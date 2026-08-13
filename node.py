@@ -14,6 +14,10 @@ NodeFunc = Callable[..., Coroutine[Any, Any, Any]]
 ConditionFunc = Callable[[Dict[str, Any]], bool]
 
 
+class HumanRejected(Exception):
+    """Raised by a human review node when the reviewer rejects the payload."""
+
+
 @dataclass
 class Node:
     """A single executable node in the DAG.

@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pprint
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from executor import DAGExecutionError, DAGExecutor
-from node import ConditionFunc, Node, NodeFunc
+from node import ConditionFunc, HumanRejected, Node, NodeFunc
 from schems import NodeResult, RetryPolicy
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,69 @@ class DAG:
             retry=retry,
             timeout=timeout,
             metadata={"loop": True, "max_iterations": max_iterations},
+        )
+        self.add_node(node)
+        return node
+
+    # ------------------------------------------------------------------
+    # Human review support
+    # ------------------------------------------------------------------
+
+    def human_node(
+        self,
+        name: str,
+        depends_on: Optional[List[str]] = None,
+        prompt: Optional[str] = None,
+        retry: Optional[RetryPolicy] = None,
+    ) -> Node:
+        """Register a human-in-the-loop review node.
+
+        When the DAG reaches this node it pauses and asks a human to
+        review the current context in the terminal. Approving (``y``)
+        completes the node with the reviewed payload; rejecting (``n``)
+        raises :exc:`HumanRejected`, which fails the node and cascades
+        to skip all downstream nodes (standard failure semantics).
+
+        Args:
+            name: Unique node name.
+            depends_on: Upstream nodes whose outputs are shown for review.
+            prompt: Optional extra text printed above the payload.
+            retry: Optional retry policy. ``HumanRejected`` is a normal
+                   exception, so a policy with default ``retry_on`` will
+                   simply ask the reviewer again after rejection.
+
+        Returns:
+            The registered review :class:`Node`.
+        """
+        async def review_func(ctx: Dict[str, Any]) -> Dict[str, Any]:
+            # Snapshot of everything available for review at this point.
+            payload = {k: v for k, v in ctx.items() if k != name}
+
+            print(f"\n  [REVIEW] node {name!r} is waiting for human approval")
+            if prompt:
+                print(f"  {prompt}")
+            print(f"  Payload:\n{pprint.pformat(payload, sort_dicts=False)}")
+
+            while True:
+                try:
+                    answer = (await asyncio.to_thread(input, "  Approve? [y/N]: ")).strip().lower()
+                except EOFError:
+                    answer = "n"  # no terminal input available -> reject
+
+                if answer in ("", "n", "no"):
+                    logger.warning("[%s] REJECTED by human reviewer", name)
+                    raise HumanRejected(f"Rejected by human reviewer")
+                if answer in ("y", "yes"):
+                    logger.info("[%s] approved by human reviewer", name)
+                    return {"approved": True, "payload": payload}
+                print("  Please answer y or n")
+
+        node = Node(
+            name=name,
+            func=review_func,
+            depends_on=depends_on or [],
+            retry=retry,
+            metadata={"human_review": True},
         )
         self.add_node(node)
         return node

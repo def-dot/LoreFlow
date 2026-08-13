@@ -409,6 +409,56 @@ async def demo_error_handling():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 8. Human review (human-in-the-loop)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def demo_human_review():
+    """A pipeline that pauses for a human to approve before publishing."""
+    print("=" * 60)
+    print("  8. HUMAN REVIEW  (human-in-the-loop approval)")
+    print("=" * 60)
+
+    dag = DAG("human_review_demo")
+
+    @dag.node("fetch_article")
+    async def fetch_article(ctx: Dict[str, Any]) -> dict:
+        await sleep_ms(50)
+        return {"title": "DAG Flow v0.1", "content": "Hello, human review!"}
+
+    @dag.node("format_article", depends_on=["fetch_article"])
+    async def format_article(ctx: Dict[str, Any]) -> str:
+        article = ctx["fetch_article"]
+        return f"{article['title']} — {article['content']}"
+
+    dag.human_node(
+        "review_article",
+        depends_on=["format_article"],
+        prompt="Please check the formatted article above.",
+    )
+
+    @dag.node("publish", depends_on=["review_article"])
+    async def publish(ctx: Dict[str, Any]) -> str:
+        reviewed = ctx["review_article"]
+        return f"Published: {reviewed['payload']['format_article']}"
+
+    try:
+        results = await dag.run()
+    except DAGExecutionError as exc:
+        results = exc.results
+        print(f"  Caught: {exc}")
+
+    for name, r in results.items():
+        detail = r.output if r.is_success else (str(r.error) if r.error else "")
+        print(f"  {name}: {r.status.value}  {detail}")
+
+    if results["review_article"].is_success:
+        print("  [OK] Approved & published\n")
+    else:
+        print("  [OK] Rejected - publish skipped (cascade)\n")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Runner
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -425,6 +475,7 @@ async def main():
     await demo_retry()
     await demo_pipeline()
     await demo_error_handling()
+    await demo_human_review()
 
     print("=" * 60)
     print("  All examples completed successfully!")

@@ -29,12 +29,13 @@ Quick start::
 
 from .dag import DAG
 from .executor import DAGExecutionError
-from .node import Node
+from .node import HumanRejected, Node
 from .schems import NodeResult, NodeStatus, RetryPolicy
 
 __all__ = [
     "DAG",
     "DAGExecutionError",
+    "HumanRejected",
     "Node",
     "NodeResult",
     "NodeStatus",
