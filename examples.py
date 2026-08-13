@@ -26,6 +26,8 @@ logging.basicConfig(
 
 from . import DAG, DAGExecutionError, Node, RetryPolicy, load_dag
 
+from demo_functions import FUNCTIONS
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Helper
 # ═══════════════════════════════════════════════════════════════════════════
@@ -470,42 +472,9 @@ async def demo_yaml_config():
     print("  9. YAML CONFIG  (declarative wiring)")
     print("=" * 60)
 
-    # Only the actual work is code — the wiring lives in pipeline.yaml
-    async def cfg_fetch(ctx: Dict[str, Any]) -> dict:
-        await sleep_ms(50)
-        return {"title": "DAG Flow v0.1", "body": "  declarative config rocks  "}
-
-    async def cfg_clean(ctx: Dict[str, Any]) -> str:
-        return ctx["fetch"]["body"].strip()
-
-    async def cfg_enrich(ctx: Dict[str, Any]) -> str:
-        await sleep_ms(50)
-        return f"[ENRICHED] {ctx['fetch']['title']}"
-
-    async def cfg_merge(ctx: Dict[str, Any]) -> dict:
-        return {"title": ctx["enrich"], "body": ctx["clean"]}
-
-    async def cfg_publish(ctx: Dict[str, Any]) -> str:
-        reviewed = ctx["review"]
-        return f"Published: {reviewed['payload']['merge']['title']}"
-
-    def cfg_needs_report(ctx: Dict[str, Any]) -> bool:
-        return bool(ctx.get("merge"))
-
-    async def cfg_report(ctx: Dict[str, Any]) -> str:
-        return f"Report generated for {ctx['merge']['title']}"
-
-    functions = {
-        "cfg_fetch": cfg_fetch,
-        "cfg_clean": cfg_clean,
-        "cfg_enrich": cfg_enrich,
-        "cfg_merge": cfg_merge,
-        "cfg_publish": cfg_publish,
-        "cfg_needs_report": cfg_needs_report,
-        "cfg_report": cfg_report,
-    }
-
-    dag = load_dag(Path(__file__).parent / "pipeline.yaml", functions=functions)
+    # Functions live in demo_functions.py (shared with web.py);
+    # everything about the wiring lives in pipeline.yaml.
+    dag = load_dag(Path(__file__).parent / "pipeline.yaml", functions=FUNCTIONS)
     print(f"  Loaded pipeline.yaml: {' -> '.join(dag.topological_order())}")
 
     try:

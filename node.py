@@ -13,6 +13,10 @@ NodeFunc = Callable[..., Coroutine[Any, Any, Any]]
 #: Signature for a condition predicate: receives context, returns whether to run.
 ConditionFunc = Callable[[Dict[str, Any]], bool]
 
+#: Signature for a human-review approver: receives ``(node_name, payload)``
+#: and returns a decision dict: ``{"approve": bool, "reason": Optional[str]}``.
+ApproverFunc = Callable[..., Coroutine[Any, Any, Any]]
+
 
 class HumanRejected(Exception):
     """Raised by a human review node when the reviewer rejects the payload."""

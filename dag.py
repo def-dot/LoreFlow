@@ -27,10 +27,25 @@ import pprint
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from executor import DAGExecutionError, DAGExecutor
-from node import ConditionFunc, HumanRejected, Node, NodeFunc
+from node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
 from schems import NodeResult, RetryPolicy
 
 logger = logging.getLogger(__name__)
+
+
+async def _terminal_approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Default approver: ask the reviewer on the terminal (y/n)."""
+    print(f"  Payload:\n{pprint.pformat(payload, sort_dicts=False)}")
+    while True:
+        try:
+            answer = (await asyncio.to_thread(input, "  Approve? [y/N]: ")).strip().lower()
+        except EOFError:
+            answer = "n"  # no terminal input available -> reject
+        if answer in ("", "n", "no"):
+            return {"approve": False}
+        if answer in ("y", "yes"):
+            return {"approve": True}
+        print("  Please answer y or n")
 
 
 class DAG:
@@ -197,26 +212,34 @@ class DAG:
         depends_on: Optional[List[str]] = None,
         prompt: Optional[str] = None,
         retry: Optional[RetryPolicy] = None,
+        approver: Optional[ApproverFunc] = None,
     ) -> Node:
         """Register a human-in-the-loop review node.
 
         When the DAG reaches this node it pauses and asks a human to
-        review the current context in the terminal. Approving (``y``)
-        completes the node with the reviewed payload; rejecting (``n``)
-        raises :exc:`HumanRejected`, which fails the node and cascades
-        to skip all downstream nodes (standard failure semantics).
+        review the current context. Approving completes the node with
+        the reviewed payload; rejecting raises :exc:`HumanRejected`,
+        which fails the node and cascades to skip all downstream nodes
+        (standard failure semantics).
 
         Args:
             name: Unique node name.
             depends_on: Upstream nodes whose outputs are shown for review.
-            prompt: Optional extra text printed above the payload.
+            prompt: Optional extra text shown with the review request.
             retry: Optional retry policy. ``HumanRejected`` is a normal
                    exception, so a policy with default ``retry_on`` will
                    simply ask the reviewer again after rejection.
+            approver: Optional async callable ``(node_name, payload) ->
+                      {"approve": bool, "reason": Optional[str]}``.
+                      Defaults to an interactive terminal prompt; pass
+                      your own to drive reviews from elsewhere (e.g. a
+                      web UI waiting on an ``asyncio.Event``).
 
         Returns:
             The registered review :class:`Node`.
         """
+        ask = approver or _terminal_approver
+
         async def review_func(ctx: Dict[str, Any]) -> Dict[str, Any]:
             # Snapshot of everything available for review at this point.
             payload = {k: v for k, v in ctx.items() if k != name}
@@ -224,21 +247,19 @@ class DAG:
             print(f"\n  [REVIEW] node {name!r} is waiting for human approval")
             if prompt:
                 print(f"  {prompt}")
-            print(f"  Payload:\n{pprint.pformat(payload, sort_dicts=False)}")
 
-            while True:
-                try:
-                    answer = (await asyncio.to_thread(input, "  Approve? [y/N]: ")).strip().lower()
-                except EOFError:
-                    answer = "n"  # no terminal input available -> reject
+            decision = await ask(name, payload)
+            if decision.get("approve"):
+                logger.info("[%s] approved by human reviewer", name)
+                return {
+                    "approved": True,
+                    "payload": payload,
+                    "reason": decision.get("reason"),
+                }
 
-                if answer in ("", "n", "no"):
-                    logger.warning("[%s] REJECTED by human reviewer", name)
-                    raise HumanRejected(f"Rejected by human reviewer")
-                if answer in ("y", "yes"):
-                    logger.info("[%s] approved by human reviewer", name)
-                    return {"approved": True, "payload": payload}
-                print("  Please answer y or n")
+            reason = decision.get("reason") or "Rejected by human reviewer"
+            logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
+            raise HumanRejected(reason)
 
         node = Node(
             name=name,
@@ -352,6 +373,7 @@ class DAG:
         inputs: Optional[Dict[str, Any]] = None,
         concurrency: Optional[int] = None,
         fail_fast: bool = False,
+        on_event: Optional[Callable[[NodeResult], None]] = None,
     ) -> Dict[str, NodeResult]:
         """Execute the DAG.
 
@@ -362,6 +384,9 @@ class DAG:
                          (``None`` = unlimited).
             fail_fast: If ``True``, raise :exc:`DAGExecutionError` as soon as
                        any node fails.
+            on_event: Optional callback invoked on every node state change
+                      (running/retrying/completed/failed/skipped/cancelled).
+                      Useful for live progress monitoring (e.g. a web UI).
 
         Returns:
             A dict mapping every node name to its :class:`NodeResult`.
@@ -383,7 +408,7 @@ class DAG:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
 
-        executor = DAGExecutor(concurrency=concurrency)
+        executor = DAGExecutor(concurrency=concurrency, on_event=on_event)
         return await executor.execute(self._nodes, inputs, fail_fast=fail_fast)
 
     # ------------------------------------------------------------------

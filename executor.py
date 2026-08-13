@@ -13,7 +13,7 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from node import Node
 from schems import NodeResult, NodeStatus, RetryPolicy
@@ -37,10 +37,20 @@ class DAGExecutor:
                      ``None`` means unlimited.
     """
 
-    def __init__(self, concurrency: Optional[int] = None):
+    def __init__(
+        self,
+        concurrency: Optional[int] = None,
+        on_event: Optional[Callable[[NodeResult], None]] = None,
+    ):
         self._semaphore: Optional[asyncio.Semaphore] = (
             asyncio.Semaphore(concurrency) if concurrency else None
         )
+        self.on_event = on_event
+
+    def _emit(self, node_name: str, status: NodeStatus, **fields: Any) -> None:
+        """Push a node state change to the ``on_event`` callback (if set)."""
+        if self.on_event is not None:
+            self.on_event(NodeResult(node_name=node_name, status=status, **fields))
 
     # ------------------------------------------------------------------
     # Public API
@@ -93,6 +103,7 @@ class DAGExecutor:
                     node_name=node.name,
                     status=NodeStatus.CANCELLED,
                 )
+                self._emit(node.name, NodeStatus.CANCELLED)
             except Exception as exc:
                 # Should not happen — _run_one is defensive, but guard anyway
                 logger.exception("Unexpected error in executor for %s", node.name)
@@ -102,6 +113,7 @@ class DAGExecutor:
                     status=NodeStatus.FAILED,
                     error=exc,
                 )
+                self._emit(node.name, NodeStatus.FAILED, error=exc)
             finally:
                 events[node.name].set()
 
@@ -159,6 +171,7 @@ class DAGExecutor:
                 node_name=node.name,
                 status=NodeStatus.SKIPPED,
             )
+            self._emit(node.name, NodeStatus.SKIPPED)
             return
 
         # ---- 3. Evaluate condition (branching) ----
@@ -179,12 +192,14 @@ class DAGExecutor:
                     node_name=node.name,
                     status=NodeStatus.SKIPPED,
                 )
+                self._emit(node.name, NodeStatus.SKIPPED)
                 return
 
         # ---- 4. Execute with retry ----
         retry = node.retry or RetryPolicy(max_retries=0)
         last_error: Optional[Exception] = None
         statuses[node.name] = NodeStatus.RUNNING
+        self._emit(node.name, NodeStatus.RUNNING)
 
         for attempt in range(retry.max_retries + 1):
             try:
@@ -207,6 +222,10 @@ class DAGExecutor:
                     output=output,
                     attempts=attempt + 1,
                     duration_ms=duration_ms,
+                )
+                self._emit(
+                    node.name, NodeStatus.COMPLETED,
+                    output=output, attempts=attempt + 1, duration_ms=duration_ms,
                 )
                 logger.info(
                     "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
@@ -238,6 +257,7 @@ class DAGExecutor:
                     exc,
                     delay,
                 )
+                self._emit(node.name, NodeStatus.RETRYING, attempts=attempt + 1, error=exc)
                 await asyncio.sleep(delay)
 
         # ---- 5. All retries exhausted ----
@@ -247,6 +267,10 @@ class DAGExecutor:
             status=NodeStatus.FAILED,
             error=last_error,
             attempts=retry.max_retries + 1,
+        )
+        self._emit(
+            node.name, NodeStatus.FAILED,
+            error=last_error, attempts=retry.max_retries + 1,
         )
         logger.error(
             "[%s] FAILED after %d attempt(s): %s: %s",

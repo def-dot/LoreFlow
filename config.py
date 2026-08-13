@@ -72,7 +72,7 @@ from functools import lru_cache
 from typing import Any, Callable, Dict, Optional
 
 from dag import DAG
-from node import Node
+from node import ApproverFunc, Node
 from schems import RetryPolicy
 
 _MISSING = object()
@@ -166,10 +166,15 @@ def _parse_retry(spec: Any) -> Optional[RetryPolicy]:
     return RetryPolicy(**fields)
 
 
-def build_dag(config: Dict[str, Any], functions: Any = None) -> DAG:
+def build_dag(
+    config: Dict[str, Any],
+    functions: Any = None,
+    approver: Optional[ApproverFunc] = None,
+) -> DAG:
     """Build a :class:`DAG` from a declarative config dict.
 
-    See the module docstring for the schema.
+    *approver* is passed to every ``kind: human`` node; see
+    :meth:`DAG.human_node`.
     """
     if not isinstance(config, dict):
         raise ValueError(f"Config must be a dict, got {type(config).__name__}")
@@ -203,6 +208,7 @@ def build_dag(config: Dict[str, Any], functions: Any = None) -> DAG:
                 depends_on=deps,
                 prompt=spec.get("prompt"),
                 retry=retry,
+                approver=approver,
             )
 
         elif kind == "loop":
@@ -242,7 +248,11 @@ def build_dag(config: Dict[str, Any], functions: Any = None) -> DAG:
     return dag
 
 
-def load_dag(path: str, functions: Any = None) -> DAG:
+def load_dag(
+    path: str,
+    functions: Any = None,
+    approver: Optional[ApproverFunc] = None,
+) -> DAG:
     """Load a YAML file and build the DAG from it (requires PyYAML)."""
     try:
         import yaml
@@ -251,4 +261,4 @@ def load_dag(path: str, functions: Any = None) -> DAG:
 
     with open(path, "r", encoding="utf-8") as fh:
         config = yaml.safe_load(fh)
-    return build_dag(config, functions)
+    return build_dag(config, functions, approver=approver)

@@ -12,6 +12,7 @@ class NodeStatus(Enum):
     """Execution status of a DAG node."""
     PENDING = "pending"
     RUNNING = "running"
+    RETRYING = "retrying"
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
