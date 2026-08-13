@@ -15,8 +15,8 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-from .node import Node
-from .types import NodeResult, NodeStatus, RetryPolicy
+from node import Node
+from schems import NodeResult, NodeStatus, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -79,17 +79,30 @@ class DAGExecutor:
         tasks: Dict[str, asyncio.Task[None]] = {}
 
         async def run_node(node: Node) -> None:
-            """Lifecycle of a single node."""
+            """Lifecycle of a single node.
+
+            Task-level safety net: however ``_run_one`` exits, record the
+            terminal status and always set the event so downstream nodes
+            never hang.
+            """
             try:
                 await self._run_one(node, ctx, statuses, events, results)
             except asyncio.CancelledError:
                 statuses[node.name] = NodeStatus.CANCELLED
-                events[node.name].set()
-                # Don't re-raise — gather with return_exceptions handles it
-            except Exception:
+                results[node.name] = NodeResult(
+                    node_name=node.name,
+                    status=NodeStatus.CANCELLED,
+                )
+            except Exception as exc:
                 # Should not happen — _run_one is defensive, but guard anyway
                 logger.exception("Unexpected error in executor for %s", node.name)
                 statuses[node.name] = NodeStatus.FAILED
+                results[node.name] = NodeResult(
+                    node_name=node.name,
+                    status=NodeStatus.FAILED,
+                    error=exc,
+                )
+            finally:
                 events[node.name].set()
 
         # ----- spawn all nodes -----
@@ -146,7 +159,6 @@ class DAGExecutor:
                 node_name=node.name,
                 status=NodeStatus.SKIPPED,
             )
-            events[node.name].set()
             return
 
         # ---- 3. Evaluate condition (branching) ----
@@ -167,7 +179,6 @@ class DAGExecutor:
                     node_name=node.name,
                     status=NodeStatus.SKIPPED,
                 )
-                events[node.name].set()
                 return
 
         # ---- 4. Execute with retry ----
@@ -204,18 +215,7 @@ class DAGExecutor:
                     retry.max_retries + 1,
                     duration_ms,
                 )
-                events[node.name].set()
                 return
-
-            except asyncio.CancelledError:
-                statuses[node.name] = NodeStatus.CANCELLED
-                results[node.name] = NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus.CANCELLED,
-                    attempts=attempt + 1,
-                )
-                events[node.name].set()
-                raise  # let the gather() see it
 
             except Exception as exc:
                 last_error = exc
@@ -255,7 +255,6 @@ class DAGExecutor:
             type(last_error).__name__ if last_error else "?",
             last_error,
         )
-        events[node.name].set()
 
     # ------------------------------------------------------------------
     # Helpers

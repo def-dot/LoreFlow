@@ -25,9 +25,9 @@ import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from .executor import DAGExecutionError, DAGExecutor
-from .node import ConditionFunc, Node, NodeFunc
-from .types import NodeResult, RetryPolicy
+from executor import DAGExecutionError, DAGExecutor
+from node import ConditionFunc, Node, NodeFunc
+from schems import NodeResult, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -211,30 +211,28 @@ class DAG:
         return errors
 
     def _find_cycle(self) -> Optional[List[str]]:
-        """DFS-based cycle detection with three-colour marking."""
+        """DFS-based cycle detection using path stack slicing."""
         WHITE, GRAY, BLACK = 0, 1, 2
         colour: Dict[str, int] = {n: WHITE for n in self._nodes}
-        parent: Dict[str, str] = {}
+        path_stack: List[str] = []
 
         def dfs(node_name: str) -> Optional[List[str]]:
             colour[node_name] = GRAY
+            path_stack.append(node_name)  # 入栈
+
             for dep in self._nodes[node_name].depends_on:
                 if colour[dep] == GRAY:
-                    # Reconstruct the cycle path
-                    path = [node_name]
-                    cur = node_name
-                    while parent.get(cur) and parent[cur] != dep:
-                        cur = parent[cur]
-                        path.append(cur)
-                    path.append(dep)
-                    path.reverse()
-                    return path
+                    # 发现环：从 dep 第一次出现的位置直接切片提取完整环路径
+                    cycle_start_idx = path_stack.index(dep)
+                    return path_stack[cycle_start_idx:]
+
                 if colour[dep] == WHITE:
-                    parent[dep] = node_name
                     cycle = dfs(dep)
                     if cycle:
                         return cycle
+
             colour[node_name] = BLACK
+            path_stack.pop()  # 出栈（回溯）
             return None
 
         for name in self._nodes:

@@ -23,7 +23,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from dag_flow import DAG, DAGExecutionError, Node, RetryPolicy
+from . import DAG, DAGExecutionError, Node, RetryPolicy
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helper
@@ -193,37 +193,22 @@ async def demo_loop():
     dag = DAG("loop_demo")
 
     @dag.node("prepare")
-    async def prepare(ctx: Dict[str, Any]) -> dict:
+    async def prepare(ctx: Dict[str, Any]) -> list:
         items = ["apple", "lemon", "grape", "orange"]
         print(f"  Items to process: {items}")
-        return {"items": items, "processed": [], "idx": 0}
+        return items
 
-    # Build loop body nodes
-    body_nodes = [
-        Node(
-            name="process_one",
-            func=lambda ctx: asyncio.sleep(0.08, f"processed:{ctx['prepare']['items'][ctx['prepare']['idx']]}"),
-        ),
-        Node(
-            name="advance",
-            func=lambda ctx: asyncio.sleep(0.02, {"idx": ctx['prepare']['idx'] + 1}),
-        ),
-    ]
-
-    # Rewrite as proper async functions
     async def process_one(ctx: Dict[str, Any]) -> str:
         await sleep_ms(80)
-        state = ctx["prepare"]
-        item = state["items"][state["idx"]]
-        state["processed"].append(item)
+        idx = ctx.get("advance", {}).get("idx", 0)  # idx from previous iteration's advance output
+        item = ctx["prepare"][idx]
         print(f"    -> processed: {item}")
         return item
 
     async def advance(ctx: Dict[str, Any]) -> dict:
         await sleep_ms(20)
-        state = ctx["prepare"]
-        state["idx"] += 1
-        return state
+        idx = ctx.get("advance", {}).get("idx", 0)
+        return {"idx": idx + 1}
 
     body_nodes = [
         Node(name="process_one", func=process_one),
@@ -234,16 +219,13 @@ async def demo_loop():
         "batch_loop",
         body_nodes=body_nodes,
         depends_on=["prepare"],
-        condition=lambda ctx, i: ctx["prepare"]["idx"] < len(ctx["prepare"]["items"]),
+        condition=lambda ctx, i: ctx["advance"]["idx"] < len(ctx["prepare"]),
         max_iterations=10,
     )
 
     results = await dag.run()
     for name, r in results.items():
-        if r.is_success:
-            print(f"  {name}: {r.status.value}  ->  {r.output}")
-        else:
-            print(f"  {name}: {r.status.value}")
+        print(f"  {name}: {r.status.value}")
     print("  [OK] Loop completed\n")
 
 

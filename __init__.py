@@ -30,7 +30,7 @@ Quick start::
 from .dag import DAG
 from .executor import DAGExecutionError
 from .node import Node
-from .types import NodeResult, NodeStatus, RetryPolicy
+from .schems import NodeResult, NodeStatus, RetryPolicy
 
 __all__ = [
     "DAG",
