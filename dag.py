@@ -41,10 +41,17 @@ class DAG:
 
     Parameters:
         name: A human-readable label for this workflow (used in logs & diagrams).
+        default_inputs: Initial context applied when :meth:`run` is called
+                        without explicit ``inputs``.
     """
 
-    def __init__(self, name: str = "dag"):
+    def __init__(
+        self,
+        name: str = "dag",
+        default_inputs: Optional[Dict[str, Any]] = None,
+    ):
         self.name = name
+        self.default_inputs = default_inputs if default_inputs else {}
         self._nodes: Dict[str, Node] = {}
 
     # ------------------------------------------------------------------
@@ -349,7 +356,8 @@ class DAG:
         """Execute the DAG.
 
         Args:
-            inputs: Initial data placed into the shared context before execution.
+            inputs: Initial data placed into the shared context before
+                    execution (defaults to ``default_inputs``).
             concurrency: Maximum number of nodes running at once
                          (``None`` = unlimited).
             fail_fast: If ``True``, raise :exc:`DAGExecutionError` as soon as
@@ -367,6 +375,9 @@ class DAG:
             raise ValueError(
                 f"DAG {self.name!r} validation failed:\n  " + "\n  ".join(errors)
             )
+
+        if inputs is None:
+            inputs = self.default_inputs
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
         if logger.isEnabledFor(logging.DEBUG):

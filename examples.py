@@ -12,6 +12,7 @@ import asyncio
 import logging
 import random
 import time
+from pathlib import Path
 from typing import Any, Dict
 
 # ---------------------------------------------------------------------------
@@ -23,7 +24,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from . import DAG, DAGExecutionError, Node, RetryPolicy
+from . import DAG, DAGExecutionError, Node, RetryPolicy, load_dag
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helper
@@ -459,6 +460,71 @@ async def demo_human_review():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 9. Declarative YAML config
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def demo_yaml_config():
+    """The same engine, wired from a YAML file instead of Python code."""
+    print("=" * 60)
+    print("  9. YAML CONFIG  (declarative wiring)")
+    print("=" * 60)
+
+    # Only the actual work is code — the wiring lives in pipeline.yaml
+    async def cfg_fetch(ctx: Dict[str, Any]) -> dict:
+        await sleep_ms(50)
+        return {"title": "DAG Flow v0.1", "body": "  declarative config rocks  "}
+
+    async def cfg_clean(ctx: Dict[str, Any]) -> str:
+        return ctx["fetch"]["body"].strip()
+
+    async def cfg_enrich(ctx: Dict[str, Any]) -> str:
+        await sleep_ms(50)
+        return f"[ENRICHED] {ctx['fetch']['title']}"
+
+    async def cfg_merge(ctx: Dict[str, Any]) -> dict:
+        return {"title": ctx["enrich"], "body": ctx["clean"]}
+
+    async def cfg_publish(ctx: Dict[str, Any]) -> str:
+        reviewed = ctx["review"]
+        return f"Published: {reviewed['payload']['merge']['title']}"
+
+    def cfg_needs_report(ctx: Dict[str, Any]) -> bool:
+        return bool(ctx.get("merge"))
+
+    async def cfg_report(ctx: Dict[str, Any]) -> str:
+        return f"Report generated for {ctx['merge']['title']}"
+
+    functions = {
+        "cfg_fetch": cfg_fetch,
+        "cfg_clean": cfg_clean,
+        "cfg_enrich": cfg_enrich,
+        "cfg_merge": cfg_merge,
+        "cfg_publish": cfg_publish,
+        "cfg_needs_report": cfg_needs_report,
+        "cfg_report": cfg_report,
+    }
+
+    dag = load_dag(Path(__file__).parent / "pipeline.yaml", functions=functions)
+    print(f"  Loaded pipeline.yaml: {' -> '.join(dag.topological_order())}")
+
+    try:
+        results = await dag.run()
+    except DAGExecutionError as exc:
+        results = exc.results
+        print(f"  Caught: {exc}")
+
+    for name, r in results.items():
+        detail = r.output if r.is_success else (str(r.error) if r.error else "")
+        print(f"  {name}: {r.status.value}  {detail}")
+
+    if results["review"].is_success:
+        print("  [OK] YAML pipeline completed\n")
+    else:
+        print("  [OK] Rejected at review - publish skipped (cascade)\n")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Runner
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -476,6 +542,7 @@ async def main():
     await demo_pipeline()
     await demo_error_handling()
     await demo_human_review()
+    await demo_yaml_config()
 
     print("=" * 60)
     print("  All examples completed successfully!")

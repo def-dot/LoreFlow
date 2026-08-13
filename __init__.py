@@ -27,6 +27,7 @@ Quick start::
     print(results["process"].output)
 """
 
+from .config import build_dag, load_dag
 from .dag import DAG
 from .executor import DAGExecutionError
 from .node import HumanRejected, Node
@@ -40,4 +41,6 @@ __all__ = [
     "NodeResult",
     "NodeStatus",
     "RetryPolicy",
+    "build_dag",
+    "load_dag",
 ]
