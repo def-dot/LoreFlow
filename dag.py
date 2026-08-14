@@ -238,8 +238,6 @@ class DAG:
         Returns:
             The registered review :class:`Node`.
         """
-        ask = approver or _terminal_approver
-
         async def review_func(ctx: Dict[str, Any]) -> Dict[str, Any]:
             # Snapshot of everything available for review at this point.
             payload = {k: v for k, v in ctx.items() if k != name}
@@ -248,7 +246,7 @@ class DAG:
             if prompt:
                 print(f"  {prompt}")
 
-            decision = await ask(name, payload)
+            decision = await (approver or _terminal_approver)(name, payload)
             if decision.get("approve"):
                 logger.info("[%s] approved by human reviewer", name)
                 return {

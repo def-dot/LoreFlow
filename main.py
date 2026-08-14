@@ -18,7 +18,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
@@ -38,16 +38,6 @@ INDEX = Path(__file__).parent / "index.html"
 # ---------------------------------------------------------------------------
 # Run state
 # ---------------------------------------------------------------------------
-
-def _node_dict(r: NodeResult) -> Dict[str, Any]:
-    return {
-        "status": r.status.value,
-        "output": r.output,
-        "error": str(r.error) if r.error else None,
-        "attempts": r.attempts,
-        "duration_ms": round(r.duration_ms) if r.duration_ms else 0,
-    }
-
 
 class _Run:
     def __init__(self, run_id: str) -> None:
@@ -84,7 +74,16 @@ class _Run:
             "running": self.finished_at is None,
             "result": result,
             "error": self.error,
-            "nodes": {name: _node_dict(r) for name, r in self.nodes.items()},
+            "nodes": {
+                name: {
+                    "status": r.status.value,
+                    "output": r.output,
+                    "error": str(r.error) if r.error else None,
+                    "attempts": r.attempts,
+                    "duration_ms": round(r.duration_ms) if r.duration_ms else 0,
+                }
+                for name, r in self.nodes.items()
+            },
             "pending": {name: entry["payload"] for name, entry in self.pending.items()},
             "decisions": self.decisions,
             "mermaid": self.dag.to_mermaid() if self.dag else "",
@@ -93,10 +92,6 @@ class _Run:
 
 runs: Dict[str, _Run] = {}     # active _Run objects
 history: Dict[str, Dict] = {}  # persisted snapshots (active + finished)
-
-
-def _new_run_id() -> str:
-    return datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
 
 
 def _load_history() -> None:
@@ -112,18 +107,6 @@ def _load_history() -> None:
             snap["result"] = "interrupted"
 
 
-def _save_history() -> None:
-    HISTORY_FILE.write_text(
-        json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-
-def _record(run: _Run) -> None:
-    """Put a run's snapshot into history and persist it."""
-    history[run.id] = run.snapshot()
-    _save_history()
-
-
 _load_history()
 
 
@@ -131,31 +114,21 @@ _load_history()
 # Run plumbing
 # ---------------------------------------------------------------------------
 
-def make_web_approver(run: _Run) -> Callable:
-    """Review strategy for the web UI: pause until the browser decides."""
-
+async def _run_pipeline(run: _Run) -> None:
     async def approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        # Pause until the browser decides; api_approve fills the decision
+        # and sets the event.
         entry: Dict[str, Any] = {"payload": payload, "event": asyncio.Event(), "decision": None}
         run.pending[node_name] = entry
         await entry["event"].wait()
         return entry["decision"]
 
-    return approver
-
-
-def make_collector(run: _Run) -> Callable:
-    """Collector for ``dag.run(on_event=...)``: latest state per node."""
-
     def on_event(result: NodeResult) -> None:
         run.nodes[result.node_name] = result
 
-    return on_event
-
-
-async def _run_pipeline(run: _Run) -> None:
-    run.dag = load_dag(PIPELINE, functions=FUNCTIONS, approver=make_web_approver(run))
+    run.dag = load_dag(PIPELINE, functions=FUNCTIONS, approver=approver)
     try:
-        await run.dag.run(on_event=make_collector(run))
+        await run.dag.run(on_event=on_event)
     except DAGExecutionError as exc:
         run.error = str(exc)
         for name, result in exc.results.items():
@@ -164,7 +137,10 @@ async def _run_pipeline(run: _Run) -> None:
         run.error = f"{type(exc).__name__}: {exc}"
     finally:
         run.finished_at = datetime.now()
-        _record(run)
+        history[run.id] = run.snapshot()
+        HISTORY_FILE.write_text(
+            json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +157,14 @@ class ApproveBody(BaseModel):
 
 @app.post("/api/run")
 async def api_run():
-    run = _Run(_new_run_id())
+    run = _Run(datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4])
     runs[run.id] = run
     run.task = asyncio.create_task(_run_pipeline(run))
-    _record(run)  # so a crash mid-run still leaves a visible (interrupted) record
+    # persist immediately so a crash mid-run still leaves a visible record
+    history[run.id] = run.snapshot()
+    HISTORY_FILE.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return {"run_id": run.id}
 
 
@@ -196,16 +176,10 @@ async def api_runs():
     return {"runs": [{k: s[k] for k in fields} for s in items]}
 
 
-def _get_snapshot(run_id: str) -> Optional[Dict[str, Any]]:
-    run = runs.get(run_id)
-    if run is not None:
-        return run.snapshot()
-    return history.get(run_id)
-
-
 @app.get("/api/state/{run_id}")
 async def api_state(run_id: str):
-    snap = _get_snapshot(run_id)
+    run = runs.get(run_id)
+    snap = run.snapshot() if run is not None else history.get(run_id)
     if snap is None:
         return JSONResponse({"error": f"Unknown run {run_id!r}"}, status_code=404)
     return snap
@@ -230,7 +204,11 @@ async def api_approve(run_id: str, node_name: str, body: ApproveBody):
     entry["decision"] = {"approve": body.approve, "reason": body.reason}
     entry["event"].set()
     run.pending.pop(node_name, None)
-    _record(run)  # audit trail survives even if the server dies before the run finishes
+    # persist audit trail even if the server dies before the run finishes
+    history[run.id] = run.snapshot()
+    HISTORY_FILE.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return {"status": "ok", "run_id": run_id, "node": node_name, "approve": body.approve}
 
 
