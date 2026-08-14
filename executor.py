@@ -13,121 +13,12 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
-from datetime import datetime
-from typing import Any, Awaitable, Callable, Coroutine, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from node import Node
 from schems import NodeResult, NodeStatus, RetryPolicy
 
 logger = logging.getLogger(__name__)
-
-
-#: Reserved context key under which the executor exposes the current
-#: :class:`Execution` to node functions (used by human review nodes).
-_EXECUTION_KEY = "__execution__"
-
-
-class Execution(Awaitable[Dict[str, NodeResult]]):
-    """Live state of a single DAG run; await it for the final results dict.
-
-    The executor updates :attr:`nodes` as nodes transition, and records
-    reviews requested by human nodes in :attr:`pending` (answer them with
-    :meth:`resolve_review`). Failures land in :attr:`error` instead of
-    raising — only cancellation propagates, flipping :attr:`cancelled`.
-    """
-
-    def __init__(self) -> None:
-        self._coro: Optional[Coroutine[Any, Any, Dict[str, NodeResult]]] = None
-        self._task: Optional[asyncio.Task] = None
-        self.nodes: Dict[str, NodeResult] = {}
-        self.pending: Dict[str, Dict[str, Any]] = {}
-        self.error: Optional[str] = None
-        self.cancelled: bool = False
-        self.started_at: Optional[datetime] = None
-        self.finished_at: Optional[datetime] = None
-
-    def start(self) -> asyncio.Task:
-        """Begin execution in a background task and return it.
-
-        Alternatively, ``await`` the execution directly (runs inline in
-        the awaiter's task).
-        """
-        if self._task is None:
-            self._task = asyncio.create_task(self._coro)
-        return self._task
-
-    def __await__(self):
-        if self._task is not None:
-            return self._task.__await__()
-        return self._coro.__await__()
-
-    @property
-    def status(self) -> str:
-        """One of pending / running / completed / failed / cancelled."""
-        if self.cancelled:
-            return "cancelled"
-        if self.error:
-            return "failed"
-        if self.finished_at:
-            return "completed"
-        if self.started_at:
-            return "running"
-        return "pending"
-
-    # ------------------------------------------------------------------
-    # Human review plumbing (internal — see DAG.human_node)
-    # ------------------------------------------------------------------
-
-    def request_review(
-        self,
-        node_name: str,
-        payload: Dict[str, Any],
-        approver: Optional[Callable] = None,
-    ) -> asyncio.Future:
-        """Register a pending review and return the future that resolves
-        with the decision. If *approver* is given it answers the review
-        automatically (e.g. ``terminal_approver`` for CLI runs)."""
-        future = asyncio.get_running_loop().create_future()
-        task = None
-        if approver is not None:
-            task = asyncio.create_task(
-                self._auto_approve(approver, node_name, payload, future)
-            )
-        self.pending[node_name] = {"payload": payload, "future": future, "task": task}
-        return future
-
-    async def _auto_approve(
-        self, approver: Callable, node_name: str, payload: Dict[str, Any],
-        future: asyncio.Future,
-    ) -> None:
-        try:
-            decision = await approver(node_name, payload)
-        except Exception as exc:  # approver crashed — fail the review
-            if not future.done():
-                future.set_exception(exc)
-            return
-        if not future.done():
-            future.set_result(decision)
-
-    def resolve_review(self, node_name: str, decision: Dict[str, Any]) -> bool:
-        """Answer a pending review; *decision* looks like
-        ``{"approve": bool, "reason": Optional[str]}``.
-
-        Returns ``False`` if no review for *node_name* was pending.
-        """
-        entry = self._drop_review(node_name)
-        if entry is None:
-            return False
-        if not entry["future"].done():
-            entry["future"].set_result(decision)
-        return True
-
-    def _drop_review(self, node_name: str) -> Optional[Dict[str, Any]]:
-        """Remove a pending review, cancelling its auto-approver (if any)."""
-        entry = self.pending.pop(node_name, None)
-        if entry is not None and entry["task"] is not None and not entry["task"].done():
-            entry["task"].cancel()
-        return entry
 
 
 class DAGExecutionError(Exception):
@@ -170,7 +61,6 @@ class DAGExecutor:
         nodes: Dict[str, Node],
         inputs: Optional[Dict[str, Any]] = None,
         fail_fast: bool = False,
-        execution: Optional[Execution] = None,
     ) -> Dict[str, NodeResult]:
         """Execute all *nodes* and return a mapping of node name → NodeResult.
 
@@ -179,9 +69,6 @@ class DAGExecutor:
             inputs: Initial key-value pairs placed into the shared context.
             fail_fast: If True, cancel all running nodes as soon as any node
                        fails (after retries exhausted).
-            execution: The :class:`Execution` receiving live state (a fresh
-                       one is created if not given). Loop bodies reuse the
-                       parent's so their results and reviews stay visible.
 
         Returns:
             Dict mapping each node name to its :class:`NodeResult`.
@@ -192,14 +79,11 @@ class DAGExecutor:
         """
         # ----- shared state -----
         ctx: Dict[str, Any] = dict(inputs) if inputs else {}
-        if execution is None:
-            inherited = ctx.get(_EXECUTION_KEY)
-            execution = inherited if isinstance(inherited, Execution) else Execution()
-        ctx[_EXECUTION_KEY] = execution
         statuses: Dict[str, NodeStatus] = {}
         events: Dict[str, asyncio.Event] = {
             name: asyncio.Event() for name in nodes
         }
+        results: Dict[str, NodeResult] = {}
 
         # Track tasks so we can cancel on fail_fast
         tasks: Dict[str, asyncio.Task[None]] = {}
@@ -212,10 +96,10 @@ class DAGExecutor:
             never hang.
             """
             try:
-                await self._run_one(node, ctx, statuses, events, execution)
+                await self._run_one(node, ctx, statuses, events, results)
             except asyncio.CancelledError:
                 statuses[node.name] = NodeStatus.CANCELLED
-                execution.nodes[node.name] = NodeResult(
+                results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.CANCELLED,
                 )
@@ -224,7 +108,7 @@ class DAGExecutor:
                 # Should not happen — _run_one is defensive, but guard anyway
                 logger.exception("Unexpected error in executor for %s", node.name)
                 statuses[node.name] = NodeStatus.FAILED
-                execution.nodes[node.name] = NodeResult(
+                results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.FAILED,
                     error=exc,
@@ -243,17 +127,17 @@ class DAGExecutor:
         # ----- optionally fail-fast on first error -----
         if not fail_fast:
             failed = [
-                name for name, r in execution.nodes.items()
+                name for name, r in results.items()
                 if r.status == NodeStatus.FAILED
             ]
             if failed:
                 raise DAGExecutionError(
                     f"DAG execution finished with {len(failed)} failed node(s): "
                     f"{', '.join(failed)}",
-                    execution.nodes,
+                    results,
                 )
 
-        return execution.nodes
+        return results
 
     # ------------------------------------------------------------------
     # Single-node execution
@@ -265,7 +149,7 @@ class DAGExecutor:
         ctx: Dict[str, Any],
         statuses: Dict[str, NodeStatus],
         events: Dict[str, asyncio.Event],
-        execution: Execution,
+        results: Dict[str, NodeResult],
     ) -> None:
         """Run a single node through its full lifecycle."""
 
@@ -283,7 +167,7 @@ class DAGExecutor:
                 "[%s] Skipped - upstream failed: %s", node.name, failed_deps
             )
             statuses[node.name] = NodeStatus.SKIPPED
-            execution.nodes[node.name] = NodeResult(
+            results[node.name] = NodeResult(
                 node_name=node.name,
                 status=NodeStatus.SKIPPED,
             )
@@ -304,7 +188,7 @@ class DAGExecutor:
             if not should_run:
                 logger.info("[%s] Skipped - condition not met", node.name)
                 statuses[node.name] = NodeStatus.SKIPPED
-                execution.nodes[node.name] = NodeResult(
+                results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.SKIPPED,
                 )
@@ -332,7 +216,7 @@ class DAGExecutor:
                 # success
                 ctx[node.name] = output
                 statuses[node.name] = NodeStatus.COMPLETED
-                execution.nodes[node.name] = NodeResult(
+                results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.COMPLETED,
                     output=output,
@@ -378,7 +262,7 @@ class DAGExecutor:
 
         # ---- 5. All retries exhausted ----
         statuses[node.name] = NodeStatus.FAILED
-        execution.nodes[node.name] = NodeResult(
+        results[node.name] = NodeResult(
             node_name=node.name,
             status=NodeStatus.FAILED,
             error=last_error,

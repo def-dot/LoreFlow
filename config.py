@@ -173,9 +173,8 @@ def build_dag(
 ) -> DAG:
     """Build a :class:`DAG` from a declarative config dict.
 
-    ``kind: human`` nodes pause for review in the run's Execution
-    (answered via ``resolve_review``); an optional *approver* answers them
-    automatically (e.g. :func:`dag.terminal_approver`).
+    ``kind: human`` nodes require *approver* — e.g.
+    :func:`dag.terminal_approver`.
     """
     if not isinstance(config, dict):
         raise ValueError(f"Config must be a dict, got {type(config).__name__}")

@@ -29,14 +29,13 @@ Quick start::
 
 from .config import build_dag, load_dag
 from .dag import DAG, terminal_approver
-from .executor import DAGExecutionError, Execution
+from .executor import DAGExecutionError
 from .node import HumanRejected, Node
 from .schems import NodeResult, NodeStatus, RetryPolicy
 
 __all__ = [
     "DAG",
     "DAGExecutionError",
-    "Execution",
     "HumanRejected",
     "Node",
     "NodeResult",
