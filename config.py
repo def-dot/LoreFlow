@@ -30,13 +30,13 @@ Example YAML::
 
 Usage::
 
-    from dag_flow import load_dag
+    from dag_flow import load_dag, terminal_approver
 
     dag = load_dag("pipeline.yaml", functions={
         "cfg_fetch": fetch_func,
         "cfg_clean": clean_func,
         "cfg_publish": publish_func,
-    })
+    }, approver=terminal_approver)
     results = await dag.run()   # uses dag.default_inputs from the YAML
 
 Node spec fields
@@ -173,8 +173,9 @@ def build_dag(
 ) -> DAG:
     """Build a :class:`DAG` from a declarative config dict.
 
-    *approver* is passed to every ``kind: human`` node; see
-    :meth:`DAG.human_node`.
+    ``kind: human`` nodes pause for review in the run's Execution
+    (answered via ``resolve_review``); an optional *approver* answers them
+    automatically (e.g. :func:`dag.terminal_approver`).
     """
     if not isinstance(config, dict):
         raise ValueError(f"Config must be a dict, got {type(config).__name__}")
@@ -219,7 +220,7 @@ def build_dag(
                 raise ValueError(f"Loop node {name!r} requires a 'condition' function key")
 
             # Body nodes go through the same parsing path as top-level nodes.
-            body_dag = build_dag({"nodes": body}, functions)
+            body_dag = build_dag({"nodes": body}, functions, approver=approver)
             dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
@@ -253,7 +254,11 @@ def load_dag(
     functions: Any = None,
     approver: Optional[ApproverFunc] = None,
 ) -> DAG:
-    """Load a YAML file and build the DAG from it (requires PyYAML)."""
+    """Load a YAML file and build the DAG from it (requires PyYAML).
+
+    *approver* is passed to every ``kind: human`` node (see
+    :func:`build_dag`).
+    """
     try:
         import yaml
     except ImportError as exc:

@@ -24,7 +24,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from . import DAG, DAGExecutionError, Node, RetryPolicy, load_dag
+from . import DAG, Node, RetryPolicy, load_dag, terminal_approver
 
 from demo_functions import FUNCTIONS
 
@@ -399,11 +399,10 @@ async def demo_error_handling():
         await sleep_ms(50)
         return "I run regardless"
 
-    try:
-        results = await dag.run()
-    except DAGExecutionError as exc:
-        results = exc.results
-        print(f"  Caught: {exc}")
+    execution = dag.run()
+    results = await execution
+    if execution.error:
+        print(f"  Run failed: {execution.error}")
 
     for name, r in results.items():
         detail = r.output if r.is_success else (str(r.error) if r.error else "")
@@ -438,6 +437,7 @@ async def demo_human_review():
         "review_article",
         depends_on=["format_article"],
         prompt="Please check the formatted article above.",
+        approver=terminal_approver,
     )
 
     @dag.node("publish", depends_on=["review_article"])
@@ -445,11 +445,10 @@ async def demo_human_review():
         reviewed = ctx["review_article"]
         return f"Published: {reviewed['payload']['format_article']}"
 
-    try:
-        results = await dag.run()
-    except DAGExecutionError as exc:
-        results = exc.results
-        print(f"  Caught: {exc}")
+    execution = dag.run()
+    results = await execution
+    if execution.error:
+        print(f"  Run failed: {execution.error}")
 
     for name, r in results.items():
         detail = r.output if r.is_success else (str(r.error) if r.error else "")
@@ -474,14 +473,17 @@ async def demo_yaml_config():
 
     # Functions live in demo_functions.py (shared with web.py);
     # everything about the wiring lives in pipeline.yaml.
-    dag = load_dag(Path(__file__).parent / "pipeline.yaml", functions=FUNCTIONS)
+    dag = load_dag(
+        Path(__file__).parent / "pipeline.yaml",
+        functions=FUNCTIONS,
+        approver=terminal_approver,
+    )
     print(f"  Loaded pipeline.yaml: {' -> '.join(dag.topological_order())}")
 
-    try:
-        results = await dag.run()
-    except DAGExecutionError as exc:
-        results = exc.results
-        print(f"  Caught: {exc}")
+    execution = dag.run()
+    results = await execution
+    if execution.error:
+        print(f"  Run failed: {execution.error}")
 
     for name, r in results.items():
         detail = r.output if r.is_success else (str(r.error) if r.error else "")

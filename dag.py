@@ -24,17 +24,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import pprint
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from executor import DAGExecutionError, DAGExecutor
+from executor import DAGExecutionError, DAGExecutor, Execution, _EXECUTION_KEY
 from node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
 from schems import NodeResult, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
 
-async def _terminal_approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Default approver: ask the reviewer on the terminal (y/n)."""
+async def terminal_approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Interactive approver: ask the reviewer on the terminal (y/n).
+
+    Pass explicitly to :meth:`DAG.human_node` or ``load_dag(approver=...)``
+    for runs driven from a terminal; on EOF (e.g. CI) the review is rejected.
+    """
     print(f"  Payload:\n{pprint.pformat(payload, sort_dicts=False)}")
     while True:
         try:
@@ -163,8 +168,11 @@ class DAG:
                     "[%s] loop iteration %d / %d", name, iteration, max_iterations
                 )
 
-                # Run the body sub-DAG
-                iter_results = await sub.run(ctx, fail_fast=True)
+                # Run the body sub-DAG, sharing the top-level execution so
+                # body results and reviews stay visible to the host.
+                iter_results = await sub.run(
+                    ctx, fail_fast=True, execution=ctx.get(_EXECUTION_KEY)
+                )
 
                 # Merge successful outputs into context
                 for nname, nr in iter_results.items():
@@ -216,11 +224,15 @@ class DAG:
     ) -> Node:
         """Register a human-in-the-loop review node.
 
-        When the DAG reaches this node it pauses and asks a human to
-        review the current context. Approving completes the node with
-        the reviewed payload; rejecting raises :exc:`HumanRejected`,
-        which fails the node and cascades to skip all downstream nodes
-        (standard failure semantics).
+        When the DAG reaches this node it pauses: the review is registered
+        in the run's :class:`~executor.Execution.pending` and the node waits
+        for :meth:`~executor.Execution.resolve_review` (e.g. from a web UI).
+        If *approver* is given it answers the review automatically (e.g.
+        :func:`terminal_approver` for CLI runs).
+
+        Approving completes the node with the reviewed payload; rejecting
+        raises :exc:`HumanRejected`, which fails the node and cascades to
+        skip all downstream nodes (standard failure semantics).
 
         Args:
             name: Unique node name.
@@ -231,28 +243,37 @@ class DAG:
                    simply ask the reviewer again after rejection.
             approver: Optional async callable ``(node_name, payload) ->
                       {"approve": bool, "reason": Optional[str]}``.
-                      Defaults to an interactive terminal prompt; pass
-                      your own to drive reviews from elsewhere (e.g. a
-                      web UI waiting on an ``asyncio.Event``).
+                      If given, answers reviews automatically (e.g.
+                      :func:`terminal_approver`); without it the review
+                      waits in ``Execution.pending`` for ``resolve_review``.
 
         Returns:
             The registered review :class:`Node`.
         """
         async def review_func(ctx: Dict[str, Any]) -> Dict[str, Any]:
+            execution = ctx.get(_EXECUTION_KEY)
+            if execution is None:
+                raise RuntimeError("human review node ran outside an executor context")
+
             # Snapshot of everything available for review at this point.
-            payload = {k: v for k, v in ctx.items() if k != name}
+            payload = {k: v for k, v in ctx.items() if k != name and k != _EXECUTION_KEY}
 
             print(f"\n  [REVIEW] node {name!r} is waiting for human approval")
             if prompt:
                 print(f"  {prompt}")
 
-            decision = await (approver or _terminal_approver)(name, payload)
+            future = execution.request_review(name, payload, approver)
+            try:
+                decision = await future
+            finally:
+                execution._drop_review(name)
             if decision.get("approve"):
                 logger.info("[%s] approved by human reviewer", name)
                 return {
                     "approved": True,
                     "payload": payload,
                     "reason": decision.get("reason"),
+                    "approved_at": datetime.now().isoformat(timespec="seconds"),
                 }
 
             reason = decision.get("reason") or "Rejected by human reviewer"
@@ -366,14 +387,22 @@ class DAG:
     # Execution
     # ------------------------------------------------------------------
 
-    async def run(
+    def run(
         self,
         inputs: Optional[Dict[str, Any]] = None,
         concurrency: Optional[int] = None,
         fail_fast: bool = False,
         on_event: Optional[Callable[[NodeResult], None]] = None,
-    ) -> Dict[str, NodeResult]:
-        """Execute the DAG.
+        execution: Optional[Execution] = None,
+    ) -> Execution:
+        """Build an :class:`Execution` for this DAG; await it to run.
+
+        The execution carries the run's live state: :attr:`Execution.nodes`
+        fills in as nodes transition, human reviews pend in
+        :attr:`Execution.pending` (answer them with
+        :meth:`Execution.resolve_review`), and failures land in
+        :attr:`Execution.error` instead of raising — only cancellation
+        propagates (flipping :attr:`Execution.cancelled`).
 
         Args:
             inputs: Initial data placed into the shared context before
@@ -384,14 +413,19 @@ class DAG:
                        any node fails.
             on_event: Optional callback invoked on every node state change
                       (running/retrying/completed/failed/skipped/cancelled).
-                      Useful for live progress monitoring (e.g. a web UI).
+                      Useful for streaming progress; the same state is
+                      available on :attr:`Execution.nodes`.
+            execution: Internal — reuse an existing execution (loop bodies
+                       share the top-level one so their results and reviews
+                       stay visible).
 
         Returns:
-            A dict mapping every node name to its :class:`NodeResult`.
+            The :class:`Execution`; awaiting it yields a dict mapping every
+            node name to its :class:`NodeResult`.
 
         Raises:
-            ValueError: If the DAG fails validation.
-            DAGExecutionError: If *fail_fast* is ``False`` and nodes failed.
+            ValueError: If the DAG fails validation (raised immediately,
+                        before the run starts).
         """
         errors = self.validate()
         if errors:
@@ -402,12 +436,41 @@ class DAG:
         if inputs is None:
             inputs = self.default_inputs
 
-        logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
+        own_execution = execution is None
+        if execution is None:
+            execution = Execution()
 
-        executor = DAGExecutor(concurrency=concurrency, on_event=on_event)
-        return await executor.execute(self._nodes, inputs, fail_fast=fail_fast)
+        async def _run() -> Dict[str, NodeResult]:
+            if own_execution:
+                execution.started_at = datetime.now()
+                logger.info(
+                    "== DAG %r starting (%d nodes) ==", self.name, len(self._nodes)
+                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Topological order: %s", " -> ".join(self.topological_order())
+                    )
+
+            executor = DAGExecutor(concurrency=concurrency, on_event=on_event)
+            try:
+                return await executor.execute(
+                    self._nodes, inputs, fail_fast=fail_fast, execution=execution
+                )
+            except asyncio.CancelledError:
+                execution.cancelled = True
+                raise
+            except DAGExecutionError as exc:
+                execution.error = str(exc)
+                return exc.results
+            except Exception as exc:  # unexpected — surface via state, not a crash
+                execution.error = f"{type(exc).__name__}: {exc}"
+                return execution.nodes
+            finally:
+                if own_execution:
+                    execution.finished_at = datetime.now()
+
+        execution._coro = _run()
+        return execution
 
     # ------------------------------------------------------------------
     # Visualisation

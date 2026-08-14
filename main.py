@@ -27,8 +27,7 @@ from pydantic import BaseModel
 from config import load_dag
 from dag import DAG
 from demo_functions import FUNCTIONS
-from executor import DAGExecutionError
-from schems import NodeResult
+from executor import Execution
 
 PIPELINE = Path(__file__).parent / "pipeline.yaml"
 HISTORY_FILE = Path(__file__).parent / "runs_history.json"
@@ -42,37 +41,29 @@ INDEX = Path(__file__).parent / "index.html"
 class _Run:
     def __init__(self, run_id: str) -> None:
         self.id = run_id
-        self.started_at = datetime.now()
-        self.finished_at: Optional[datetime] = None
+        self.started_at = datetime.now()  # created at (shown before execution starts)
         self.dag: Optional[DAG] = None
+        self.execution: Optional[Execution] = None
         self.task: Optional[asyncio.Task] = None
-        self.nodes: Dict[str, NodeResult] = {}
-        self.pending: Dict[str, Dict[str, Any]] = {}
-        self.error: Optional[str] = None
-
-    @property
-    def running(self) -> bool:
-        return self.task is not None and not self.task.done()
 
     def snapshot(self) -> Dict[str, Any]:
-        """JSON-serializable record of this run (also used for history)."""
-        if self.error:
-            result = "failed"
-        elif self.finished_at:
-            result = "completed"
-        else:
-            result = "running"
+        """JSON-serializable record of this run (also used for history).
+
+        All execution state lives on :class:`Execution` — the single source
+        of truth that the framework updates in place.
+        """
+        ex = self.execution
         return {
             "id": self.id,
             "name": self.dag.name if self.dag else None,
-            "started_at": self.started_at.isoformat(timespec="seconds"),
-            "finished_at": self.finished_at.isoformat(timespec="seconds")
-            if self.finished_at else None,
-            # finished_at is the source of truth: while the task's own finally
-            # runs, task.done() is still False even though the run is over.
-            "running": self.finished_at is None,
-            "result": result,
-            "error": self.error,
+            "started_at": (
+                ex.started_at if ex and ex.started_at else self.started_at
+            ).isoformat(timespec="seconds"),
+            "finished_at": ex.finished_at.isoformat(timespec="seconds")
+            if ex and ex.finished_at else None,
+            "running": ex.status == "running" if ex else False,
+            "result": ex.status if ex else "pending",
+            "error": ex.error if ex else None,
             "nodes": {
                 name: {
                     "status": r.status.value,
@@ -81,9 +72,11 @@ class _Run:
                     "attempts": r.attempts,
                     "duration_ms": round(r.duration_ms) if r.duration_ms else 0,
                 }
-                for name, r in self.nodes.items()
-            },
-            "pending": {name: entry["payload"] for name, entry in self.pending.items()},
+                for name, r in ex.nodes.items()
+            } if ex else {},
+            "pending": {
+                name: entry["payload"] for name, entry in ex.pending.items()
+            } if ex else {},
             "mermaid": self.dag.to_mermaid() if self.dag else "",
         }
 
@@ -112,31 +105,12 @@ _load_history()
 # Run plumbing
 # ---------------------------------------------------------------------------
 
-async def _run_pipeline(run: _Run) -> None:
-    async def approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        # Pause until the browser decides; api_approve resolves the future.
-        future = asyncio.get_running_loop().create_future()
-        run.pending[node_name] = {"payload": payload, "future": future}
-        return await future
-
-    def on_event(result: NodeResult) -> None:
-        run.nodes[result.node_name] = result
-
-    run.dag = load_dag(PIPELINE, functions=FUNCTIONS, approver=approver)
-    try:
-        await run.dag.run(on_event=on_event)
-    except DAGExecutionError as exc:
-        run.error = str(exc)
-        for name, result in exc.results.items():
-            run.nodes[name] = result
-    except Exception as exc:  # unexpected — surface it in the UI instead of dying
-        run.error = f"{type(exc).__name__}: {exc}"
-    finally:
-        run.finished_at = datetime.now()
-        history[run.id] = run.snapshot()
-        HISTORY_FILE.write_text(
-            json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+def _persist(run: _Run) -> None:
+    """Record the run's final state (fired when its task completes)."""
+    history[run.id] = run.snapshot()
+    HISTORY_FILE.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -154,8 +128,14 @@ class ApproveBody(BaseModel):
 @app.post("/api/run")
 async def api_run():
     run = _Run(datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4])
+    try:
+        run.dag = load_dag(PIPELINE, functions=FUNCTIONS)
+        run.execution = run.dag.run()  # validates immediately
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
     runs[run.id] = run
-    run.task = asyncio.create_task(_run_pipeline(run))
+    run.task = run.execution.start()
+    run.task.add_done_callback(lambda _task: _persist(run))
     # persist immediately so a crash mid-run still leaves a visible record
     history[run.id] = run.snapshot()
     HISTORY_FILE.write_text(
@@ -184,15 +164,14 @@ async def api_state(run_id: str):
 @app.post("/api/approve/{run_id}/{node_name}")
 async def api_approve(run_id: str, node_name: str, body: ApproveBody):
     run = runs.get(run_id)
-    if run is None:
+    if run is None or run.execution is None:
         return JSONResponse({"error": f"No active run {run_id!r}"}, status_code=404)
-    entry = run.pending.get(node_name)
-    if entry is None:
+    if not run.execution.resolve_review(
+        node_name, {"approve": body.approve, "reason": body.reason}
+    ):
         return JSONResponse(
             {"error": f"No pending review for node {node_name!r}"}, status_code=404
         )
-    entry["future"].set_result({"approve": body.approve, "reason": body.reason})
-    run.pending.pop(node_name, None)
     # persist state even if the server dies before the run finishes
     history[run.id] = run.snapshot()
     HISTORY_FILE.write_text(
