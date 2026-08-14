@@ -28,20 +28,37 @@ class RunRecord(SQLModel, table=True):
     __tablename__ = "runs"
 
     id: str = Field(primary_key=True)
-    name: str = ""
+    name: str = ""          # yaml 里的 name 字段（如 content_pipeline）
+    config_file: str = ""   # yaml 文件名（如 pipeline.yaml）
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
-    running: bool = False
-    result: str = "pending"
+    status: str = "pending"  # pending/running/completed/failed/cancelled
     error: Optional[str] = None
     nodes: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    pending: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
 
 async def init() -> None:
-    """Create tables (idempotent)."""
+    """Create tables (idempotent)；开发期为旧表做一次性列迁移。"""
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+        if engine.sync_engine.dialect.name == "postgresql":
+            await conn.exec_driver_sql(
+                "ALTER TABLE runs ADD COLUMN IF NOT EXISTS config_file TEXT NOT NULL DEFAULT ''"
+            )
+            cols = {
+                row[0] for row in (await conn.exec_driver_sql(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name='runs'"
+                )).fetchall()
+            }
+            if "result" in cols:  # result -> status 重命名（一次性）
+                await conn.exec_driver_sql("ALTER TABLE runs RENAME COLUMN result TO status")
+            await conn.exec_driver_sql("ALTER TABLE runs DROP COLUMN IF EXISTS running")
+            # interrupted -> cancelled 术语统一（一次性，幂等）
+            await conn.exec_driver_sql(
+                "UPDATE runs SET status='cancelled' WHERE status='interrupted'"
+            )
+            # 待审是瞬态信息，无需持久化
+            await conn.exec_driver_sql("ALTER TABLE runs DROP COLUMN IF EXISTS pending")
 
 
 async def save(record: RunRecord) -> None:

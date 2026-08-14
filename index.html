@@ -15,7 +15,7 @@
   button.no { background: #7f1d1d; border-color: #991b1b; }
   .chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #374151; white-space: nowrap; }
   .chip-completed { background: #14532d; } .chip-running { background: #1e40af; }
-  .chip-failed { background: #7f1d1d; } .chip-interrupted { background: #92400e; }
+  .chip-failed { background: #7f1d1d; } .chip-cancelled { background: #92400e; }
   main { display: grid; grid-template-columns: 300px 1fr; gap: 18px; padding: 18px 20px; }
   aside { background: #1a1d23; border: 1px solid #2a2f38; border-radius: 10px; padding: 14px; align-self: start; }
   aside .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
@@ -95,7 +95,7 @@ async function refreshRuns() {
   document.getElementById('run-count').textContent = runList.length;
   document.getElementById('run-list').innerHTML = runList.map(r => `
     <div class="run-item${r.id === selected ? ' sel' : ''}" onclick="select('${esc(r.id)}')">
-      <span class="chip chip-${r.result}">${r.result}</span>
+      <span class="chip chip-${r.status}">${r.status}</span>
       <span class="rid">${esc(r.id)}</span>
     </div>`).join('');
   if (!selected && runList.length) select(runList[0].id);
@@ -108,8 +108,8 @@ async function refreshState() {
   document.getElementById('dag-name').textContent = state.name || '';
   document.getElementById('run-id').textContent = '#' + state.id;
   const chip = document.getElementById('run-chip');
-  chip.textContent = state.running ? 'running…' : state.result;
-  chip.className = 'chip chip-' + (state.running ? 'running' : state.result);
+  chip.textContent = state.status === 'running' ? 'running…' : state.status;
+  chip.className = 'chip chip-' + (state.status === 'running' ? 'running' : state.status);
   const err = document.getElementById('run-error');
   err.textContent = state.error || '';
   err.style.display = state.error ? '' : 'none';
@@ -124,13 +124,13 @@ async function refreshState() {
     </tr>`).join('');
 
   const box = document.getElementById('reviews');
-  const entries = Object.entries(state.running && state.pending ? state.pending : {});
+  const entries = state.status === 'running' ? (state.pending || []) : [];
   box.innerHTML = entries.length ? '' : '<p class="muted">No review pending.</p>';
-  for (const [node, payload] of entries) {
+  for (const node of entries) {
     const card = document.createElement('div');
     card.className = 'review';
     card.innerHTML = `<h3>${esc(node)}</h3>
-      <pre>${esc(JSON.stringify(payload, null, 2))}</pre>
+      <p class="muted">待审内容见 Nodes 表（已完成节点的输出）。</p>
       <div class="buttons">
         <button class="ok" onclick="decide('${esc(node)}', true)">&#10003; Approve</button>
         <button class="no" onclick="decide('${esc(node)}', false)">&#10007; Reject</button>
@@ -152,7 +152,7 @@ function select(id) {
   selected = id;
   lastMermaid = '';
   refreshState().then(ok => {
-    if (ok && state.running) { startPolling(); startRunsPolling(); }
+    if (ok && state.status === 'running') { startPolling(); startRunsPolling(); }
     else stopPolling();
   });
   refreshRuns();
@@ -178,7 +178,7 @@ let runsTimer = null;
 function startPolling() {
   stopPolling();
   stateTimer = setInterval(async () => {
-    if (await refreshState() && state && !state.running) {
+    if (await refreshState() && state && state.status !== 'running') {
       stopPolling();
       refreshRuns();  // update the sidebar chip once when the run finishes
     }
@@ -192,7 +192,7 @@ function stopPolling() {
 function startRunsPolling() {
   stopRunsPolling();
   runsTimer = setInterval(async () => {
-    if (await refreshRuns() && !runList.some(r => r.running)) stopRunsPolling();
+    if (await refreshRuns() && !runList.some(r => r.status === 'running')) stopRunsPolling();
   }, 1000);
 }
 
@@ -202,7 +202,7 @@ function stopRunsPolling() {
 
 // initial load; selects the first run and polls the list while anything is running
 refreshRuns().then(ok => {
-  if (ok && runList.some(r => r.running)) startRunsPolling();
+  if (ok && runList.some(r => r.status === 'running')) startRunsPolling();
 });
 </script>
 </body>
