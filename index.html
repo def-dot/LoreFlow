@@ -40,8 +40,6 @@
   .review h3 { margin: 0 0 8px; font-size: 14px; }
   .review pre { background: #14161a; padding: 8px; border-radius: 6px; overflow: auto; max-height: 160px; font-size: 12px; }
   .review .buttons { margin-top: 10px; display: flex; gap: 8px; }
-  #decisions div { font-size: 12px; padding: 4px 0; border-bottom: 1px solid #232833; color: #9aa4b2; }
-  #decisions .yes { color: #4ade80; } #decisions .no { color: #f87171; }
   .muted { color: #8b93a1; }
 </style>
 </head>
@@ -75,8 +73,6 @@
         </table>
         <h2 style="margin-top:14px">Human review</h2>
         <div id="reviews"></div>
-        <h2 style="margin-top:14px">Decisions (audit)</h2>
-        <div id="decisions"></div>
       </section>
     </div>
   </div>
@@ -95,7 +91,7 @@ function detail(r) {
 }
 
 async function refreshRuns() {
-  try { runList = (await (await fetch('/api/runs')).json()).runs; } catch (e) { return; }
+  try { runList = (await (await fetch('/api/runs')).json()).runs; } catch (e) { return false; }
   document.getElementById('run-count').textContent = runList.length;
   document.getElementById('run-list').innerHTML = runList.map(r => `
     <div class="run-item${r.id === selected ? ' sel' : ''}" onclick="select('${esc(r.id)}')">
@@ -103,11 +99,12 @@ async function refreshRuns() {
       <span class="rid">${esc(r.id)}</span>
     </div>`).join('');
   if (!selected && runList.length) select(runList[0].id);
+  return true;
 }
 
 async function refreshState() {
-  if (!selected) return;
-  try { state = await (await fetch('/api/state/' + encodeURIComponent(selected))).json(); } catch (e) { return; }
+  if (!selected) return false;
+  try { state = await (await fetch('/api/state/' + encodeURIComponent(selected))).json(); } catch (e) { return false; }
   document.getElementById('dag-name').textContent = state.name || '';
   document.getElementById('run-id').textContent = '#' + state.id;
   const chip = document.getElementById('run-chip');
@@ -141,11 +138,6 @@ async function refreshState() {
     box.appendChild(card);
   }
 
-  const decs = document.getElementById('decisions');
-  decs.innerHTML = (state.decisions || []).length
-    ? state.decisions.map(d => `<div><span class="${d.approve ? 'yes' : 'no'}">${d.approve ? '✓' : '✗'} ${esc(d.node)}</span> at ${esc(d.at)}${d.reason ? ' — ' + esc(d.reason) : ''}</div>`).join('')
-    : '<p class="muted">No decisions recorded.</p>';
-
   if (state.mermaid !== lastMermaid) {
     lastMermaid = state.mermaid;
     const graph = document.getElementById('graph');
@@ -153,12 +145,16 @@ async function refreshState() {
     graph.removeAttribute('data-processed');
     if (window.mermaid) { try { await mermaid.run({nodes: [graph]}); } catch (e) {} }
   }
+  return true;
 }
 
 function select(id) {
   selected = id;
   lastMermaid = '';
-  refreshState();
+  refreshState().then(ok => {
+    if (ok && state.running) { startPolling(); startRunsPolling(); }
+    else stopPolling();
+  });
   refreshRuns();
 }
 
@@ -176,10 +172,38 @@ async function decide(node, approve) {
   refreshState();
 }
 
-refreshRuns();
-refreshState();
-setInterval(refreshRuns, 1000);
-setInterval(refreshState, 1000);
+let stateTimer = null;
+let runsTimer = null;
+
+function startPolling() {
+  stopPolling();
+  stateTimer = setInterval(async () => {
+    if (await refreshState() && state && !state.running) {
+      stopPolling();
+      refreshRuns();  // update the sidebar chip once when the run finishes
+    }
+  }, 1000);
+}
+
+function stopPolling() {
+  if (stateTimer) { clearInterval(stateTimer); stateTimer = null; }
+}
+
+function startRunsPolling() {
+  stopRunsPolling();
+  runsTimer = setInterval(async () => {
+    if (await refreshRuns() && !runList.some(r => r.running)) stopRunsPolling();
+  }, 1000);
+}
+
+function stopRunsPolling() {
+  if (runsTimer) { clearInterval(runsTimer); runsTimer = null; }
+}
+
+// initial load; selects the first run and polls the list while anything is running
+refreshRuns().then(ok => {
+  if (ok && runList.some(r => r.running)) startRunsPolling();
+});
 </script>
 </body>
 </html>

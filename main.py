@@ -48,7 +48,6 @@ class _Run:
         self.task: Optional[asyncio.Task] = None
         self.nodes: Dict[str, NodeResult] = {}
         self.pending: Dict[str, Dict[str, Any]] = {}
-        self.decisions: list = []
         self.error: Optional[str] = None
 
     @property
@@ -85,7 +84,6 @@ class _Run:
                 for name, r in self.nodes.items()
             },
             "pending": {name: entry["payload"] for name, entry in self.pending.items()},
-            "decisions": self.decisions,
             "mermaid": self.dag.to_mermaid() if self.dag else "",
         }
 
@@ -116,12 +114,10 @@ _load_history()
 
 async def _run_pipeline(run: _Run) -> None:
     async def approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        # Pause until the browser decides; api_approve fills the decision
-        # and sets the event.
-        entry: Dict[str, Any] = {"payload": payload, "event": asyncio.Event(), "decision": None}
-        run.pending[node_name] = entry
-        await entry["event"].wait()
-        return entry["decision"]
+        # Pause until the browser decides; api_approve resolves the future.
+        future = asyncio.get_running_loop().create_future()
+        run.pending[node_name] = {"payload": payload, "future": future}
+        return await future
 
     def on_event(result: NodeResult) -> None:
         run.nodes[result.node_name] = result
@@ -195,16 +191,9 @@ async def api_approve(run_id: str, node_name: str, body: ApproveBody):
         return JSONResponse(
             {"error": f"No pending review for node {node_name!r}"}, status_code=404
         )
-    run.decisions.append({
-        "node": node_name,
-        "approve": body.approve,
-        "reason": body.reason,
-        "at": datetime.now().isoformat(timespec="seconds"),
-    })
-    entry["decision"] = {"approve": body.approve, "reason": body.reason}
-    entry["event"].set()
+    entry["future"].set_result({"approve": body.approve, "reason": body.reason})
     run.pending.pop(node_name, None)
-    # persist audit trail even if the server dies before the run finishes
+    # persist state even if the server dies before the run finishes
     history[run.id] = run.snapshot()
     HISTORY_FILE.write_text(
         json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
