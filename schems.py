@@ -86,6 +86,16 @@ class NodeResult:
     def is_skipped(self) -> bool:
         return self.status == NodeStatus.SKIPPED
 
+    def to_dict(self) -> dict:
+        """JSON-safe dict (the shape the web UI consumes)."""
+        return {
+            "status": self.status.value,
+            "output": self.output,
+            "error": str(self.error) if self.error else None,
+            "attempts": self.attempts,
+            "duration_ms": round(self.duration_ms) if self.duration_ms else 0,
+        }
+
     def __repr__(self) -> str:
         if self.status == NodeStatus.COMPLETED:
             return (f"NodeResult({self.node_name!r}, OK, "

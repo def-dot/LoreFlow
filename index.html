@@ -96,7 +96,7 @@ async function refreshRuns() {
   document.getElementById('run-list').innerHTML = runList.map(r => `
     <div class="run-item${r.id === selected ? ' sel' : ''}" onclick="select('${esc(r.id)}')">
       <span class="chip chip-${r.status}">${r.status}</span>
-      <span class="rid">${esc(r.id)}</span>
+      <span class="rid">${esc(r.name)} · ${esc(r.created_at || '')}</span>
     </div>`).join('');
   if (!selected && runList.length) select(runList[0].id);
   return true;
@@ -106,7 +106,8 @@ async function refreshState() {
   if (!selected) return false;
   try { state = await (await fetch('/api/state/' + encodeURIComponent(selected))).json(); } catch (e) { return false; }
   document.getElementById('dag-name').textContent = state.name || '';
-  document.getElementById('run-id').textContent = '#' + state.id;
+  document.getElementById('run-id').textContent =
+    '#' + state.id + (state.created_at ? ' · ' + state.created_at : '');
   const chip = document.getElementById('run-chip');
   chip.textContent = state.status === 'running' ? 'running…' : state.status;
   chip.className = 'chip chip-' + (state.status === 'running' ? 'running' : state.status);
