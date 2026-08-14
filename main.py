@@ -56,13 +56,15 @@ def _make_approver(record: database.RunRecord) -> ApproverFunc:
     return approver
 
 
-async def _run_pipeline(record: database.RunRecord, dag: DAG) -> None:
+async def _run_pipeline(
+    record: database.RunRecord, dag: DAG, resume: Optional[Dict[str, Dict[str, Any]]] = None
+) -> None:
     def on_event(result: NodeResult) -> None:
         record.nodes[result.node_name] = result.to_dict()
         asyncio.create_task(database.save(record))
 
     try:
-        await dag.run(on_event=on_event)
+        await dag.run(on_event=on_event, resume=resume)
     except asyncio.CancelledError:
         record.status = "cancelled"
         raise
@@ -82,14 +84,36 @@ async def _run_pipeline(record: database.RunRecord, dag: DAG) -> None:
 # API
 # ---------------------------------------------------------------------------
 
+async def _resume(record: database.RunRecord) -> None:
+    """重启后恢复未完成的 run：已完成节点快照重建上下文、重跑剩余部分。
+
+    审批节点会重新挂起继续等决策——决策表里没被消费的决策会被恢复后
+    的审批器继续消费，审批不丢。"""
+    if not record.config_file:
+        record.status = "cancelled"
+        await database.save(record)
+        return
+    try:
+        dag = load_dag(
+            PIPELINE.parent / record.config_file,
+            functions=FUNCTIONS,
+            approver=_make_approver(record),
+        )
+    except ValueError as exc:
+        record.status = "failed"
+        record.error = f"resume failed: {exc}"
+        await database.save(record)
+        return
+    asyncio.create_task(_run_pipeline(record, dag, resume=record.nodes))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await database.init()
-    # 上次进程退出时仍在 running 的记录标记为 cancelled
+    # 重启恢复：上次进程退出时仍在 running 的记录从快照续跑
     for record in (await database.load()).values():
         if record.status == "running":
-            record.status = "cancelled"
-            await database.save(record)
+            await _resume(record)
     yield
 
 

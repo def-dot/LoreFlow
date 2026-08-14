@@ -61,6 +61,7 @@ class DAGExecutor:
         nodes: Dict[str, Node],
         inputs: Optional[Dict[str, Any]] = None,
         fail_fast: bool = False,
+        resume: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, NodeResult]:
         """Execute all *nodes* and return a mapping of node name → NodeResult.
 
@@ -69,6 +70,9 @@ class DAGExecutor:
             inputs: Initial key-value pairs placed into the shared context.
             fail_fast: If True, cancel all running nodes as soon as any node
                        fails (after retries exhausted).
+            resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
+                    已完成节点不重跑，其输出作为下游上下文；其余节点正常
+                    重跑（含重新挂起的审批节点）。
 
         Returns:
             Dict mapping each node name to its :class:`NodeResult`.
@@ -84,6 +88,21 @@ class DAGExecutor:
             name: asyncio.Event() for name in nodes
         }
         results: Dict[str, NodeResult] = {}
+
+        # ----- resume: 已完成节点直接置为完成，输出进上下文 -----
+        resume = resume or {}
+        for name, saved in resume.items():
+            if saved.get("status") == "completed":
+                ctx[name] = saved.get("output")
+                statuses[name] = NodeStatus.COMPLETED
+                events[name].set()
+                results[name] = NodeResult(
+                    node_name=name,
+                    status=NodeStatus.COMPLETED,
+                    output=saved.get("output"),
+                    attempts=saved.get("attempts") or 1,
+                    duration_ms=saved.get("duration_ms") or 0.0,
+                )
 
         # Track tasks so we can cancel on fail_fast
         tasks: Dict[str, asyncio.Task[None]] = {}
@@ -117,8 +136,10 @@ class DAGExecutor:
             finally:
                 events[node.name].set()
 
-        # ----- spawn all nodes -----
+        # ----- spawn remaining nodes -----
         for node in nodes.values():
+            if node.name in resume and resume[node.name].get("status") == "completed":
+                continue  # 恢复时已完成，不重跑
             tasks[node.name] = asyncio.create_task(run_node(node))
 
         # ----- wait for completion -----

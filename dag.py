@@ -387,6 +387,7 @@ class DAG:
         concurrency: Optional[int] = None,
         fail_fast: bool = False,
         on_event: Optional[Callable[[NodeResult], None]] = None,
+        resume: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, NodeResult]:
         """Execute the DAG.
 
@@ -400,6 +401,7 @@ class DAG:
             on_event: Optional callback invoked on every node state change
                       (running/retrying/completed/failed/skipped/cancelled).
                       Useful for live progress monitoring (e.g. a web UI).
+            resume: 重启恢复用的节点快照（见 DAGExecutor.execute）。
 
         Returns:
             A dict mapping every node name to its :class:`NodeResult`.
@@ -422,7 +424,9 @@ class DAG:
             logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
 
         executor = DAGExecutor(concurrency=concurrency, on_event=on_event)
-        return await executor.execute(self._nodes, inputs, fail_fast=fail_fast)
+        return await executor.execute(
+            self._nodes, inputs, fail_fast=fail_fast, resume=resume
+        )
 
     # ------------------------------------------------------------------
     # Visualisation
