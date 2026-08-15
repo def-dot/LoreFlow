@@ -34,6 +34,7 @@
   td pre { margin: 0; max-width: 400px; max-height: 90px; overflow: auto; color: #9aa4b2; font-size: 12px; }
   .st { font-size: 12px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
   .st-completed { background: #14532d; } .st-running { background: #1e40af; }
+  .st-reviewing { background: #6d28d9; }
   .st-retrying { background: #92400e; } .st-failed { background: #7f1d1d; }
   .st-skipped, .st-cancelled { background: #374151; color: #9ca3af; }
   .review { border: 1px solid #3a4150; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
@@ -125,8 +126,8 @@ async function refreshState() {
     </tr>`).join('');
 
   const box = document.getElementById('reviews');
-  const entries = state.status === 'running' ? (state.pending || []) : [];
-  box.innerHTML = entries.length ? '' : '<p class="muted">No review pending.</p>';
+  const entries = state.status === 'running' ? (state.reviewing || []) : [];
+  box.innerHTML = entries.length ? '' : '<p class="muted">No review awaiting decision.</p>';
   for (const node of entries) {
     const card = document.createElement('div');
     card.className = 'review';

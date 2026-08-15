@@ -30,7 +30,7 @@ from dag import DAG
 from demo_functions import FUNCTIONS
 from executor import DAGExecutionError
 from node import ApproverFunc
-from schems import NodeResult
+from schems import NodeResult, NodeStatus
 
 PIPELINE = Path(__file__).parent / "pipeline.yaml"
 INDEX = Path(__file__).parent / "index.html"
@@ -41,16 +41,17 @@ INDEX = Path(__file__).parent / "index.html"
 # ---------------------------------------------------------------------------
 
 def _make_approver(record: database.RunRecord) -> ApproverFunc:
-    """Build the approver for one run: 在节点条目上标记待审并落库，然后
+    """Build the approver for one run: 把节点状态置为 reviewing 并落库，然后
     轮询决策表直到 /api/approve 写入决策。"""
     async def approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        record.nodes.setdefault(node_name, {})["pending"] = True
+        entry = record.nodes.setdefault(node_name, {})
+        entry["status"] = NodeStatus.REVIEWING.value
         await database.save(record)
         while True:
             await asyncio.sleep(0.3)
             decision = await database.take_decision(record.id, node_name)
             if decision is not None:
-                record.nodes[node_name].pop("pending", None)
+                entry["status"] = NodeStatus.RUNNING.value
                 await database.save(record)
                 return decision
     return approver
@@ -70,13 +71,14 @@ async def _run_pipeline(
         raise
     except DAGExecutionError as exc:
         record.error = str(exc)
+        record.status = "failed"
         for name, result in exc.results.items():
             record.nodes[name] = result.to_dict()
-    except Exception as exc:  # unexpected — surface it in the UI instead of dying
+    except Exception as exc:
         record.error = f"{type(exc).__name__}: {exc}"
+        record.status = "failed"
     finally:
         record.finished_at = datetime.now().isoformat(timespec="seconds")
-        record.refresh_status()
         await database.save(record)
 
 
@@ -128,9 +130,9 @@ class ApproveBody(BaseModel):
 @app.post("/api/run")
 async def api_run():
     record = database.RunRecord(
-        name=PIPELINE.name,       # 占位：任务加载 dag 前没有真实名字
-        config_file=PIPELINE.name,  # yaml 文件名
-        mermaid="",               # 占位：加载后更新
+        name=PIPELINE.name, 
+        config_file=PIPELINE.name, 
+        mermaid="",
         created_at=datetime.now().isoformat(timespec="seconds"),
         status="running",
     )
@@ -165,9 +167,9 @@ async def api_state(run_id: int):
         return JSONResponse({"error": f"Unknown run {run_id!r}"}, status_code=404)
     return {
         **record.model_dump(),
-        "pending": sorted(
+        "reviewing": sorted(
             n for n, e in record.nodes.items()
-            if isinstance(e, dict) and e.get("pending")
+            if isinstance(e, dict) and e.get("status") == NodeStatus.REVIEWING.value
         ),
     }
 
@@ -176,9 +178,9 @@ async def api_state(run_id: int):
 async def api_approve(run_id: int, node_name: str, body: ApproveBody):
     record = await database.get(run_id)
     entry = (record.nodes or {}).get(node_name) if record else None
-    if not isinstance(entry, dict) or not entry.get("pending"):
+    if not isinstance(entry, dict) or entry.get("status") != NodeStatus.REVIEWING.value:
         return JSONResponse(
-            {"error": f"No pending review for node {node_name!r}"}, status_code=404
+            {"error": f"Node {node_name!r} is not awaiting review"}, status_code=404
         )
     await database.save_decision(
         run_id, node_name, {"approve": body.approve, "reason": body.reason}

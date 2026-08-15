@@ -38,17 +38,6 @@ class RunRecord(SQLModel, table=True):
     error: Optional[str] = None
     nodes: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
-    def refresh_status(self) -> None:
-        """按 error/finished_at 推导状态；显式标记（cancelled）不覆盖。"""
-        if self.status == "cancelled":
-            return
-        if self.error:
-            self.status = "failed"
-        elif self.finished_at:
-            self.status = "completed"
-        else:
-            self.status = "running"
-
 
 async def init() -> None:
     """Create tables (idempotent)；旧版 TEXT 主键的表一次性重建。"""
