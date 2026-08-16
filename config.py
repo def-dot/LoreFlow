@@ -170,6 +170,7 @@ def build_dag(
     config: Dict[str, Any],
     functions: Any = None,
     approver: Optional[ApproverFunc] = None,
+    on_event: Optional[Callable] = None,
 ) -> DAG:
     """Build a :class:`DAG` from a declarative config dict.
 
@@ -179,7 +180,11 @@ def build_dag(
     if not isinstance(config, dict):
         raise ValueError(f"Config must be a dict, got {type(config).__name__}")
 
-    dag = DAG(config.get("name", "dag"), default_inputs=config.get("inputs"))
+    dag = DAG(
+        config.get("name", "dag"),
+        default_inputs=config.get("inputs"),
+        on_event=on_event,
+    )
 
     for name, spec in (config.get("nodes") or {}).items():
         if not isinstance(spec, dict):
@@ -252,11 +257,13 @@ def load_dag(
     path: str,
     functions: Any = None,
     approver: Optional[ApproverFunc] = None,
+    on_event: Optional[Callable] = None,
 ) -> DAG:
     """Load a YAML file and build the DAG from it (requires PyYAML).
 
     *approver* is passed to every ``kind: human`` node (see
-    :func:`build_dag`).
+    :func:`build_dag`); *on_event* is attached to the DAG (see
+    :class:`dag.DAG`).
     """
     try:
         import yaml
@@ -265,4 +272,4 @@ def load_dag(
 
     with open(path, "r", encoding="utf-8") as fh:
         config = yaml.safe_load(fh)
-    return build_dag(config, functions, approver=approver)
+    return build_dag(config, functions, approver=approver, on_event=on_event)

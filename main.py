@@ -28,9 +28,8 @@ import database
 from config import load_dag
 from dag import DAG
 from demo_functions import FUNCTIONS
-from executor import DAGExecutionError
 from node import ApproverFunc
-from schems import NodeResult, NodeStatus
+from schems import DAGExecutionError, NodeResult, NodeStatus
 
 PIPELINE = Path(__file__).parent / "pipeline.yaml"
 INDEX = Path(__file__).parent / "index.html"
@@ -57,15 +56,19 @@ def _make_approver(record: database.RunRecord) -> ApproverFunc:
     return approver
 
 
-async def _run_pipeline(
-    record: database.RunRecord, dag: DAG, resume: Optional[Dict[str, Dict[str, Any]]] = None
-) -> None:
+def _make_event_sink(record: database.RunRecord) -> Callable[[NodeResult], None]:
+    """Build the on_event sink for one run: 节点状态变化写进快照并落库。"""
     def on_event(result: NodeResult) -> None:
         record.nodes[result.node_name] = result.to_dict()
         asyncio.create_task(database.save(record))
+    return on_event
 
+
+async def _run_pipeline(
+    record: database.RunRecord, dag: DAG, resume: Optional[Dict[str, Dict[str, Any]]] = None
+) -> None:
     try:
-        await dag.run(on_event=on_event, resume=resume)
+        await dag.run(resume=resume)
     except asyncio.CancelledError:
         record.status = "cancelled"
         raise
@@ -102,6 +105,7 @@ async def _resume(record: database.RunRecord) -> None:
             PIPELINE.parent / record.config_file,
             functions=FUNCTIONS,
             approver=_make_approver(record),
+            on_event=_make_event_sink(record),
         )
     except ValueError as exc:
         record.status = "failed"
@@ -140,7 +144,7 @@ async def api_run():
     )
     record = await database.save(record)
     try:
-        dag = load_dag(PIPELINE, functions=FUNCTIONS, approver=_make_approver(record))
+        dag = load_dag(PIPELINE, functions=FUNCTIONS, approver=_make_approver(record), on_event=_make_event_sink(record))
     except ValueError as exc:
         record.status = "failed"
         record.error = str(exc)

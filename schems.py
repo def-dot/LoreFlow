@@ -5,7 +5,7 @@ Core types for the DAG Flow orchestration engine.
 import random
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, Tuple, Type
+from typing import Any, Dict, Optional, Tuple, Type
 
 
 class NodeStatus(Enum):
@@ -105,3 +105,11 @@ class NodeResult:
             return (f"NodeResult({self.node_name!r}, FAILED, "
                     f"{type(self.error).__name__}: {self.error})")
         return f"NodeResult({self.node_name!r}, {self.status.value})"
+
+
+class DAGExecutionError(Exception):
+    """Raised when the DAG execution fails (one or more nodes failed)."""
+
+    def __init__(self, message: str, results: Dict[str, NodeResult]):
+        super().__init__(message)
+        self.results = results

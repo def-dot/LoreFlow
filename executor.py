@@ -16,17 +16,9 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from node import Node
-from schems import NodeResult, NodeStatus, RetryPolicy
+from schems import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
 
 logger = logging.getLogger(__name__)
-
-
-class DAGExecutionError(Exception):
-    """Raised when the DAG execution fails (one or more nodes failed)."""
-
-    def __init__(self, message: str, results: Dict[str, NodeResult]):
-        super().__init__(message)
-        self.results = results
 
 
 class DAGExecutor:

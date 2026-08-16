@@ -27,9 +27,9 @@ import pprint
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from executor import DAGExecutionError, DAGExecutor
+from executor import DAGExecutor
 from node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
-from schems import NodeResult, RetryPolicy
+from schems import DAGExecutionError, NodeResult, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +63,20 @@ class DAG:
         name: A human-readable label for this workflow (used in logs & diagrams).
         default_inputs: Initial context applied when :meth:`run` is called
                         without explicit ``inputs``.
+        on_event: Optional callback invoked on every node state change
+                  (running/retrying/completed/failed/skipped/cancelled).
+                  Useful for live progress monitoring (e.g. a web UI).
     """
 
     def __init__(
         self,
         name: str = "dag",
         default_inputs: Optional[Dict[str, Any]] = None,
+        on_event: Optional[Callable[[NodeResult], None]] = None,
     ):
         self.name = name
         self.default_inputs = default_inputs if default_inputs else {}
+        self.on_event = on_event
         self._nodes: Dict[str, Node] = {}
 
     # ------------------------------------------------------------------
@@ -389,7 +394,6 @@ class DAG:
         self,
         inputs: Optional[Dict[str, Any]] = None,
         concurrency: Optional[int] = None,
-        on_event: Optional[Callable[[NodeResult], None]] = None,
         resume: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, NodeResult]:
         """Execute the DAG.
@@ -399,9 +403,6 @@ class DAG:
                     execution (defaults to ``default_inputs``).
             concurrency: Maximum number of nodes running at once
                          (``None`` = unlimited).
-            on_event: Optional callback invoked on every node state change
-                      (running/retrying/completed/failed/skipped/cancelled).
-                      Useful for live progress monitoring (e.g. a web UI).
             resume: 重启恢复用的节点快照（见 DAGExecutor.execute）。
 
         Returns:
@@ -424,7 +425,7 @@ class DAG:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
 
-        executor = DAGExecutor(concurrency=concurrency, on_event=on_event)
+        executor = DAGExecutor(concurrency=concurrency, on_event=self.on_event)
         return await executor.execute(self._nodes, inputs, resume=resume)
 
     # ------------------------------------------------------------------
