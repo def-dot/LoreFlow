@@ -79,6 +79,8 @@ async def _run_pipeline(
         record.status = "failed"
     finally:
         record.finished_at = datetime.now().isoformat(timespec="seconds")
+        if record.status == "running":  # 成功路径（failed/cancelled 已在 except 里显式设置）
+            record.status = "completed"
         await database.save(record)
 
 

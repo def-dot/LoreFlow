@@ -168,8 +168,12 @@ class DAG:
                     "[%s] loop iteration %d / %d", name, iteration, max_iterations
                 )
 
-                # Run the body sub-DAG
-                iter_results = await sub.run(ctx, fail_fast=True)
+                # Run the body sub-DAG。body 失败抛 DAGExecutionError——取其
+                # results 继续，是否终止循环由 condition 决定
+                try:
+                    iter_results = await sub.run(ctx)
+                except DAGExecutionError as exc:
+                    iter_results = exc.results
 
                 # Merge successful outputs into context
                 for nname, nr in iter_results.items():
@@ -385,7 +389,6 @@ class DAG:
         self,
         inputs: Optional[Dict[str, Any]] = None,
         concurrency: Optional[int] = None,
-        fail_fast: bool = False,
         on_event: Optional[Callable[[NodeResult], None]] = None,
         resume: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, NodeResult]:
@@ -396,8 +399,6 @@ class DAG:
                     execution (defaults to ``default_inputs``).
             concurrency: Maximum number of nodes running at once
                          (``None`` = unlimited).
-            fail_fast: If ``True``, raise :exc:`DAGExecutionError` as soon as
-                       any node fails.
             on_event: Optional callback invoked on every node state change
                       (running/retrying/completed/failed/skipped/cancelled).
                       Useful for live progress monitoring (e.g. a web UI).
@@ -408,7 +409,7 @@ class DAG:
 
         Raises:
             ValueError: If the DAG fails validation.
-            DAGExecutionError: If *fail_fast* is ``False`` and nodes failed.
+            DAGExecutionError: If any nodes failed.
         """
         errors = self.validate()
         if errors:
@@ -424,9 +425,7 @@ class DAG:
             logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
 
         executor = DAGExecutor(concurrency=concurrency, on_event=on_event)
-        return await executor.execute(
-            self._nodes, inputs, fail_fast=fail_fast, resume=resume
-        )
+        return await executor.execute(self._nodes, inputs, resume=resume)
 
     # ------------------------------------------------------------------
     # Visualisation

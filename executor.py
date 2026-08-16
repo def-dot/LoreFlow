@@ -60,7 +60,6 @@ class DAGExecutor:
         self,
         nodes: Dict[str, Node],
         inputs: Optional[Dict[str, Any]] = None,
-        fail_fast: bool = False,
         resume: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, NodeResult]:
         """Execute all *nodes* and return a mapping of node name → NodeResult.
@@ -68,8 +67,6 @@ class DAGExecutor:
         Args:
             nodes: All nodes in the DAG (keyed by name).
             inputs: Initial key-value pairs placed into the shared context.
-            fail_fast: If True, cancel all running nodes as soon as any node
-                       fails (after retries exhausted).
             resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
                     已完成节点不重跑，其输出作为下游上下文；其余节点正常
                     重跑（含重新挂起的审批节点）。
@@ -78,8 +75,7 @@ class DAGExecutor:
             Dict mapping each node name to its :class:`NodeResult`.
 
         Raises:
-            DAGExecutionError: If *fail_fast* is False and one or more nodes
-                               ultimately failed.
+            DAGExecutionError: If one or more nodes ultimately failed.
         """
         # ----- shared state -----
         ctx: Dict[str, Any] = dict(inputs) if inputs else {}
@@ -104,7 +100,7 @@ class DAGExecutor:
                     duration_ms=saved.get("duration_ms") or 0.0,
                 )
 
-        # Track tasks so we can cancel on fail_fast
+        # Task registry — gathered at the end
         tasks: Dict[str, asyncio.Task[None]] = {}
 
         async def run_node(node: Node) -> None:
@@ -145,18 +141,17 @@ class DAGExecutor:
         # ----- wait for completion -----
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
-        # ----- optionally fail-fast on first error -----
-        if not fail_fast:
-            failed = [
-                name for name, r in results.items()
-                if r.status == NodeStatus.FAILED
-            ]
-            if failed:
-                raise DAGExecutionError(
-                    f"DAG execution finished with {len(failed)} failed node(s): "
-                    f"{', '.join(failed)}",
-                    results,
-                )
+        # ----- surface failures as DAGExecutionError -----
+        failed = [
+            name for name, r in results.items()
+            if r.status == NodeStatus.FAILED
+        ]
+        if failed:
+            raise DAGExecutionError(
+                f"DAG execution finished with {len(failed)} failed node(s): "
+                f"{', '.join(failed)}",
+                results,
+            )
 
         return results
 
