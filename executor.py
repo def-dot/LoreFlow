@@ -71,7 +71,6 @@ class DAGExecutor:
         """
         # ----- shared state -----
         ctx: Dict[str, Any] = dict(inputs) if inputs else {}
-        statuses: Dict[str, NodeStatus] = {}
         events: Dict[str, asyncio.Event] = {
             name: asyncio.Event() for name in nodes
         }
@@ -82,7 +81,6 @@ class DAGExecutor:
         for name, saved in resume.items():
             if saved.get("status") == "completed":
                 ctx[name] = saved.get("output")
-                statuses[name] = NodeStatus.COMPLETED
                 events[name].set()
                 results[name] = NodeResult(
                     node_name=name,
@@ -92,46 +90,23 @@ class DAGExecutor:
                     duration_ms=saved.get("duration_ms") or 0.0,
                 )
 
-        # Task registry — gathered at the end
-        tasks: Dict[str, asyncio.Task[None]] = {}
-
-        async def run_node(node: Node) -> None:
-            """Lifecycle of a single node: 等依赖 → 执行 → 收尾。
-
-            Task-level safety net: however ``_run_one`` exits, ``results``
-            carries the terminal result. 状态机(statuses)/同步(events)/事件
-            汇报三件事都在这里收口——全部从 results 这一个真相推导。
-            """
-            try:
-                for dep in node.depends_on:
-                    await events[dep].wait()
-                results[node.name] = await self._run_one(node, ctx, statuses)
-            except asyncio.CancelledError:
-                results[node.name] = NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus.CANCELLED,
-                )
-            except Exception as exc:
-                # Should not happen — _run_one is defensive, but guard anyway
-                logger.exception("Unexpected error in executor for %s", node.name)
-                results[node.name] = NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus.FAILED,
-                    error=exc,
-                )
-            finally:
-                statuses[node.name] = results[node.name].status
-                events[node.name].set()
-                self._emit(results[node.name])
+        # Task registry — 节点任务表（下游跳过检查也从中读上游终态）
+        tasks: Dict[str, asyncio.Task[NodeResult]] = {}
 
         # ----- spawn remaining nodes -----
         for node in nodes.values():
             if node.name in resume and resume[node.name].get("status") == "completed":
                 continue  # 恢复时已完成，不重跑
-            tasks[node.name] = asyncio.create_task(run_node(node))
+            tasks[node.name] = asyncio.create_task(
+                self._run_node(node, ctx, tasks, events)
+            )
 
         # ----- wait for completion -----
         await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+        # ----- collect results from task return values -----
+        for name, task in tasks.items():
+            results[name] = task.result()
 
         # ----- surface failures as DAGExecutionError -----
         failed = [
@@ -151,123 +126,153 @@ class DAGExecutor:
     # Single-node execution
     # ------------------------------------------------------------------
 
-    async def _run_one(
+    async def _run_node(
         self,
         node: Node,
         ctx: Dict[str, Any],
-        statuses: Dict[str, NodeStatus],
+        tasks: Dict[str, asyncio.Task[NodeResult]],
+        events: Dict[str, asyncio.Event],
     ) -> NodeResult:
-        """Run a single node (依赖已在 ``run_node`` 中等完) and return its
-        terminal result: 级联跳过检查 → 条件判断 → 带重试的执行。
-        结果存储与终态汇报由 ``run_node`` 负责，这里只生产。"""
+        """Lifecycle of a single node: 等依赖 → 跳过/条件判断 → 带重试执行 → 收尾。
 
-        # ---- 1. Check for cascading failure ----
-        failed_deps = [
-            dep for dep in node.depends_on
-            if statuses.get(dep) == NodeStatus.FAILED
-        ]
-        if failed_deps:
-            logger.warning(
-                "[%s] Skipped - upstream failed: %s", node.name, failed_deps
-            )
-            return NodeResult(
-                node_name=node.name,
-                status=NodeStatus.SKIPPED,
-            )
+        Task-level safety net: 无论执行如何退出，必返回终态 NodeResult。
+        同步(events)/事件汇报两件事都在 finally 收口——全部从这同一个
+        result 推导。
+        """
+        result: NodeResult
+        try:
+            # ---- 1. Wait for dependencies ----
+            for dep in node.depends_on:
+                await events[dep].wait()
 
-        # ---- 2. Evaluate condition (branching) ----
-        if node.condition is not None:
-            try:
-                should_run = node.condition(ctx)
-            except Exception as exc:
-                logger.error(
-                    "[%s] Condition raised %s: %s - skipping node",
-                    node.name, type(exc).__name__, exc,
+            # ---- 2. Check for cascading failure ----
+            # 上游终态从其任务返回值读（恢复完成的节点没有任务，视为未失败）
+            failed_deps = [
+                dep for dep in node.depends_on
+                if dep in tasks and tasks[dep].result().status == NodeStatus.FAILED
+            ]
+            if failed_deps:
+                logger.warning(
+                    "[%s] Skipped - upstream failed: %s", node.name, failed_deps
                 )
-                should_run = False
-
-            if not should_run:
-                logger.info("[%s] Skipped - condition not met", node.name)
-                return NodeResult(
+                result = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.SKIPPED,
                 )
+                return result
 
-        # ---- 3. Execute with retry ----
-        retry = node.retry or RetryPolicy(max_retries=0)
-        last_error: Optional[Exception] = None
-        self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
-
-        for attempt in range(retry.max_retries + 1):
-            try:
-                start = time.monotonic()
-
-                if self._semaphore:
-                    async with self._semaphore:
-                        output = await self._call(node, ctx)
-                else:
-                    output = await self._call(node, ctx)
-
-                duration_ms = (time.monotonic() - start) * 1000
-
-                # success
-                ctx[node.name] = output
-                logger.info(
-                    "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
-                    node.name,
-                    attempt + 1,
-                    retry.max_retries + 1,
-                    duration_ms,
-                )
-                return NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus.COMPLETED,
-                    output=output,
-                    attempts=attempt + 1,
-                    duration_ms=duration_ms,
-                )
-
-            except Exception as exc:
-                last_error = exc
-
-                if not retry.should_retry(exc, attempt):
+            # ---- 3. Evaluate condition (branching) ----
+            if node.condition is not None:
+                try:
+                    should_run = node.condition(ctx)
+                except Exception as exc:
                     logger.error(
-                        "[%s] FAIL  non-retryable / retries exhausted: %s: %s",
+                        "[%s] Condition raised %s: %s - skipping node",
                         node.name, type(exc).__name__, exc,
                     )
-                    break
+                    should_run = False
 
-                delay = retry.get_delay(attempt)
-                logger.warning(
-                    "[%s] RETRY  attempt %d/%d failed (%s: %s), "
-                    "retrying in %.1f s ...",
-                    node.name,
-                    attempt + 1,
-                    retry.max_retries + 1,
-                    type(exc).__name__,
-                    exc,
-                    delay,
-                )
-                self._emit(NodeResult(
-                    node_name=node.name, status=NodeStatus.RETRYING,
-                    attempts=attempt + 1, error=exc,
-                ))
-                await asyncio.sleep(delay)
+                if not should_run:
+                    logger.info("[%s] Skipped - condition not met", node.name)
+                    result = NodeResult(
+                        node_name=node.name,
+                        status=NodeStatus.SKIPPED,
+                    )
+                    return result
 
-        # ---- 4. All retries exhausted ----
-        logger.error(
-            "[%s] FAILED after %d attempt(s): %s: %s",
-            node.name,
-            retry.max_retries + 1,
-            type(last_error).__name__ if last_error else "?",
-            last_error,
-        )
-        return NodeResult(
-            node_name=node.name,
-            status=NodeStatus.FAILED,
-            error=last_error,
-            attempts=retry.max_retries + 1,
-        )
+            # ---- 4. Execute with retry ----
+            retry = node.retry or RetryPolicy(max_retries=0)
+            last_error: Optional[Exception] = None
+            self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
+
+            for attempt in range(retry.max_retries + 1):
+                try:
+                    start = time.monotonic()
+
+                    if self._semaphore:
+                        async with self._semaphore:
+                            output = await self._call(node, ctx)
+                    else:
+                        output = await self._call(node, ctx)
+
+                    duration_ms = (time.monotonic() - start) * 1000
+
+                    # success
+                    ctx[node.name] = output
+                    logger.info(
+                        "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
+                        node.name,
+                        attempt + 1,
+                        retry.max_retries + 1,
+                        duration_ms,
+                    )
+                    result = NodeResult(
+                        node_name=node.name,
+                        status=NodeStatus.COMPLETED,
+                        output=output,
+                        attempts=attempt + 1,
+                        duration_ms=duration_ms,
+                    )
+                    return result
+
+                except Exception as exc:
+                    last_error = exc
+
+                    if not retry.should_retry(exc, attempt):
+                        logger.error(
+                            "[%s] FAIL  non-retryable / retries exhausted: %s: %s",
+                            node.name, type(exc).__name__, exc,
+                        )
+                        break
+
+                    delay = retry.get_delay(attempt)
+                    logger.warning(
+                        "[%s] RETRY  attempt %d/%d failed (%s: %s), "
+                        "retrying in %.1f s ...",
+                        node.name,
+                        attempt + 1,
+                        retry.max_retries + 1,
+                        type(exc).__name__,
+                        exc,
+                        delay,
+                    )
+                    self._emit(NodeResult(
+                        node_name=node.name, status=NodeStatus.RETRYING,
+                        attempts=attempt + 1, error=exc,
+                    ))
+                    await asyncio.sleep(delay)
+
+            # ---- 5. All retries exhausted ----
+            logger.error(
+                "[%s] FAILED after %d attempt(s): %s: %s",
+                node.name,
+                retry.max_retries + 1,
+                type(last_error).__name__ if last_error else "?",
+                last_error,
+            )
+            result = NodeResult(
+                node_name=node.name,
+                status=NodeStatus.FAILED,
+                error=last_error,
+                attempts=retry.max_retries + 1,
+            )
+        except asyncio.CancelledError:
+            result = NodeResult(
+                node_name=node.name,
+                status=NodeStatus.CANCELLED,
+            )
+        except Exception as exc:
+            # Should not happen — the code above is defensive, but guard anyway
+            logger.exception("Unexpected error in executor for %s", node.name)
+            result = NodeResult(
+                node_name=node.name,
+                status=NodeStatus.FAILED,
+                error=exc,
+            )
+        finally:
+            events[node.name].set()
+            self._emit(result)
+        return result
 
     # ------------------------------------------------------------------
     # Helpers
