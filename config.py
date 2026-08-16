@@ -175,7 +175,8 @@ def build_dag(
     """Build a :class:`DAG` from a declarative config dict.
 
     ``kind: human`` nodes require *approver* — e.g.
-    :func:`dag.terminal_approver`.
+    :func:`dag.terminal_approver`. The finished graph is validated
+    (missing dependencies, cycles) before returning.
     """
     if not isinstance(config, dict):
         raise ValueError(f"Config must be a dict, got {type(config).__name__}")
@@ -250,6 +251,9 @@ def build_dag(
                 metadata=spec.get("metadata") or {},
             ))
 
+    errors = dag.validate()
+    if errors:
+        raise ValueError(f"Invalid DAG config:\n  " + "\n  ".join(errors))
     return dag
 
 

@@ -14,7 +14,6 @@ Run::
 from __future__ import annotations
 
 import asyncio
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -29,7 +28,7 @@ from config import load_dag
 from dag import DAG
 from demo_functions import FUNCTIONS
 from node import ApproverFunc
-from schems import DAGExecutionError, NodeResult, NodeStatus
+from schems import NodeResult, NodeStatus
 
 PIPELINE = Path(__file__).parent / "pipeline.yaml"
 INDEX = Path(__file__).parent / "index.html"
@@ -69,21 +68,15 @@ async def _run_pipeline(
 ) -> None:
     try:
         await dag.run(resume=resume)
+        record.status = "completed"
     except asyncio.CancelledError:
         record.status = "cancelled"
         raise
-    except DAGExecutionError as exc:
-        record.error = str(exc)
-        record.status = "failed"
-        for name, result in exc.results.items():
-            record.nodes[name] = result.to_dict()
     except Exception as exc:
         record.error = f"{type(exc).__name__}: {exc}"
         record.status = "failed"
     finally:
         record.finished_at = datetime.now().isoformat(timespec="seconds")
-        if record.status == "running":  # 成功路径（failed/cancelled 已在 except 里显式设置）
-            record.status = "completed"
         await database.save(record)
 
 
@@ -135,21 +128,20 @@ class ApproveBody(BaseModel):
 
 @app.post("/api/run")
 async def api_run():
+    # 先校验配置（load_dag 构建失败抛 ValueError），通过后才落库——
+    # 配置错误直接 400，不产生垃圾 run 记录
     record = database.RunRecord(
-        name=PIPELINE.name, 
-        config_file=PIPELINE.name, 
+        name=PIPELINE.name,
+        config_file=PIPELINE.name,
         mermaid="",
         created_at=datetime.now().isoformat(timespec="seconds"),
         status="running",
     )
-    record = await database.save(record)
     try:
         dag = load_dag(PIPELINE, functions=FUNCTIONS, approver=_make_approver(record), on_event=_make_event_sink(record))
     except ValueError as exc:
-        record.status = "failed"
-        record.error = str(exc)
-        await database.save(record)
         return JSONResponse({"error": str(exc)}, status_code=400)
+    await database.save(record)
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
     await database.save(record)

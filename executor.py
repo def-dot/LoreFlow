@@ -39,10 +39,10 @@ class DAGExecutor:
         )
         self.on_event = on_event
 
-    def _emit(self, node_name: str, status: NodeStatus, **fields: Any) -> None:
+    def _emit(self, result: NodeResult) -> None:
         """Push a node state change to the ``on_event`` callback (if set)."""
         if self.on_event is not None:
-            self.on_event(NodeResult(node_name=node_name, status=status, **fields))
+            self.on_event(result)
 
     # ------------------------------------------------------------------
     # Public API
@@ -96,33 +96,33 @@ class DAGExecutor:
         tasks: Dict[str, asyncio.Task[None]] = {}
 
         async def run_node(node: Node) -> None:
-            """Lifecycle of a single node.
+            """Lifecycle of a single node: 等依赖 → 执行 → 收尾。
 
-            Task-level safety net: however ``_run_one`` exits, record the
-            terminal status and always set the event so downstream nodes
-            never hang.
+            Task-level safety net: however ``_run_one`` exits, ``results``
+            carries the terminal result. 状态机(statuses)/同步(events)/事件
+            汇报三件事都在这里收口——全部从 results 这一个真相推导。
             """
             try:
-                await self._run_one(node, ctx, statuses, events, results)
+                for dep in node.depends_on:
+                    await events[dep].wait()
+                results[node.name] = await self._run_one(node, ctx, statuses)
             except asyncio.CancelledError:
-                statuses[node.name] = NodeStatus.CANCELLED
                 results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.CANCELLED,
                 )
-                self._emit(node.name, NodeStatus.CANCELLED)
             except Exception as exc:
                 # Should not happen — _run_one is defensive, but guard anyway
                 logger.exception("Unexpected error in executor for %s", node.name)
-                statuses[node.name] = NodeStatus.FAILED
                 results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.FAILED,
                     error=exc,
                 )
-                self._emit(node.name, NodeStatus.FAILED, error=exc)
             finally:
+                statuses[node.name] = results[node.name].status
                 events[node.name].set()
+                self._emit(results[node.name])
 
         # ----- spawn remaining nodes -----
         for node in nodes.values():
@@ -156,16 +156,12 @@ class DAGExecutor:
         node: Node,
         ctx: Dict[str, Any],
         statuses: Dict[str, NodeStatus],
-        events: Dict[str, asyncio.Event],
-        results: Dict[str, NodeResult],
-    ) -> None:
-        """Run a single node through its full lifecycle."""
+    ) -> NodeResult:
+        """Run a single node (依赖已在 ``run_node`` 中等完) and return its
+        terminal result: 级联跳过检查 → 条件判断 → 带重试的执行。
+        结果存储与终态汇报由 ``run_node`` 负责，这里只生产。"""
 
-        # ---- 1. Wait for dependencies ----
-        for dep in node.depends_on:
-            await events[dep].wait()
-
-        # ---- 2. Check for cascading failure ----
+        # ---- 1. Check for cascading failure ----
         failed_deps = [
             dep for dep in node.depends_on
             if statuses.get(dep) == NodeStatus.FAILED
@@ -174,15 +170,12 @@ class DAGExecutor:
             logger.warning(
                 "[%s] Skipped - upstream failed: %s", node.name, failed_deps
             )
-            statuses[node.name] = NodeStatus.SKIPPED
-            results[node.name] = NodeResult(
+            return NodeResult(
                 node_name=node.name,
                 status=NodeStatus.SKIPPED,
             )
-            self._emit(node.name, NodeStatus.SKIPPED)
-            return
 
-        # ---- 3. Evaluate condition (branching) ----
+        # ---- 2. Evaluate condition (branching) ----
         if node.condition is not None:
             try:
                 should_run = node.condition(ctx)
@@ -195,19 +188,15 @@ class DAGExecutor:
 
             if not should_run:
                 logger.info("[%s] Skipped - condition not met", node.name)
-                statuses[node.name] = NodeStatus.SKIPPED
-                results[node.name] = NodeResult(
+                return NodeResult(
                     node_name=node.name,
                     status=NodeStatus.SKIPPED,
                 )
-                self._emit(node.name, NodeStatus.SKIPPED)
-                return
 
-        # ---- 4. Execute with retry ----
+        # ---- 3. Execute with retry ----
         retry = node.retry or RetryPolicy(max_retries=0)
         last_error: Optional[Exception] = None
-        statuses[node.name] = NodeStatus.RUNNING
-        self._emit(node.name, NodeStatus.RUNNING)
+        self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
 
         for attempt in range(retry.max_retries + 1):
             try:
@@ -223,18 +212,6 @@ class DAGExecutor:
 
                 # success
                 ctx[node.name] = output
-                statuses[node.name] = NodeStatus.COMPLETED
-                results[node.name] = NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus.COMPLETED,
-                    output=output,
-                    attempts=attempt + 1,
-                    duration_ms=duration_ms,
-                )
-                self._emit(
-                    node.name, NodeStatus.COMPLETED,
-                    output=output, attempts=attempt + 1, duration_ms=duration_ms,
-                )
                 logger.info(
                     "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
                     node.name,
@@ -242,7 +219,13 @@ class DAGExecutor:
                     retry.max_retries + 1,
                     duration_ms,
                 )
-                return
+                return NodeResult(
+                    node_name=node.name,
+                    status=NodeStatus.COMPLETED,
+                    output=output,
+                    attempts=attempt + 1,
+                    duration_ms=duration_ms,
+                )
 
             except Exception as exc:
                 last_error = exc
@@ -265,27 +248,25 @@ class DAGExecutor:
                     exc,
                     delay,
                 )
-                self._emit(node.name, NodeStatus.RETRYING, attempts=attempt + 1, error=exc)
+                self._emit(NodeResult(
+                    node_name=node.name, status=NodeStatus.RETRYING,
+                    attempts=attempt + 1, error=exc,
+                ))
                 await asyncio.sleep(delay)
 
-        # ---- 5. All retries exhausted ----
-        statuses[node.name] = NodeStatus.FAILED
-        results[node.name] = NodeResult(
-            node_name=node.name,
-            status=NodeStatus.FAILED,
-            error=last_error,
-            attempts=retry.max_retries + 1,
-        )
-        self._emit(
-            node.name, NodeStatus.FAILED,
-            error=last_error, attempts=retry.max_retries + 1,
-        )
+        # ---- 4. All retries exhausted ----
         logger.error(
             "[%s] FAILED after %d attempt(s): %s: %s",
             node.name,
             retry.max_retries + 1,
             type(last_error).__name__ if last_error else "?",
             last_error,
+        )
+        return NodeResult(
+            node_name=node.name,
+            status=NodeStatus.FAILED,
+            error=last_error,
+            attempts=retry.max_retries + 1,
         )
 
     # ------------------------------------------------------------------

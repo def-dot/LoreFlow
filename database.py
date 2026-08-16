@@ -52,13 +52,20 @@ async def init() -> None:
         await conn.run_sync(SQLModel.metadata.create_all)
 
 
-async def save(record: RunRecord) -> RunRecord:
-    """Upsert 一条记录，返回带主键的持久化实例（新建时 id 由数据库生成）。"""
+async def save(record: RunRecord) -> None:
+    """把记录同步到库（原地，不换对象）。
+
+    首次插入（id is None）走 add：自增 id 回填到同一对象，这样提前
+    捕获了该对象的闭包（如 approver/sink）也能看到 id；之后走 merge。
+    """
     async with AsyncSession(engine) as session:
-        merged = await session.merge(record)
+        if record.id is None:
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            return
+        await session.merge(record)
         await session.commit()
-        await session.refresh(merged)
-        return merged
 
 
 async def load() -> Dict[int, RunRecord]:
