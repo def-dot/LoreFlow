@@ -1,0 +1,28 @@
+/* 全局暗色基调（沿用旧 index.html 的调色板），组件色由 element-plus dark vars 接管 */
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font: 14px/1.5 system-ui, sans-serif;
+  background: #14161a;
+  color: #d8dce3;
+}
+
+h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b93a1;
+  margin: 0 0 8px;
+}
+
+.muted {
+  color: #8b93a1;
+}
