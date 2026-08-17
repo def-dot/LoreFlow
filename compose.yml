@@ -1,0 +1,21 @@
+# 开发基础设施（数据库等）。应用服务本身在本地跑（dev.sh），
+# 生产编排见 compose.prod.yml（与 docker compose -f 叠加使用）。
+services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER?variable not set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?variable not set}
+      POSTGRES_DB: ${POSTGRES_DB?variable not set}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
