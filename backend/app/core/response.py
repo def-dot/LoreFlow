@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable
+from typing import Any
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -14,7 +15,7 @@ class UnifiedResponseRoute(APIRoute):
     错误响应由 app.core.exceptions 的全局异常处理器统一返回
     """
 
-    def get_route_handler(self) -> Callable:
+    def get_route_handler(self) -> Callable[..., Any]:
         original_route_handler = super().get_route_handler()
 
         async def custom_route_handler(request: Request) -> Response:
@@ -22,7 +23,7 @@ class UnifiedResponseRoute(APIRoute):
             if response.media_type != "application/json":
                 return response
             try:
-                data = json.loads(response.body)
+                data = json.loads(bytes(response.body))
             except (ValueError, UnicodeDecodeError):
                 return response
 

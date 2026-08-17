@@ -55,8 +55,7 @@ async def get_run(run_id: int) -> RunDetail:
     if record is None:
         raise HTTPException(status_code=404, detail=f"Unknown run {run_id!r}")
     reviewing = sorted(
-        n for n, e in record.nodes.items()
-        if isinstance(e, dict) and e.get("status") == NodeStatus.REVIEWING.value
+        n for n, e in record.nodes.items() if isinstance(e, dict) and e.get("status") == NodeStatus.REVIEWING.value
     )
     return RunDetail(**record.model_dump(), reviewing=reviewing)
 
@@ -66,10 +65,6 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
     record = await database.get(run_id)
     entry = (record.nodes or {}).get(node_name) if record else None
     if not isinstance(entry, dict) or entry.get("status") != NodeStatus.REVIEWING.value:
-        raise HTTPException(
-            status_code=404, detail=f"Node {node_name!r} is not awaiting review"
-        )
-    await database.save_decision(
-        run_id, node_name, {"approve": body.approve, "reason": body.reason}
-    )
+        raise HTTPException(status_code=404, detail=f"Node {node_name!r} is not awaiting review")
+    await database.save_decision(run_id, node_name, {"approve": body.approve, "reason": body.reason})
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

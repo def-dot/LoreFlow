@@ -24,8 +24,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import pprint
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
@@ -34,7 +35,7 @@ from .types import DAGExecutionError, NodeResult, RetryPolicy
 logger = logging.getLogger(__name__)
 
 
-async def terminal_approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def terminal_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Interactive approver: ask the reviewer on the terminal (y/n).
 
     Pass explicitly to :meth:`DAG.human_node` or ``load_dag(approver=...)``
@@ -71,13 +72,13 @@ class DAG:
     def __init__(
         self,
         name: str = "dag",
-        default_inputs: Optional[Dict[str, Any]] = None,
-        on_event: Optional[Callable[[NodeResult], None]] = None,
+        default_inputs: dict[str, Any] | None = None,
+        on_event: Callable[[NodeResult], None] | None = None,
     ):
         self.name = name
         self.default_inputs = default_inputs if default_inputs else {}
         self.on_event = on_event
-        self._nodes: Dict[str, Node] = {}
+        self._nodes: dict[str, Node] = {}
 
     # ------------------------------------------------------------------
     # Registration
@@ -97,12 +98,12 @@ class DAG:
     def node(
         self,
         name: str,
-        depends_on: Optional[List[str]] = None,
-        retry: Optional[RetryPolicy] = None,
-        timeout: Optional[float] = None,
-        condition: Optional[ConditionFunc] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ):
+        depends_on: list[str] | None = None,
+        retry: RetryPolicy | None = None,
+        timeout: float | None = None,
+        condition: ConditionFunc | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Callable[[NodeFunc], NodeFunc]:
         """Decorator: register an async function as a DAG node.
 
         Example::
@@ -111,17 +112,21 @@ class DAG:
             async def step_2(ctx):
                 return process(ctx["step_1"])
         """
+
         def decorator(func: NodeFunc) -> NodeFunc:
-            self.add_node(Node(
-                name=name,
-                func=func,
-                depends_on=depends_on or [],
-                retry=retry,
-                timeout=timeout,
-                condition=condition,
-                metadata=metadata or {},
-            ))
+            self.add_node(
+                Node(
+                    name=name,
+                    func=func,
+                    depends_on=depends_on or [],
+                    retry=retry,
+                    timeout=timeout,
+                    condition=condition,
+                    metadata=metadata or {},
+                )
+            )
             return func
+
         return decorator
 
     # ------------------------------------------------------------------
@@ -131,12 +136,12 @@ class DAG:
     def loop_node(
         self,
         name: str,
-        body_nodes: List[Node],
-        condition: Callable[[Dict[str, Any], int], bool],
-        depends_on: Optional[List[str]] = None,
+        body_nodes: list[Node],
+        condition: Callable[[dict[str, Any], int], bool],
+        depends_on: list[str] | None = None,
         max_iterations: int = 100,
-        retry: Optional[RetryPolicy] = None,
-        timeout: Optional[float] = None,
+        retry: RetryPolicy | None = None,
+        timeout: float | None = None,
     ) -> Node:
         """Add a loop node that iterates a sub-DAG until a condition is met.
 
@@ -165,13 +170,11 @@ class DAG:
         for n in body_nodes:
             sub.add_node(n)
 
-        async def loop_func(ctx: Dict[str, Any]) -> Dict[str, Any]:
+        async def loop_func(ctx: dict[str, Any]) -> dict[str, Any]:
             iteration = 0
             while iteration < max_iterations:
                 iteration += 1
-                logger.info(
-                    "[%s] loop iteration %d / %d", name, iteration, max_iterations
-                )
+                logger.info("[%s] loop iteration %d / %d", name, iteration, max_iterations)
 
                 # Run the body sub-DAG。body 失败抛 DAGExecutionError——取其
                 # results 继续，是否终止循环由 condition 决定
@@ -191,7 +194,8 @@ class DAG:
                 except Exception as exc:
                     logger.error(
                         "[%s] Loop condition raised %s — exiting loop",
-                        name, type(exc).__name__,
+                        name,
+                        type(exc).__name__,
                     )
                     break
 
@@ -199,9 +203,7 @@ class DAG:
                     logger.info("[%s] loop finished after %d iteration(s)", name, iteration)
                     break
             else:
-                logger.warning(
-                    "[%s] max iterations (%d) reached", name, max_iterations
-                )
+                logger.warning("[%s] max iterations (%d) reached", name, max_iterations)
 
             return ctx
 
@@ -223,10 +225,10 @@ class DAG:
     def human_node(
         self,
         name: str,
-        depends_on: Optional[List[str]] = None,
-        prompt: Optional[str] = None,
-        retry: Optional[RetryPolicy] = None,
-        approver: Optional[ApproverFunc] = None,
+        depends_on: list[str] | None = None,
+        prompt: str | None = None,
+        retry: RetryPolicy | None = None,
+        approver: ApproverFunc | None = None,
     ) -> Node:
         """Register a human-in-the-loop review node.
 
@@ -256,12 +258,9 @@ class DAG:
             ValueError: If *approver* is not provided.
         """
         if approver is None:
-            raise ValueError(
-                f"Human node {name!r} requires an approver — "
-                "pass approver=..., e.g. terminal_approver"
-            )
+            raise ValueError(f"Human node {name!r} requires an approver — pass approver=..., e.g. terminal_approver")
 
-        async def review_func(ctx: Dict[str, Any]) -> Dict[str, Any]:
+        async def review_func(ctx: dict[str, Any]) -> dict[str, Any]:
             # Snapshot of everything available for review at this point.
             payload = {k: v for k, v in ctx.items() if k != name}
 
@@ -297,9 +296,9 @@ class DAG:
     # Validation
     # ------------------------------------------------------------------
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate the DAG. Returns a list of error messages (empty = valid)."""
-        errors: List[str] = []
+        errors: list[str] = []
 
         if not self._nodes:
             errors.append("DAG has no nodes")
@@ -311,10 +310,7 @@ class DAG:
         for node in self._nodes.values():
             for dep in node.depends_on:
                 if dep not in all_names:
-                    errors.append(
-                        f"Node {node.name!r} depends on {dep!r}, "
-                        f"which does not exist in the DAG"
-                    )
+                    errors.append(f"Node {node.name!r} depends on {dep!r}, which does not exist in the DAG")
 
         # Cycle detection (only if no missing-dependency errors)
         if not errors:
@@ -324,13 +320,13 @@ class DAG:
 
         return errors
 
-    def _find_cycle(self) -> Optional[List[str]]:
+    def _find_cycle(self) -> list[str] | None:
         """DFS-based cycle detection using path stack slicing."""
         WHITE, GRAY, BLACK = 0, 1, 2
-        colour: Dict[str, int] = {n: WHITE for n in self._nodes}
-        path_stack: List[str] = []
+        colour: dict[str, int] = {n: WHITE for n in self._nodes}
+        path_stack: list[str] = []
 
-        def dfs(node_name: str) -> Optional[List[str]]:
+        def dfs(node_name: str) -> list[str] | None:
             colour[node_name] = GRAY
             path_stack.append(node_name)  # 入栈
 
@@ -360,13 +356,13 @@ class DAG:
     # Topological order (informational)
     # ------------------------------------------------------------------
 
-    def topological_order(self) -> List[str]:
+    def topological_order(self) -> list[str]:
         """Return node names in topological order (Kahn's algorithm).
 
         Useful for visualising the execution plan.
         """
-        in_degree: Dict[str, int] = {n: 0 for n in self._nodes}
-        dependents: Dict[str, List[str]] = {n: [] for n in self._nodes}
+        in_degree: dict[str, int] = {n: 0 for n in self._nodes}
+        dependents: dict[str, list[str]] = {n: [] for n in self._nodes}
 
         for node in self._nodes.values():
             for dep in node.depends_on:
@@ -374,7 +370,7 @@ class DAG:
                 in_degree[node.name] += 1
 
         queue = [n for n, d in in_degree.items() if d == 0]
-        order: List[str] = []
+        order: list[str] = []
 
         while queue:
             n = queue.pop(0)
@@ -392,10 +388,10 @@ class DAG:
 
     async def run(
         self,
-        inputs: Optional[Dict[str, Any]] = None,
-        concurrency: Optional[int] = None,
-        resume: Optional[Dict[str, Dict[str, Any]]] = None,
-    ) -> Dict[str, NodeResult]:
+        inputs: dict[str, Any] | None = None,
+        concurrency: int | None = None,
+        resume: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, NodeResult]:
         """Execute the DAG.
 
         Args:
@@ -414,9 +410,7 @@ class DAG:
         """
         errors = self.validate()
         if errors:
-            raise ValueError(
-                f"DAG {self.name!r} validation failed:\n  " + "\n  ".join(errors)
-            )
+            raise ValueError(f"DAG {self.name!r} validation failed:\n  " + "\n  ".join(errors))
 
         if inputs is None:
             inputs = self.default_inputs
@@ -440,7 +434,7 @@ class DAG:
             extras = []
             if node.condition:
                 extras.append("[?]")
-            if (node.retry and node.retry.max_retries):
+            if node.retry and node.retry.max_retries:
                 extras.append(f"[R{node.retry.max_retries}]")
             label = node.name
             if extras:
@@ -456,12 +450,12 @@ class DAG:
     # ------------------------------------------------------------------
 
     @property
-    def nodes(self) -> Dict[str, Node]:
+    def nodes(self) -> dict[str, Node]:
         """Return all registered nodes (read-only view)."""
         return dict(self._nodes)
 
     @property
-    def node_names(self) -> List[str]:
+    def node_names(self) -> list[str]:
         """Return the list of registered node names."""
         return list(self._nodes)
 

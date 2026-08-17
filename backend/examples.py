@@ -12,7 +12,10 @@ import asyncio
 import logging
 import random
 import time
-from typing import Any, Dict
+from typing import Any
+
+from app.demo import FUNCTIONS, PIPELINE_PATH
+from app.engine import DAG, DAGExecutionError, Node, RetryPolicy, load_dag, terminal_approver
 
 # ---------------------------------------------------------------------------
 # Set up logging so we can see what's happening
@@ -22,9 +25,6 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-7s  %(message)s",
     datefmt="%H:%M:%S",
 )
-
-from app.demo import FUNCTIONS, PIPELINE_PATH
-from app.engine import DAG, DAGExecutionError, Node, RetryPolicy, load_dag, terminal_approver
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helper
@@ -50,18 +50,18 @@ async def demo_serial():
     dag = DAG("serial_demo")
 
     @dag.node("A")
-    async def node_a(ctx: Dict[str, Any]) -> str:
+    async def node_a(ctx: dict[str, Any]) -> str:
         await sleep_ms(100)
         return "data_from_A"
 
     @dag.node("B", depends_on=["A"])
-    async def node_b(ctx: Dict[str, Any]) -> str:
+    async def node_b(ctx: dict[str, Any]) -> str:
         data = ctx["A"]
         await sleep_ms(100)
         return f"processed({data})"
 
     @dag.node("C", depends_on=["B"])
-    async def node_c(ctx: Dict[str, Any]) -> str:
+    async def node_c(ctx: dict[str, Any]) -> str:
         data = ctx["B"]
         await sleep_ms(100)
         return f"finalized({data})"
@@ -87,27 +87,27 @@ async def demo_parallel():
     dag = DAG("parallel_demo")
 
     @dag.node("fetch")
-    async def fetch(ctx: Dict[str, Any]) -> str:
+    async def fetch(ctx: dict[str, Any]) -> str:
         await sleep_ms(80)
         return "raw_data"
 
     @dag.node("enrich", depends_on=["fetch"])
-    async def enrich(ctx: Dict[str, Any]) -> str:
+    async def enrich(ctx: dict[str, Any]) -> str:
         await sleep_ms(150)
         return f"enriched({ctx['fetch']})"
 
     @dag.node("validate", depends_on=["fetch"])
-    async def validate(ctx: Dict[str, Any]) -> str:
+    async def validate(ctx: dict[str, Any]) -> str:
         await sleep_ms(120)
         return f"validated({ctx['fetch']})"
 
     @dag.node("normalize", depends_on=["fetch"])
-    async def normalize(ctx: Dict[str, Any]) -> str:
+    async def normalize(ctx: dict[str, Any]) -> str:
         await sleep_ms(100)
         return f"normalized({ctx['fetch']})"
 
     @dag.node("merge", depends_on=["enrich", "validate", "normalize"])
-    async def merge(ctx: Dict[str, Any]) -> str:
+    async def merge(ctx: dict[str, Any]) -> str:
         parts = [ctx["enrich"], ctx["validate"], ctx["normalize"]]
         return " | ".join(parts)
 
@@ -137,7 +137,7 @@ async def demo_branching():
     dag = DAG("branch_demo")
 
     @dag.node("router")
-    async def router(ctx: Dict[str, Any]) -> dict:
+    async def router(ctx: dict[str, Any]) -> dict:
         user = ctx.get("user", {"tier": "standard"})
         await sleep_ms(50)
         return user
@@ -147,7 +147,7 @@ async def demo_branching():
         depends_on=["router"],
         condition=lambda ctx: ctx["router"].get("tier") == "premium",
     )
-    async def premium_flow(ctx: Dict[str, Any]) -> str:
+    async def premium_flow(ctx: dict[str, Any]) -> str:
         await sleep_ms(100)
         return f"[PREMIUM] Treatment for {ctx['router']['name']}"
 
@@ -156,12 +156,12 @@ async def demo_branching():
         depends_on=["router"],
         condition=lambda ctx: ctx["router"].get("tier") != "premium",
     )
-    async def standard_flow(ctx: Dict[str, Any]) -> str:
+    async def standard_flow(ctx: dict[str, Any]) -> str:
         await sleep_ms(100)
         return f"[STANDARD] Treatment for {ctx['router']['name']}"
 
     @dag.node("notify", depends_on=["premium_flow", "standard_flow"])
-    async def notify(ctx: Dict[str, Any]) -> str:
+    async def notify(ctx: dict[str, Any]) -> str:
         result = ctx.get("premium_flow") or ctx.get("standard_flow")
         return f"Notified: {result}"
 
@@ -194,19 +194,19 @@ async def demo_loop():
     dag = DAG("loop_demo")
 
     @dag.node("prepare")
-    async def prepare(ctx: Dict[str, Any]) -> list:
+    async def prepare(ctx: dict[str, Any]) -> list:
         items = ["apple", "lemon", "grape", "orange"]
         print(f"  Items to process: {items}")
         return items
 
-    async def process_one(ctx: Dict[str, Any]) -> str:
+    async def process_one(ctx: dict[str, Any]) -> str:
         await sleep_ms(80)
         idx = ctx.get("advance", {}).get("idx", 0)  # idx from previous iteration's advance output
         item = ctx["prepare"][idx]
         print(f"    -> processed: {item}")
         return item
 
-    async def advance(ctx: Dict[str, Any]) -> dict:
+    async def advance(ctx: dict[str, Any]) -> dict:
         await sleep_ms(20)
         idx = ctx.get("advance", {}).get("idx", 0)
         return {"idx": idx + 1}
@@ -256,7 +256,7 @@ async def demo_retry():
             jitter=False,  # deterministic for the demo
         ),
     )
-    async def flaky_api(ctx: Dict[str, Any]) -> str:
+    async def flaky_api(ctx: dict[str, Any]) -> str:
         attempt_counter["calls"] += 1
         call = attempt_counter["calls"]
         await sleep_ms(50)
@@ -265,7 +265,7 @@ async def demo_retry():
         return f"Success on call #{call}!"
 
     @dag.node("consume", depends_on=["flaky_api"])
-    async def consume(ctx: Dict[str, Any]) -> str:
+    async def consume(ctx: dict[str, Any]) -> str:
         return f"Consumed: {ctx['flaky_api']}"
 
     results = await dag.run()
@@ -290,17 +290,17 @@ async def demo_pipeline():
     dag = DAG("data_pipeline")
 
     @dag.node("fetch_users", retry=RetryPolicy(max_retries=2, backoff_base=0.05))
-    async def fetch_users(ctx: Dict[str, Any]) -> list:
+    async def fetch_users(ctx: dict[str, Any]) -> list:
         await sleep_ms(150)
         return [{"id": i, "name": f"user_{i}"} for i in range(10)]
 
     @dag.node("fetch_orders", retry=RetryPolicy(max_retries=2, backoff_base=0.05))
-    async def fetch_orders(ctx: Dict[str, Any]) -> list:
+    async def fetch_orders(ctx: dict[str, Any]) -> list:
         await sleep_ms(200)
         return [{"user_id": i % 10, "amount": random.randint(10, 500)} for i in range(30)]
 
     @dag.node("enrich_users", depends_on=["fetch_users"])
-    async def enrich_users(ctx: Dict[str, Any]) -> list:
+    async def enrich_users(ctx: dict[str, Any]) -> list:
         await sleep_ms(100)
         users = ctx["fetch_users"]
         for u in users:
@@ -308,7 +308,7 @@ async def demo_pipeline():
         return users
 
     @dag.node("aggregate_orders", depends_on=["fetch_orders"])
-    async def aggregate_orders(ctx: Dict[str, Any]) -> dict:
+    async def aggregate_orders(ctx: dict[str, Any]) -> dict:
         await sleep_ms(120)
         orders = ctx["fetch_orders"]
         by_user: dict = {}
@@ -318,7 +318,7 @@ async def demo_pipeline():
         return {uid: {"count": len(amts), "total": sum(amts)} for uid, amts in by_user.items()}
 
     @dag.node("join", depends_on=["enrich_users", "aggregate_orders"])
-    async def join(ctx: Dict[str, Any]) -> list:
+    async def join(ctx: dict[str, Any]) -> list:
         await sleep_ms(80)
         users = ctx["enrich_users"]
         agg = ctx["aggregate_orders"]
@@ -333,14 +333,15 @@ async def demo_pipeline():
         depends_on=["join"],
         condition=lambda ctx: any(r["total"] > 0 for r in ctx["join"]),
     )
-    async def high_value_report(ctx: Dict[str, Any]) -> str:
+    async def high_value_report(ctx: dict[str, Any]) -> str:
         top = sorted(ctx["join"], key=lambda r: r["total"], reverse=True)[:3]
-        lines = [f"  #{i+1}: {r['name']} (${r['total']}, {r['count']} orders, {r['tier']})"
-                 for i, r in enumerate(top)]
+        lines = [
+            f"  #{i + 1}: {r['name']} (${r['total']}, {r['count']} orders, {r['tier']})" for i, r in enumerate(top)
+        ]
         return "Top customers:\n" + "\n".join(lines)
 
     @dag.node("summary", depends_on=["join"])
-    async def summary(ctx: Dict[str, Any]) -> dict:
+    async def summary(ctx: dict[str, Any]) -> dict:
         data = ctx["join"]
         total_revenue = sum(r["total"] for r in data)
         return {
@@ -385,15 +386,15 @@ async def demo_error_handling():
     dag = DAG("error_demo")
 
     @dag.node("critical_fetch", retry=RetryPolicy(max_retries=1, backoff_base=0.05))
-    async def critical_fetch(ctx: Dict[str, Any]) -> str:
+    async def critical_fetch(ctx: dict[str, Any]) -> str:
         raise ConnectionError("Service unreachable")
 
     @dag.node("dependant", depends_on=["critical_fetch"])
-    async def dependant(ctx: Dict[str, Any]) -> str:
+    async def dependant(ctx: dict[str, Any]) -> str:
         return "This should not run"
 
     @dag.node("independent")
-    async def independent(ctx: Dict[str, Any]) -> str:
+    async def independent(ctx: dict[str, Any]) -> str:
         await sleep_ms(50)
         return "I run regardless"
 
@@ -423,12 +424,12 @@ async def demo_human_review():
     dag = DAG("human_review_demo")
 
     @dag.node("fetch_article")
-    async def fetch_article(ctx: Dict[str, Any]) -> dict:
+    async def fetch_article(ctx: dict[str, Any]) -> dict:
         await sleep_ms(50)
         return {"title": "DAG Flow v0.1", "content": "Hello, human review!"}
 
     @dag.node("format_article", depends_on=["fetch_article"])
-    async def format_article(ctx: Dict[str, Any]) -> str:
+    async def format_article(ctx: dict[str, Any]) -> str:
         article = ctx["fetch_article"]
         return f"{article['title']} — {article['content']}"
 
@@ -440,7 +441,7 @@ async def demo_human_review():
     )
 
     @dag.node("publish", depends_on=["review_article"])
-    async def publish(ctx: Dict[str, Any]) -> str:
+    async def publish(ctx: dict[str, Any]) -> str:
         reviewed = ctx["review_article"]
         return f"Published: {reviewed['payload']['format_article']}"
 

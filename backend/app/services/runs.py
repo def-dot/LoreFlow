@@ -7,8 +7,9 @@ Run 编排服务 — approver/事件落库/执行/重启恢复。
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 from app.core import database
 from app.core.logging import get_logger
@@ -23,7 +24,8 @@ logger = get_logger(__name__)
 def make_approver(record: RunRecord) -> ApproverFunc:
     """Build the approver for one run: 把节点状态置为 reviewing 并落库，然后
     轮询决策表直到 /api/approve 写入决策。"""
-    async def approver(node_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+
+    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
         entry["status"] = NodeStatus.REVIEWING.value
         await database.save(record)
@@ -36,6 +38,7 @@ def make_approver(record: RunRecord) -> ApproverFunc:
                 entry["status"] = NodeStatus.RUNNING.value
                 await database.save(record)
                 return decision
+
     return approver
 
 
@@ -45,6 +48,7 @@ def make_event_sink(record: RunRecord) -> Callable[[NodeResult], None]:
     落库走 fire-and-forget 任务，done-callback 记录异常（否则失败静默）；
     终态由 run_pipeline 的 finally 保证落库。
     """
+
     def _log_save_error(task: asyncio.Task[None]) -> None:
         if task.cancelled():
             return
@@ -63,7 +67,7 @@ def make_event_sink(record: RunRecord) -> Callable[[NodeResult], None]:
 async def run_pipeline(
     record: RunRecord,
     dag: DAG,
-    resume: Optional[Dict[str, Dict[str, Any]]] = None,
+    resume: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     try:
         await dag.run(resume=resume)

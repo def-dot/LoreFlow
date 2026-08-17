@@ -28,6 +28,7 @@ dev = [
     "pre-commit",
     "mypy>=1.10",
     "pytest-cov>=5.0",
+    "types-pyyaml",
 ]
 
 [tool.setuptools.packages.find]

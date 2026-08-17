@@ -13,7 +13,8 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .node import Node
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
@@ -31,12 +32,10 @@ class DAGExecutor:
 
     def __init__(
         self,
-        concurrency: Optional[int] = None,
-        on_event: Optional[Callable[[NodeResult], None]] = None,
+        concurrency: int | None = None,
+        on_event: Callable[[NodeResult], None] | None = None,
     ):
-        self._semaphore: Optional[asyncio.Semaphore] = (
-            asyncio.Semaphore(concurrency) if concurrency else None
-        )
+        self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
 
     def _emit(self, result: NodeResult) -> None:
@@ -50,10 +49,10 @@ class DAGExecutor:
 
     async def execute(
         self,
-        nodes: Dict[str, Node],
-        inputs: Optional[Dict[str, Any]] = None,
-        resume: Optional[Dict[str, Dict[str, Any]]] = None,
-    ) -> Dict[str, NodeResult]:
+        nodes: dict[str, Node],
+        inputs: dict[str, Any] | None = None,
+        resume: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, NodeResult]:
         """Execute all *nodes* and return a mapping of node name → NodeResult.
 
         Args:
@@ -70,11 +69,9 @@ class DAGExecutor:
             DAGExecutionError: If one or more nodes ultimately failed.
         """
         # ----- shared state -----
-        ctx: Dict[str, Any] = dict(inputs) if inputs else {}
-        events: Dict[str, asyncio.Event] = {
-            name: asyncio.Event() for name in nodes
-        }
-        results: Dict[str, NodeResult] = {}
+        ctx: dict[str, Any] = dict(inputs) if inputs else {}
+        events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in nodes}
+        results: dict[str, NodeResult] = {}
 
         # ----- resume: 已完成节点直接置为完成，输出进上下文 -----
         resume = resume or {}
@@ -91,15 +88,13 @@ class DAGExecutor:
                 )
 
         # Task registry — 节点任务表（下游跳过检查也从中读上游终态）
-        tasks: Dict[str, asyncio.Task[NodeResult]] = {}
+        tasks: dict[str, asyncio.Task[NodeResult]] = {}
 
         # ----- spawn remaining nodes -----
         for node in nodes.values():
             if node.name in resume and resume[node.name].get("status") == "completed":
                 continue  # 恢复时已完成，不重跑
-            tasks[node.name] = asyncio.create_task(
-                self._run_node(node, ctx, tasks, events)
-            )
+            tasks[node.name] = asyncio.create_task(self._run_node(node, ctx, tasks, events))
 
         # ----- wait for completion -----
         await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -109,14 +104,10 @@ class DAGExecutor:
             results[name] = task.result()
 
         # ----- surface failures as DAGExecutionError -----
-        failed = [
-            name for name, r in results.items()
-            if r.status == NodeStatus.FAILED
-        ]
+        failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
             raise DAGExecutionError(
-                f"DAG execution finished with {len(failed)} failed node(s): "
-                f"{', '.join(failed)}",
+                f"DAG execution finished with {len(failed)} failed node(s): {', '.join(failed)}",
                 results,
             )
 
@@ -129,9 +120,9 @@ class DAGExecutor:
     async def _run_node(
         self,
         node: Node,
-        ctx: Dict[str, Any],
-        tasks: Dict[str, asyncio.Task[NodeResult]],
-        events: Dict[str, asyncio.Event],
+        ctx: dict[str, Any],
+        tasks: dict[str, asyncio.Task[NodeResult]],
+        events: dict[str, asyncio.Event],
     ) -> NodeResult:
         """Lifecycle of a single node: 等依赖 → 跳过/条件判断 → 带重试执行 → 收尾。
 
@@ -148,13 +139,10 @@ class DAGExecutor:
             # ---- 2. Check for cascading failure ----
             # 上游终态从其任务返回值读（恢复完成的节点没有任务，视为未失败）
             failed_deps = [
-                dep for dep in node.depends_on
-                if dep in tasks and tasks[dep].result().status == NodeStatus.FAILED
+                dep for dep in node.depends_on if dep in tasks and tasks[dep].result().status == NodeStatus.FAILED
             ]
             if failed_deps:
-                logger.warning(
-                    "[%s] Skipped - upstream failed: %s", node.name, failed_deps
-                )
+                logger.warning("[%s] Skipped - upstream failed: %s", node.name, failed_deps)
                 result = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.SKIPPED,
@@ -168,7 +156,9 @@ class DAGExecutor:
                 except Exception as exc:
                     logger.error(
                         "[%s] Condition raised %s: %s - skipping node",
-                        node.name, type(exc).__name__, exc,
+                        node.name,
+                        type(exc).__name__,
+                        exc,
                     )
                     should_run = False
 
@@ -182,7 +172,7 @@ class DAGExecutor:
 
             # ---- 4. Execute with retry ----
             retry = node.retry or RetryPolicy(max_retries=0)
-            last_error: Optional[Exception] = None
+            last_error: Exception | None = None
             self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
 
             for attempt in range(retry.max_retries + 1):
@@ -221,14 +211,15 @@ class DAGExecutor:
                     if not retry.should_retry(exc, attempt):
                         logger.error(
                             "[%s] FAIL  non-retryable / retries exhausted: %s: %s",
-                            node.name, type(exc).__name__, exc,
+                            node.name,
+                            type(exc).__name__,
+                            exc,
                         )
                         break
 
                     delay = retry.get_delay(attempt)
                     logger.warning(
-                        "[%s] RETRY  attempt %d/%d failed (%s: %s), "
-                        "retrying in %.1f s ...",
+                        "[%s] RETRY  attempt %d/%d failed (%s: %s), retrying in %.1f s ...",
                         node.name,
                         attempt + 1,
                         retry.max_retries + 1,
@@ -236,17 +227,21 @@ class DAGExecutor:
                         exc,
                         delay,
                     )
-                    self._emit(NodeResult(
-                        node_name=node.name, status=NodeStatus.RETRYING,
-                        attempts=attempt + 1, error=exc,
-                    ))
+                    self._emit(
+                        NodeResult(
+                            node_name=node.name,
+                            status=NodeStatus.RETRYING,
+                            attempts=attempt + 1,
+                            error=exc,
+                        )
+                    )
                     await asyncio.sleep(delay)
 
             # ---- 5. All retries exhausted ----
             logger.error(
                 "[%s] FAILED after %d attempt(s): %s: %s",
                 node.name,
-                retry.max_retries + 1,
+                attempt + 1,
                 type(last_error).__name__ if last_error else "?",
                 last_error,
             )
@@ -254,7 +249,7 @@ class DAGExecutor:
                 node_name=node.name,
                 status=NodeStatus.FAILED,
                 error=last_error,
-                attempts=retry.max_retries + 1,
+                attempts=attempt + 1,
             )
         except asyncio.CancelledError:
             result = NodeResult(
@@ -279,7 +274,7 @@ class DAGExecutor:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _call(node: Node, ctx: Dict[str, Any]) -> Any:
+    async def _call(node: Node, ctx: dict[str, Any]) -> Any:
         """Invoke *node.func* with timeout if configured."""
         coro = node.func(ctx)
         if node.timeout is not None:

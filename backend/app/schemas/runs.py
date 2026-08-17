@@ -1,6 +1,6 @@
 """Pydantic 请求/响应模型 — /api/v1/runs 系列"""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -8,10 +8,10 @@ from pydantic import BaseModel
 class RunListItem(BaseModel):
     id: int
     name: str
-    created_at: Optional[str] = None
-    finished_at: Optional[str] = None
+    created_at: str | None = None
+    finished_at: str | None = None
     status: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class NodeSnapshot(BaseModel):
@@ -19,7 +19,7 @@ class NodeSnapshot(BaseModel):
 
     status: str
     output: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     attempts: int = 0
     duration_ms: float = 0
 
@@ -27,12 +27,12 @@ class NodeSnapshot(BaseModel):
 class RunDetail(RunListItem):
     config_file: str
     mermaid: str
-    nodes: Dict[str, NodeSnapshot]
-    reviewing: List[str]
+    nodes: dict[str, NodeSnapshot]
+    reviewing: list[str]
 
 
 class RunListResponse(BaseModel):
-    runs: List[RunListItem]
+    runs: list[RunListItem]
 
 
 class RunCreateResponse(BaseModel):
@@ -41,7 +41,7 @@ class RunCreateResponse(BaseModel):
 
 class ApproveRequest(BaseModel):
     approve: bool
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class ApproveResponse(BaseModel):

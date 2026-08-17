@@ -3,13 +3,14 @@ Core types for the DAG Flow orchestration engine.
 """
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple, Type
+from typing import Any
 
 
 class NodeStatus(Enum):
     """Execution status of a DAG node."""
+
     PENDING = "pending"
     RUNNING = "running"
     REVIEWING = "reviewing"
@@ -37,12 +38,12 @@ class RetryPolicy:
     backoff_base: float = 1.0
     backoff_factor: float = 2.0
     backoff_max: float = 60.0
-    retry_on: Tuple[Type[Exception], ...] = (Exception,)
+    retry_on: tuple[type[Exception], ...] = (Exception,)
     jitter: bool = True
 
     def get_delay(self, attempt: int) -> float:
         """Compute the backoff delay for a given retry attempt (0-indexed)."""
-        delay = self.backoff_base * (self.backoff_factor ** attempt)
+        delay = self.backoff_base * (self.backoff_factor**attempt)
         delay = min(delay, self.backoff_max)
         if self.jitter:
             delay *= 0.5 + random.random()
@@ -71,7 +72,7 @@ class NodeResult:
     node_name: str
     status: NodeStatus
     output: Any = None
-    error: Optional[Exception] = None
+    error: Exception | None = None
     attempts: int = 0
     duration_ms: float = 0.0
 
@@ -87,7 +88,7 @@ class NodeResult:
     def is_skipped(self) -> bool:
         return self.status == NodeStatus.SKIPPED
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """JSON-safe dict (the shape the web UI consumes)."""
         return {
             "status": self.status.value,
@@ -99,17 +100,15 @@ class NodeResult:
 
     def __repr__(self) -> str:
         if self.status == NodeStatus.COMPLETED:
-            return (f"NodeResult({self.node_name!r}, OK, "
-                    f"{self.attempts} attempt(s), {self.duration_ms:.0f}ms)")
+            return f"NodeResult({self.node_name!r}, OK, {self.attempts} attempt(s), {self.duration_ms:.0f}ms)"
         if self.status == NodeStatus.FAILED:
-            return (f"NodeResult({self.node_name!r}, FAILED, "
-                    f"{type(self.error).__name__}: {self.error})")
+            return f"NodeResult({self.node_name!r}, FAILED, {type(self.error).__name__}: {self.error})"
         return f"NodeResult({self.node_name!r}, {self.status.value})"
 
 
 class DAGExecutionError(Exception):
     """Raised when the DAG execution fails (one or more nodes failed)."""
 
-    def __init__(self, message: str, results: Dict[str, NodeResult]):
+    def __init__(self, message: str, results: dict[str, NodeResult]):
         super().__init__(message)
         self.results = results

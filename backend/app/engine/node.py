@@ -2,8 +2,9 @@
 Node definitions for DAG Flow.
 """
 
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+from typing import Any
 
 from .types import RetryPolicy
 
@@ -11,7 +12,7 @@ from .types import RetryPolicy
 NodeFunc = Callable[..., Coroutine[Any, Any, Any]]
 
 #: Signature for a condition predicate: receives context, returns whether to run.
-ConditionFunc = Callable[[Dict[str, Any]], bool]
+ConditionFunc = Callable[[dict[str, Any]], bool]
 
 #: Signature for a human-review approver: receives ``(node_name, payload)``
 #: and returns a decision dict: ``{"approve": bool, "reason": Optional[str]}``.
@@ -42,10 +43,10 @@ class Node:
     name: str
     func: NodeFunc
     depends_on: list[str] = field(default_factory=list)
-    condition: Optional[ConditionFunc] = None
-    retry: Optional[RetryPolicy] = None
-    timeout: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    condition: ConditionFunc | None = None
+    retry: RetryPolicy | None = None
+    timeout: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         deps = ",".join(self.depends_on) if self.depends_on else "root"

@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 
 
 @router.get("/health")
-async def health() -> dict:
+async def health() -> dict[str, str]:
     """探活接口：deploy.sh 轮询它判断服务是否就绪。
 
     DB 不可达时仍返回 200（带降级 payload），避免探活失败导致容器

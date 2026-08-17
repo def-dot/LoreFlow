@@ -9,7 +9,7 @@ Session-per-call helpers for run snapshots and review decisions.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
@@ -38,20 +38,20 @@ async def save(record: RunRecord) -> None:
         await session.commit()
 
 
-async def load() -> Dict[int, RunRecord]:
+async def load() -> dict[int, RunRecord]:
     """All persisted run records, keyed by run id."""
     async with AsyncSessionLocal() as session:
         records = (await session.exec(select(RunRecord))).all()
     return {rec.id: rec for rec in records if rec.id is not None}
 
 
-async def get(run_id: int) -> Optional[RunRecord]:
+async def get(run_id: int) -> RunRecord | None:
     """One run record, or ``None``."""
     async with AsyncSessionLocal() as session:
         return await session.get(RunRecord, run_id)
 
 
-async def save_decision(run_id: int, node_name: str, decision: Dict[str, Any]) -> None:
+async def save_decision(run_id: int, node_name: str, decision: dict[str, Any]) -> None:
     """写入一条审批决策（浏览器答复）。"""
     row = ReviewDecision(
         run_id=run_id,
@@ -65,13 +65,13 @@ async def save_decision(run_id: int, node_name: str, decision: Dict[str, Any]) -
         await session.commit()
 
 
-async def take_decision(run_id: int, node_name: str) -> Optional[Dict[str, Any]]:
+async def take_decision(run_id: int, node_name: str) -> dict[str, Any] | None:
     """取走并删除该节点最近一条决策（审批器轮询消费）。"""
     async with AsyncSessionLocal() as session:
         result = await session.exec(
             select(ReviewDecision)
             .where(ReviewDecision.run_id == run_id, ReviewDecision.node_name == node_name)
-            .order_by(ReviewDecision.id.desc())
+            .order_by(cast(Any, ReviewDecision.id).desc())
         )
         row = result.first()
         if row is None:

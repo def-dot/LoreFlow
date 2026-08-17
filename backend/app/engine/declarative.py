@@ -68,12 +68,14 @@ from __future__ import annotations
 
 import builtins
 import importlib
-from functools import lru_cache
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from functools import cache
+from pathlib import Path
+from typing import Any, cast
 
 from .dag import DAG
 from .node import ApproverFunc, Node
-from .types import RetryPolicy
+from .types import NodeResult, RetryPolicy
 
 _MISSING = object()
 
@@ -89,7 +91,8 @@ _KIND_FIELDS = {
 # Resolvers
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=None)
+
+@cache
 def _import_attr(key: str) -> Any:
     """Resolve a dotted path by importing the longest module prefix and
     walking the remaining attributes. Returns ``_MISSING`` if unresolvable."""
@@ -108,20 +111,20 @@ def _import_attr(key: str) -> Any:
     return _MISSING
 
 
-def _resolve(functions: Any, key: str, what: str = "function") -> Callable:
+def _resolve(functions: Any, key: str, what: str = "function") -> Callable[..., Any]:
     """Look up *key* in a registry (dict or module) or as a dotted path."""
     if functions is not None:
         if isinstance(functions, dict):
             if key in functions:
-                return functions[key]
+                return cast(Callable[..., Any], functions[key])
         else:
             attr = getattr(functions, key, None)
             if attr is not None:
-                return attr
+                return cast(Callable[..., Any], attr)
 
     value = _import_attr(key)
     if value is not _MISSING:
-        return value
+        return cast(Callable[..., Any], value)
 
     if functions is None:
         raise ValueError(
@@ -135,12 +138,12 @@ def _is_exception(obj: Any) -> bool:
     return isinstance(obj, type) and issubclass(obj, BaseException)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _resolve_exception(name: str) -> type:
     """Resolve an exception name like ``RuntimeError`` or ``my_errors.MyError``."""
     value = getattr(builtins, name, None) or _import_attr(name)
     if _is_exception(value):
-        return value
+        return cast(type, value)
     raise ValueError(f"Unknown exception {name!r} in retry_on")
 
 
@@ -148,7 +151,8 @@ def _resolve_exception(name: str) -> type:
 # Public API
 # ---------------------------------------------------------------------------
 
-def _parse_retry(spec: Any) -> Optional[RetryPolicy]:
+
+def _parse_retry(spec: Any) -> RetryPolicy | None:
     """Parse a retry spec: ``retry: 3`` or a RetryPolicy field mapping."""
     if spec is None:
         return None
@@ -167,10 +171,10 @@ def _parse_retry(spec: Any) -> Optional[RetryPolicy]:
 
 
 def build_dag(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     functions: Any = None,
-    approver: Optional[ApproverFunc] = None,
-    on_event: Optional[Callable] = None,
+    approver: ApproverFunc | None = None,
+    on_event: Callable[[NodeResult], None] | None = None,
 ) -> DAG:
     """Build a :class:`DAG` from a declarative config dict.
 
@@ -189,21 +193,15 @@ def build_dag(
 
     for name, spec in (config.get("nodes") or {}).items():
         if not isinstance(spec, dict):
-            raise ValueError(
-                f"Node {name!r}: spec must be a mapping, got {type(spec).__name__}"
-            )
+            raise ValueError(f"Node {name!r}: spec must be a mapping, got {type(spec).__name__}")
 
         kind = spec.get("kind", "node")
         allowed = _KIND_FIELDS.get(kind)
         if allowed is None:
-            raise ValueError(
-                f"Node {name!r}: unknown kind {kind!r} (expected node|human|loop)"
-            )
+            raise ValueError(f"Node {name!r}: unknown kind {kind!r} (expected node|human|loop)")
         unknown = set(spec) - {"kind"} - allowed
         if unknown:
-            raise ValueError(
-                f"Node {name!r} ({kind}): unsupported field(s) {sorted(unknown)}"
-            )
+            raise ValueError(f"Node {name!r} ({kind}): unsupported field(s) {sorted(unknown)}")
 
         deps = spec.get("depends_on") or []
         retry = _parse_retry(spec.get("retry"))
@@ -240,28 +238,29 @@ def build_dag(
             if "type" not in spec:
                 raise ValueError(f"Node {name!r} requires a 'type' (function key)")
             condition = spec.get("condition")
-            dag.add_node(Node(
-                name=name,
-                func=_resolve(functions, spec["type"], f"node {name!r} type"),
-                depends_on=deps,
-                retry=retry,
-                timeout=spec.get("timeout"),
-                condition=_resolve(functions, condition, f"node {name!r} condition")
-                if condition else None,
-                metadata=spec.get("metadata") or {},
-            ))
+            dag.add_node(
+                Node(
+                    name=name,
+                    func=_resolve(functions, spec["type"], f"node {name!r} type"),
+                    depends_on=deps,
+                    retry=retry,
+                    timeout=spec.get("timeout"),
+                    condition=_resolve(functions, condition, f"node {name!r} condition") if condition else None,
+                    metadata=spec.get("metadata") or {},
+                )
+            )
 
     errors = dag.validate()
     if errors:
-        raise ValueError(f"Invalid DAG config:\n  " + "\n  ".join(errors))
+        raise ValueError("Invalid DAG config:\n  " + "\n  ".join(errors))
     return dag
 
 
 def load_dag(
-    path: str,
+    path: str | Path,
     functions: Any = None,
-    approver: Optional[ApproverFunc] = None,
-    on_event: Optional[Callable] = None,
+    approver: ApproverFunc | None = None,
+    on_event: Callable[[NodeResult], None] | None = None,
 ) -> DAG:
     """Load a YAML file and build the DAG from it (requires PyYAML).
 
@@ -274,6 +273,6 @@ def load_dag(
     except ImportError as exc:
         raise ImportError("load_dag requires PyYAML — run: pip install pyyaml") from exc
 
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         config = yaml.safe_load(fh)
     return build_dag(config, functions, approver=approver, on_event=on_event)
