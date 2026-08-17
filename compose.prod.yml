@@ -1,0 +1,39 @@
+# 生产编排（叠加在 compose.yml 之上）：
+#   docker compose -f compose.yml -f compose.prod.yml up -d
+# 手动部署： bash deploy.sh
+services:
+  db:
+    ports: !override []
+
+  backend:
+    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: ${DOCKER_FRONTEND_REPOSITORY}:${DOCKER_FRONTEND_TAG}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  db_migrate:
+    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: alembic upgrade head
+    profiles:
+      - migrate
