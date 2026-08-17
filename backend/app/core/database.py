@@ -11,8 +11,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.models.run import ReviewDecision, RunRecord
