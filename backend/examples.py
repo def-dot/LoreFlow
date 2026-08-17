@@ -3,7 +3,7 @@ Examples demonstrating all features of DAG Flow.
 
 Run this file directly to see the engine in action::
 
-    python -m dag_flow.examples
+    uv run python examples.py
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import asyncio
 import logging
 import random
 import time
-from pathlib import Path
 from typing import Any, Dict
 
 # ---------------------------------------------------------------------------
@@ -24,9 +23,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from . import DAG, DAGExecutionError, Node, RetryPolicy, load_dag, terminal_approver
-
-from demo_functions import FUNCTIONS
+from app.demo import FUNCTIONS, PIPELINE_PATH
+from app.engine import DAG, DAGExecutionError, Node, RetryPolicy, load_dag, terminal_approver
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helper
@@ -473,10 +471,10 @@ async def demo_yaml_config():
     print("  9. YAML CONFIG  (declarative wiring)")
     print("=" * 60)
 
-    # Functions live in demo_functions.py (shared with web.py);
+    # Functions live in app/demo/functions.py (shared with app/main.py);
     # everything about the wiring lives in pipeline.yaml.
     dag = load_dag(
-        Path(__file__).parent / "pipeline.yaml",
+        PIPELINE_PATH,
         functions=FUNCTIONS,
         approver=terminal_approver,
     )

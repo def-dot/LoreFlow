@@ -1,5 +1,5 @@
 """
-DAG Flow — Async DAG-based workflow orchestration engine.
+DAG Flow engine — async DAG-based workflow orchestration.
 
 Supports:
 - **Serial** execution: dependency chains (A → B → C)
@@ -8,10 +8,12 @@ Supports:
 - **Looping**: iterate a sub-DAG until a condition is met
 - **Retry**: configurable exponential backoff with jitter
 - **Timeout**: per-node execution deadline
+- **Human review**: human-in-the-loop approval nodes
+- **Declarative config**: build DAGs from YAML/JSON
 
 Quick start::
 
-    from dag_flow import DAG, RetryPolicy
+    from app.engine import DAG, RetryPolicy
 
     dag = DAG("pipeline")
 
@@ -27,10 +29,10 @@ Quick start::
     print(results["process"].output)
 """
 
-from .config import build_dag, load_dag
 from .dag import DAG, terminal_approver
+from .declarative import build_dag, load_dag
 from .node import HumanRejected, Node
-from .schems import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
+from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
 
 __all__ = [
     "DAG",

@@ -5,7 +5,7 @@ Node definitions for DAG Flow.
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
 
-from schems import RetryPolicy
+from .types import RetryPolicy
 
 #: Signature for a node's async function: receives the shared context dict, returns anything.
 NodeFunc = Callable[..., Coroutine[Any, Any, Any]]

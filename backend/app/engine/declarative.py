@@ -30,7 +30,7 @@ Example YAML::
 
 Usage::
 
-    from dag_flow import load_dag, terminal_approver
+    from app.engine import load_dag, terminal_approver
 
     dag = load_dag("pipeline.yaml", functions={
         "cfg_fetch": fetch_func,
@@ -71,9 +71,9 @@ import importlib
 from functools import lru_cache
 from typing import Any, Callable, Dict, Optional
 
-from dag import DAG
-from node import ApproverFunc, Node
-from schems import RetryPolicy
+from .dag import DAG
+from .node import ApproverFunc, Node
+from .types import RetryPolicy
 
 _MISSING = object()
 
@@ -175,7 +175,7 @@ def build_dag(
     """Build a :class:`DAG` from a declarative config dict.
 
     ``kind: human`` nodes require *approver* — e.g.
-    :func:`dag.terminal_approver`. The finished graph is validated
+    :func:`app.engine.terminal_approver`. The finished graph is validated
     (missing dependencies, cycles) before returning.
     """
     if not isinstance(config, dict):

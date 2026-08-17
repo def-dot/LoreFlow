@@ -15,8 +15,8 @@ import logging
 import time
 from typing import Any, Callable, Dict, Optional
 
-from node import Node
-from schems import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
+from .node import Node
+from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
