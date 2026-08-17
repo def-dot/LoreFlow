@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.eggs/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/node_modules/
+
+# 环境（.env 由 dev.sh / deploy.sh 从 .env.dev / .env.prod 生成）
+.env
+.env.local
+
+# 运行时产物
+logs/
+postgres/backup/*.sql.gz
+
+# 工具
+.claude/
+.deepeval/
+.idea/
+.vscode/
