@@ -1,5 +1,3 @@
-# 开发基础设施（数据库等）。应用服务本身在本地跑（dev.sh），
-# 生产编排见 compose.prod.yml（与 docker compose -f 叠加使用）。
 services:
   db:
     image: postgres:16-alpine

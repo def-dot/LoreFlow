@@ -1,4 +1,3 @@
-# 开发附加工具（docker compose up 时自动生效；deploy.sh 显式指定 -f 不会加载）
 services:
   adminer:
     image: adminer
