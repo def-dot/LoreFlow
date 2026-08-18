@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.engine import DAG
+from app.engine import DAG, NodeStatus
 
 
 async def test_condition_false_skips_node() -> None:
@@ -25,9 +25,9 @@ async def test_condition_false_skips_node() -> None:
         return "notified"
 
     results = await dag.run()
-    assert results["premium_flow"].is_skipped
+    assert results["premium_flow"].status == NodeStatus.SKIPPED
     # 跳过不等于失败——下游依赖的是完成事件，照常执行
-    assert results["notify"].is_success
+    assert results["notify"].status == NodeStatus.COMPLETED
 
 
 async def test_condition_true_runs_node() -> None:
@@ -46,7 +46,7 @@ async def test_condition_true_runs_node() -> None:
         return "premium"
 
     results = await dag.run()
-    assert results["premium_flow"].is_success
+    assert results["premium_flow"].status == NodeStatus.COMPLETED
 
 
 async def test_condition_raising_skips_node() -> None:
@@ -60,4 +60,4 @@ async def test_condition_raising_skips_node() -> None:
         return "ran"
 
     results = await dag.run()
-    assert results["maybe"].is_skipped
+    assert results["maybe"].status == NodeStatus.SKIPPED

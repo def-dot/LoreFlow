@@ -76,18 +76,6 @@ class NodeResult:
     attempts: int = 0
     duration_ms: float = 0.0
 
-    @property
-    def is_success(self) -> bool:
-        return self.status == NodeStatus.COMPLETED
-
-    @property
-    def is_failed(self) -> bool:
-        return self.status == NodeStatus.FAILED
-
-    @property
-    def is_skipped(self) -> bool:
-        return self.status == NodeStatus.SKIPPED
-
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe dict (the shape the web UI consumes)."""
         return {

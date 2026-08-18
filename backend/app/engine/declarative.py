@@ -32,18 +32,14 @@ Usage::
 
     from app.engine import load_dag, terminal_approver
 
-    dag = load_dag("pipeline.yaml", functions={
-        "cfg_fetch": fetch_func,
-        "cfg_clean": clean_func,
-        "cfg_publish": publish_func,
-    }, approver=terminal_approver)
+    # ``type``/``condition`` 键必须是 app.registry 中注册过的名字:
+    dag = load_dag("pipeline.yaml", approver=terminal_approver)
     results = await dag.run()   # uses dag.default_inputs from the YAML
 
 Node spec fields
 ----------------
 kind            ``node`` (default) | ``human`` | ``loop``
-type            function key looked up in *functions* (dict or module);
-                dotted paths like ``"my_nodes.fetchers.fetch_users"`` work too
+type            function key registered in *app.registry*;
 depends_on      list of upstream node names
 retry           int (max_retries shorthand) or a RetryPolicy field mapping:
                 max_retries, backoff_base, backoff_factor, backoff_max,
@@ -66,18 +62,14 @@ inputs          initial context passed to :meth:`DAG.run`; stored on the
 
 from __future__ import annotations
 
-import builtins
-import importlib
-from collections.abc import Callable
-from functools import cache
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
+
+from app.registry import resolve_function
 
 from .dag import DAG
-from .node import ApproverFunc, Node
-from .types import NodeResult, RetryPolicy
-
-_MISSING = object()
+from .node import ApproverFunc, Node, NodeEventFunc
+from .resolve import parse_retry
 
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
@@ -87,103 +79,34 @@ _KIND_FIELDS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Resolvers
-# ---------------------------------------------------------------------------
+def _load_yaml(path: str | Path) -> Any:
+    """Read and parse a YAML config file (requires PyYAML)."""
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ImportError("从文件加载 DAG 需要 PyYAML —— 请运行: pip install pyyaml") from exc
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+    except OSError as exc:
+        raise ValueError(f"无法读取配置文件 {path!r}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"配置文件 {path!r} 的 YAML 无效: {exc}") from exc
 
 
-@cache
-def _import_attr(key: str) -> Any:
-    """Resolve a dotted path by importing the longest module prefix and
-    walking the remaining attributes. Returns ``_MISSING`` if unresolvable."""
-    parts = key.split(".")
-    for i in range(len(parts), 0, -1):
-        try:
-            value: Any = importlib.import_module(".".join(parts[:i]))
-        except ImportError:
-            continue
-        try:
-            for part in parts[i:]:
-                value = getattr(value, part)
-        except AttributeError:
-            continue
-        return value
-    return _MISSING
-
-
-def _resolve(functions: Any, key: str, what: str = "function") -> Callable[..., Any]:
-    """Look up *key* in a registry (dict or module) or as a dotted path."""
-    if functions is not None:
-        if isinstance(functions, dict):
-            if key in functions:
-                return cast(Callable[..., Any], functions[key])
-        else:
-            attr = getattr(functions, key, None)
-            if attr is not None:
-                return cast(Callable[..., Any], attr)
-
-    value = _import_attr(key)
-    if value is not _MISSING:
-        return cast(Callable[..., Any], value)
-
-    if functions is None:
-        raise ValueError(
-            f"Config references {what} {key!r} but no functions registry "
-            f"was provided — pass functions=<dict or module> to load_dag"
-        )
-    raise ValueError(f"Unknown {what} {key!r} — register it in the functions dict/module")
-
-
-def _is_exception(obj: Any) -> bool:
-    return isinstance(obj, type) and issubclass(obj, BaseException)
-
-
-@cache
-def _resolve_exception(name: str) -> type:
-    """Resolve an exception name like ``RuntimeError`` or ``my_errors.MyError``."""
-    value = getattr(builtins, name, None) or _import_attr(name)
-    if _is_exception(value):
-        return cast(type, value)
-    raise ValueError(f"Unknown exception {name!r} in retry_on")
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def _parse_retry(spec: Any) -> RetryPolicy | None:
-    """Parse a retry spec: ``retry: 3`` or a RetryPolicy field mapping."""
-    if spec is None:
-        return None
-    if isinstance(spec, int):
-        return RetryPolicy(max_retries=spec)
-    if not isinstance(spec, dict):
-        raise ValueError(f"Invalid retry spec: {spec!r} (use an int or a mapping)")
-
-    fields = dict(spec)
-    names = fields.pop("retry_on", None)
-    if names:
-        if isinstance(names, str):
-            names = [names]
-        fields["retry_on"] = tuple(_resolve_exception(n) for n in names)
-    return RetryPolicy(**fields)
-
-
-def build_dag(
-    config: dict[str, Any],
-    functions: Any = None,
+def load_dag(
+    source: str | Path | dict[str, Any],
     approver: ApproverFunc | None = None,
-    on_event: Callable[[NodeResult], None] | None = None,
+    on_event: NodeEventFunc | None = None,
 ) -> DAG:
-    """Build a :class:`DAG` from a declarative config dict.
-
-    ``kind: human`` nodes require *approver* — e.g.
-    :func:`app.engine.terminal_approver`. The finished graph is validated
-    (missing dependencies, cycles) before returning.
+    """Build a :class:`DAG` from a config dict or a YAML/JSON file path.
     """
-    if not isinstance(config, dict):
-        raise ValueError(f"Config must be a dict, got {type(config).__name__}")
+    if isinstance(source, dict):
+        config = source
+    elif isinstance(source, (str, Path)):
+        config = _load_yaml(source)
+    else:
+        raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 
     dag = DAG(
         config.get("name", "dag"),
@@ -193,18 +116,18 @@ def build_dag(
 
     for name, spec in (config.get("nodes") or {}).items():
         if not isinstance(spec, dict):
-            raise ValueError(f"Node {name!r}: spec must be a mapping, got {type(spec).__name__}")
+            raise ValueError(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
 
         kind = spec.get("kind", "node")
         allowed = _KIND_FIELDS.get(kind)
         if allowed is None:
-            raise ValueError(f"Node {name!r}: unknown kind {kind!r} (expected node|human|loop)")
+            raise ValueError(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
         unknown = set(spec) - {"kind"} - allowed
         if unknown:
-            raise ValueError(f"Node {name!r} ({kind}): unsupported field(s) {sorted(unknown)}")
+            raise ValueError(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
 
         deps = spec.get("depends_on") or []
-        retry = _parse_retry(spec.get("retry"))
+        retry = parse_retry(spec.get("retry"))
 
         if kind == "human":
             dag.human_node(
@@ -218,16 +141,16 @@ def build_dag(
         elif kind == "loop":
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
-                raise ValueError(f"Loop node {name!r} requires a non-empty 'body' mapping")
+                raise ValueError(f"循环节点 {name!r} 需要非空的 'body' 映射")
             if not spec.get("condition"):
-                raise ValueError(f"Loop node {name!r} requires a 'condition' function key")
+                raise ValueError(f"循环节点 {name!r} 需要 'condition' 函数键")
 
             # Body nodes go through the same parsing path as top-level nodes.
-            body_dag = build_dag({"nodes": body}, functions, approver=approver)
+            body_dag = load_dag({"nodes": body}, approver=approver)
             dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
-                condition=_resolve(functions, spec["condition"], f"loop {name!r} condition"),
+                condition=resolve_function(spec["condition"], f"循环 {name!r} 的条件"),
                 depends_on=deps,
                 max_iterations=int(spec.get("max_iterations", 100)),
                 retry=retry,
@@ -236,43 +159,21 @@ def build_dag(
 
         else:
             if "type" not in spec:
-                raise ValueError(f"Node {name!r} requires a 'type' (function key)")
+                raise ValueError(f"节点 {name!r} 需要 'type'（函数键）")
             condition = spec.get("condition")
             dag.add_node(
                 Node(
                     name=name,
-                    func=_resolve(functions, spec["type"], f"node {name!r} type"),
+                    func=resolve_function(spec["type"], f"节点 {name!r} 的类型"),
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
-                    condition=_resolve(functions, condition, f"node {name!r} condition") if condition else None,
+                    condition=resolve_function(condition, f"节点 {name!r} 的条件") if condition else None,
                     metadata=spec.get("metadata") or {},
                 )
             )
 
     errors = dag.validate()
     if errors:
-        raise ValueError("Invalid DAG config:\n  " + "\n  ".join(errors))
+        raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
     return dag
-
-
-def load_dag(
-    path: str | Path,
-    functions: Any = None,
-    approver: ApproverFunc | None = None,
-    on_event: Callable[[NodeResult], None] | None = None,
-) -> DAG:
-    """Load a YAML file and build the DAG from it (requires PyYAML).
-
-    *approver* is passed to every ``kind: human`` node (see
-    :func:`build_dag`); *on_event* is attached to the DAG (see
-    :class:`dag.DAG`).
-    """
-    try:
-        import yaml
-    except ImportError as exc:
-        raise ImportError("load_dag requires PyYAML — run: pip install pyyaml") from exc
-
-    with open(path, encoding="utf-8") as fh:
-        config = yaml.safe_load(fh)
-    return build_dag(config, functions, approver=approver, on_event=on_event)

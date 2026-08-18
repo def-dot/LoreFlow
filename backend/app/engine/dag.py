@@ -24,13 +24,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import pprint
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
-from .types import DAGExecutionError, NodeResult, RetryPolicy
+from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -64,16 +64,16 @@ class DAG:
         name: A human-readable label for this workflow (used in logs & diagrams).
         default_inputs: Initial context applied when :meth:`run` is called
                         without explicit ``inputs``.
-        on_event: Optional callback invoked on every node state change
-                  (running/retrying/completed/failed/skipped/cancelled).
-                  Useful for live progress monitoring (e.g. a web UI).
+        on_event: Optional async callback invoked on every node state change
+                  (running/retrying/completed/failed/skipped/cancelled) and
+                  awaited. Useful for live progress monitoring (e.g. a web UI).
     """
 
     def __init__(
         self,
         name: str = "dag",
         default_inputs: dict[str, Any] | None = None,
-        on_event: Callable[[NodeResult], None] | None = None,
+        on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
     ):
         self.name = name
         self.default_inputs = default_inputs if default_inputs else {}
@@ -91,7 +91,7 @@ class DAG:
             ValueError: If a node with the same name already exists.
         """
         if node.name in self._nodes:
-            raise ValueError(f"Duplicate node name: {node.name!r}")
+            raise ValueError(f"节点名重复: {node.name!r}")
         self._nodes[node.name] = node
         return node
 
@@ -163,7 +163,7 @@ class DAG:
             The registered loop :class:`Node`.
         """
         if not body_nodes:
-            raise ValueError(f"Loop node {name!r} requires at least one body node")
+            raise ValueError(f"循环节点 {name!r} 至少需要一个 body 节点")
 
         # Build the sub-DAG
         sub = DAG(f"{name}_body")
@@ -185,7 +185,7 @@ class DAG:
 
                 # Merge successful outputs into context
                 for nname, nr in iter_results.items():
-                    if nr.is_success:
+                    if nr.status == NodeStatus.COMPLETED:
                         ctx[nname] = nr.output
 
                 # Evaluate loop condition
@@ -258,7 +258,7 @@ class DAG:
             ValueError: If *approver* is not provided.
         """
         if approver is None:
-            raise ValueError(f"Human node {name!r} requires an approver — pass approver=..., e.g. terminal_approver")
+            raise ValueError(f"人工审核节点 {name!r} 必须提供 approver —— 例如 terminal_approver")
 
         async def review_func(ctx: dict[str, Any]) -> dict[str, Any]:
             # Snapshot of everything available for review at this point.
@@ -278,7 +278,7 @@ class DAG:
                     "approved_at": datetime.now().isoformat(timespec="seconds"),
                 }
 
-            reason = decision.get("reason") or "Rejected by human reviewer"
+            reason = decision.get("reason") or "被人工审核拒绝"
             logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
             raise HumanRejected(reason)
 
@@ -301,7 +301,7 @@ class DAG:
         errors: list[str] = []
 
         if not self._nodes:
-            errors.append("DAG has no nodes")
+            errors.append("DAG 没有节点")
             return errors
 
         all_names = set(self._nodes)
@@ -310,13 +310,13 @@ class DAG:
         for node in self._nodes.values():
             for dep in node.depends_on:
                 if dep not in all_names:
-                    errors.append(f"Node {node.name!r} depends on {dep!r}, which does not exist in the DAG")
+                    errors.append(f"节点 {node.name!r} 依赖的 {dep!r} 不在 DAG 中")
 
         # Cycle detection (only if no missing-dependency errors)
         if not errors:
             cycle = self._find_cycle()
             if cycle:
-                errors.append(f"Cycle detected: {' → '.join(cycle)}")
+                errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
 
         return errors
 
@@ -410,7 +410,7 @@ class DAG:
         """
         errors = self.validate()
         if errors:
-            raise ValueError(f"DAG {self.name!r} validation failed:\n  " + "\n  ".join(errors))
+            raise ValueError(f"DAG {self.name!r} 校验失败:\n  " + "\n  ".join(errors))
 
         if inputs is None:
             inputs = self.default_inputs

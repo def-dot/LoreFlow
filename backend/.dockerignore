@@ -8,7 +8,6 @@ __pycache__/
 .coverage
 htmlcov/
 tests/
-examples.py
 logs/
 .git/
 .github/

@@ -2,11 +2,11 @@
 Node definitions for DAG Flow.
 """
 
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
-from .types import RetryPolicy
+from .types import NodeResult, RetryPolicy
 
 #: Signature for a node's async function: receives the shared context dict, returns anything.
 NodeFunc = Callable[..., Coroutine[Any, Any, Any]]
@@ -16,7 +16,10 @@ ConditionFunc = Callable[[dict[str, Any]], bool]
 
 #: Signature for a human-review approver: receives ``(node_name, payload)``
 #: and returns a decision dict: ``{"approve": bool, "reason": Optional[str]}``.
-ApproverFunc = Callable[..., Coroutine[Any, Any, Any]]
+ApproverFunc = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+#: Signature for a node event listener: receives the finished NodeResult, returns nothing.
+NodeEventFunc = Callable[[NodeResult], Awaitable[None]]
 
 
 class HumanRejected(Exception):

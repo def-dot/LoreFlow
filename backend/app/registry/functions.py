@@ -1,9 +1,8 @@
 """
-Function implementations for pipeline.yaml.
+节点函数实现 — 注册表（app.registry）里的实际工作逻辑。
 
-The orchestration lives in pipeline.yaml; these are the pieces of actual
-work it references. Shared by examples.py (demo_yaml_config) and the web
-app (app/main.py), so both frontends run the exact same pipeline.
+编排结构在 YAML（如 app/demo/pipeline.yaml）声明；这些函数是
+YAML 里 type:/condition: 引用的实现。
 """
 
 from __future__ import annotations
@@ -41,15 +40,3 @@ def cfg_needs_report(ctx: dict[str, Any]) -> bool:
 
 async def cfg_report(ctx: dict[str, Any]) -> str:
     return f"Report generated for {ctx['merge']['title']}"
-
-
-#: Registry passed to load_dag("pipeline.yaml", functions=FUNCTIONS)
-FUNCTIONS = {
-    "cfg_fetch": cfg_fetch,
-    "cfg_clean": cfg_clean,
-    "cfg_enrich": cfg_enrich,
-    "cfg_merge": cfg_merge,
-    "cfg_publish": cfg_publish,
-    "cfg_needs_report": cfg_needs_report,
-    "cfg_report": cfg_report,
-}

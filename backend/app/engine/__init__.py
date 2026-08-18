@@ -30,7 +30,7 @@ Quick start::
 """
 
 from .dag import DAG, terminal_approver
-from .declarative import build_dag, load_dag
+from .declarative import load_dag
 from .node import HumanRejected, Node
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
 
@@ -42,7 +42,6 @@ __all__ = [
     "NodeResult",
     "NodeStatus",
     "RetryPolicy",
-    "build_dag",
     "load_dag",
     "terminal_approver",
 ]

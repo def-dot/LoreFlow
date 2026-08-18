@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, RetryPolicy
+from app.engine import DAG, DAGExecutionError, NodeStatus, RetryPolicy
 
 
 async def test_retry_then_success() -> None:
@@ -21,7 +21,7 @@ async def test_retry_then_success() -> None:
 
     results = await dag.run()
     assert calls["n"] == 3
-    assert results["flaky"].is_success
+    assert results["flaky"].status == NodeStatus.COMPLETED
     assert results["flaky"].attempts == 3
 
 
@@ -38,7 +38,7 @@ async def test_retry_on_filters_exceptions() -> None:
     with pytest.raises(DAGExecutionError) as excinfo:
         await dag.run()
     result = excinfo.value.results["boom"]
-    assert result.is_failed
+    assert result.status == NodeStatus.FAILED
     assert result.attempts == 1  # ValueError 不在 retry_on，不重试
     assert isinstance(result.error, ValueError)
 

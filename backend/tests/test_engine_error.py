@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, Node
+from app.engine import DAG, DAGExecutionError, Node, NodeStatus
 
 
 async def noop(ctx: dict[str, Any]) -> str:
@@ -29,10 +29,10 @@ async def test_failure_records_error_and_skips_downstream() -> None:
     with pytest.raises(DAGExecutionError) as excinfo:
         await dag.run()
     results = excinfo.value.results
-    assert results["critical"].is_failed
+    assert results["critical"].status == NodeStatus.FAILED
     assert isinstance(results["critical"].error, ConnectionError)
-    assert results["dependant"].is_skipped
-    assert results["independent"].is_success
+    assert results["dependant"].status == NodeStatus.SKIPPED
+    assert results["independent"].status == NodeStatus.COMPLETED
 
 
 async def test_missing_dependency_rejected() -> None:
@@ -46,20 +46,20 @@ async def test_cycle_rejected() -> None:
     dag = DAG("cycle")
     dag.add_node(Node(name="a", func=noop, depends_on=["b"]))
     dag.add_node(Node(name="b", func=noop, depends_on=["a"]))
-    with pytest.raises(ValueError, match="Cycle detected"):
+    with pytest.raises(ValueError, match="循环依赖"):
         await dag.run()
 
 
 async def test_empty_dag_rejected() -> None:
     dag = DAG("empty")
-    with pytest.raises(ValueError, match="no nodes"):
+    with pytest.raises(ValueError, match="没有节点"):
         await dag.run()
 
 
 async def test_duplicate_node_name_rejected() -> None:
     dag = DAG("dup")
     dag.add_node(Node(name="a", func=noop))
-    with pytest.raises(ValueError, match="Duplicate node name"):
+    with pytest.raises(ValueError, match="节点名重复"):
         dag.add_node(Node(name="a", func=noop))
 
 

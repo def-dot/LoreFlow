@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, Node, RetryPolicy
+from app.engine import DAG, DAGExecutionError, Node, NodeStatus, RetryPolicy
 
 
 async def test_serial_chain() -> None:
@@ -24,7 +24,7 @@ async def test_serial_chain() -> None:
         return f"finalized({ctx['B']})"
 
     results = await dag.run()
-    assert results["A"].is_success
+    assert results["A"].status == NodeStatus.COMPLETED
     assert results["C"].output == "finalized(processed(data_from_A))"
 
 
@@ -63,7 +63,7 @@ async def test_parallel_fanout() -> None:
         return "|".join(ctx[n] for n in ("b", "c", "d"))
 
     results = await dag.run()
-    assert results["join"].is_success
+    assert results["join"].status == NodeStatus.COMPLETED
     assert max_active >= 3  # b/c/d 确实并发执行
 
 
@@ -99,7 +99,7 @@ async def test_timeout_fails_node() -> None:
 
     with pytest.raises(DAGExecutionError) as excinfo:
         await dag.run()
-    assert excinfo.value.results["slow"].is_failed
+    assert excinfo.value.results["slow"].status == NodeStatus.FAILED
     assert isinstance(excinfo.value.results["slow"].error, TimeoutError)
 
 
@@ -125,7 +125,7 @@ async def test_resume_skips_completed_nodes() -> None:
     )
     assert calls["done_node"] == 0
     assert results["after"].output == "cached"
-    assert results["done_node"].is_success
+    assert results["done_node"].status == NodeStatus.COMPLETED
 
 
 async def test_default_inputs_applied() -> None:

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.engine import DAG, Node
+from app.engine import DAG, Node, NodeStatus
 
 
 async def test_loop_until_condition() -> None:
@@ -32,7 +32,7 @@ async def test_loop_until_condition() -> None:
     )
 
     results = await dag.run()
-    assert results["batch"].is_success
+    assert results["batch"].status == NodeStatus.COMPLETED
     # 最后一次迭代的 process_one 结果已合并进上下文
     assert results["batch"].output["process_one"] == "c"
     assert results["batch"].output["advance"]["idx"] == 3
@@ -52,7 +52,7 @@ async def test_loop_max_iterations_cap() -> None:
     )
 
     results = await dag.run()
-    assert results["loop"].is_success
+    assert results["loop"].status == NodeStatus.COMPLETED
     assert results["loop"].output["tick"] == 3
 
 
@@ -77,7 +77,7 @@ async def test_loop_body_failure_continues() -> None:
     )
 
     results = await dag.run()
-    assert results["loop"].is_success
+    assert results["loop"].status == NodeStatus.COMPLETED
     assert results["loop"].output["count"] == 2
 
 

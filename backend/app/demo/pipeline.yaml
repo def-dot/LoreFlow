@@ -1,10 +1,10 @@
 # DAG Flow — declarative pipeline example.
 #
-# 节点函数在 Python 侧注册(见 app/demo/functions.py 的 FUNCTIONS),
+# 节点函数在 Python 侧注册(见 app/registry 的 NODE_TYPES),
 # 这个文件只声明编排结构:依赖、重试、条件分支、人工审核。
 #
-# 加载方式:
-#     dag = load_dag("pipeline.yaml", functions=FUNCTIONS)
+# 加载方式(functions 省略时默认用系统注册表 app.registry):
+#     dag = load_dag("pipeline.yaml")
 #     results = await dag.run(dag.default_inputs or None)
 
 name: content_pipeline

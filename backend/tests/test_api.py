@@ -72,6 +72,23 @@ async def test_health(client: AsyncClient) -> None:
     assert resp.json() == {"status": "ok", "database": "ok"}
 
 
+async def test_node_types_catalog(client: AsyncClient) -> None:
+    """注册表目录：枚举全部类型，条件谓词单独成类，不含函数实现。"""
+    resp = await client.get("/api/v1/node-types")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 200 and body["msg"] == "ok"
+
+    types = body["data"]["node_types"]
+    names = {t["name"] for t in types}
+    expected = {"cfg_fetch", "cfg_clean", "cfg_enrich", "cfg_merge", "cfg_publish", "cfg_report", "cfg_needs_report"}
+    assert expected <= names
+    assert set(types[0]) == {"name", "kind", "label", "description"}
+
+    conditions = [t["name"] for t in types if t["kind"] == "condition"]
+    assert conditions == ["cfg_needs_report"]
+
+
 async def test_run_lifecycle_approve(client: AsyncClient) -> None:
     resp = await client.post("/api/v1/runs")
     assert resp.status_code == 201
@@ -124,14 +141,14 @@ async def test_unknown_run_404(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/runs/99999")
     assert resp.status_code == 404
     body = resp.json()
-    assert body["code"] == 404 and body["msg"] == "Unknown run 99999" and body["data"] is None
+    assert body["code"] == 404 and body["msg"] == "运行 99999 不存在" and body["data"] is None
 
 
 async def test_approve_non_reviewing_node_404(client: AsyncClient) -> None:
     run_id = await _create_and_approve(client)
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/publish", json={"approve": True})
     assert resp.status_code == 404
-    assert "not awaiting review" in resp.json()["msg"]
+    assert "不在等待审核" in resp.json()["msg"]
 
 
 async def test_validation_error_422(client: AsyncClient) -> None:

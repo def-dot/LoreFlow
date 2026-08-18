@@ -7,15 +7,14 @@ Run 编排服务 — approver/事件落库/执行/重启恢复。
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 from app.core import database
 from app.core.logging import get_logger
-from app.demo import FUNCTIONS, PIPELINE_PATH
+from app.demo import PIPELINE_PATH
 from app.engine import DAG, NodeResult, NodeStatus, load_dag
-from app.engine.node import ApproverFunc
+from app.engine.node import ApproverFunc, NodeEventFunc
 from app.models.run import RunRecord
 
 logger = get_logger(__name__)
@@ -28,12 +27,11 @@ def make_approver(record: RunRecord) -> ApproverFunc:
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
         entry["status"] = NodeStatus.REVIEWING.value
+        entry["payload"] = payload
         await database.save(record)
-        assert record.id is not None  # create_run 已先落库拿到自增 id
-        run_id = record.id
         while True:
             await asyncio.sleep(0.3)
-            decision = await database.take_decision(run_id, node_name)
+            decision = await database.take_decision(record.id, node_name)
             if decision is not None:
                 entry["status"] = NodeStatus.RUNNING.value
                 await database.save(record)
@@ -42,24 +40,16 @@ def make_approver(record: RunRecord) -> ApproverFunc:
     return approver
 
 
-def make_event_sink(record: RunRecord) -> Callable[[NodeResult], None]:
+def make_event_sink(record: RunRecord) -> NodeEventFunc:
     """Build the on_event sink for one run: 节点状态变化写进快照并落库。
-
-    落库走 fire-and-forget 任务，done-callback 记录异常（否则失败静默）；
-    终态由 run_pipeline 的 finally 保证落库。
     """
 
-    def _log_save_error(task: asyncio.Task[None]) -> None:
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            logger.error("Failed to save run snapshot: %s", exc)
-
-    def on_event(result: NodeResult) -> None:
+    async def on_event(result: NodeResult) -> None:
         record.nodes[result.node_name] = result.to_dict()
-        task = asyncio.create_task(database.save(record))
-        task.add_done_callback(_log_save_error)
+        try:
+            await database.save(record)
+        except Exception as exc:
+            logger.error("Failed to save run snapshot: %s", exc)
 
     return on_event
 
@@ -85,9 +75,6 @@ async def run_pipeline(
 
 async def create_run() -> int:
     """校验配置并落库一个新 run，返回 run_id。
-
-    先 load_dag（构建失败抛 ValueError，路由层转 400），通过后才落库——
-    配置错误不产生垃圾 run 记录。随后在后台任务中执行 pipeline。
     """
     record = RunRecord(
         name=PIPELINE_PATH.name,
@@ -98,7 +85,6 @@ async def create_run() -> int:
     )
     dag = load_dag(
         PIPELINE_PATH,
-        functions=FUNCTIONS,
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
@@ -107,7 +93,6 @@ async def create_run() -> int:
     record.mermaid = dag.to_mermaid()
     await database.save(record)
     asyncio.create_task(run_pipeline(record, dag))
-    assert record.id is not None
     return record.id
 
 
@@ -123,7 +108,6 @@ async def resume_record(record: RunRecord) -> None:
     try:
         dag = load_dag(
             PIPELINE_PATH.parent / record.config_file,
-            functions=FUNCTIONS,
             approver=make_approver(record),
             on_event=make_event_sink(record),
         )

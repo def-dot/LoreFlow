@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError
+from app.engine import DAG, DAGExecutionError, NodeStatus
 from app.engine.node import ApproverFunc
 
 
@@ -31,7 +31,7 @@ async def test_human_approve_completes_review() -> None:
         return ctx["review"]["payload"]["data"]["value"]
 
     results = await dag.run()
-    assert results["review"].is_success
+    assert results["review"].status == NodeStatus.COMPLETED
     assert results["review"].output["approved"] is True
     assert results["publish"].output == 42
 
@@ -56,9 +56,9 @@ async def test_human_reject_cascades_skip() -> None:
     with pytest.raises(DAGExecutionError) as excinfo:
         await dag.run()
     results = excinfo.value.results
-    assert results["review"].is_failed
+    assert results["review"].status == NodeStatus.FAILED
     assert "no good" in str(results["review"].error)
-    assert results["publish"].is_skipped
+    assert results["publish"].status == NodeStatus.SKIPPED
 
 
 async def test_human_node_requires_approver() -> None:

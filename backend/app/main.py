@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
-from app.routers import health, runs
+from app.routers import health, node_types, runs
 from app.services import runs as run_service
 
 logger = get_logger(__name__)
@@ -52,6 +52,7 @@ app.add_middleware(
 
 API_V1 = "/api/v1"
 app.include_router(runs.router, prefix=API_V1)
+app.include_router(node_types.router, prefix=API_V1)
 app.include_router(health.router, prefix=API_V1)
 
 

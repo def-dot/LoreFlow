@@ -13,10 +13,9 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
-from collections.abc import Callable
 from typing import Any
 
-from .node import Node
+from .node import Node, NodeEventFunc
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
 
 logger = logging.getLogger(__name__)
@@ -33,15 +32,15 @@ class DAGExecutor:
     def __init__(
         self,
         concurrency: int | None = None,
-        on_event: Callable[[NodeResult], None] | None = None,
+        on_event: NodeEventFunc | None = None,
     ):
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
 
-    def _emit(self, result: NodeResult) -> None:
+    async def _emit(self, result: NodeResult) -> None:
         """Push a node state change to the ``on_event`` callback (if set)."""
         if self.on_event is not None:
-            self.on_event(result)
+            await self.on_event(result)
 
     # ------------------------------------------------------------------
     # Public API
@@ -107,7 +106,7 @@ class DAGExecutor:
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
             raise DAGExecutionError(
-                f"DAG execution finished with {len(failed)} failed node(s): {', '.join(failed)}",
+                f"DAG 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}",
                 results,
             )
 
@@ -173,7 +172,7 @@ class DAGExecutor:
             # ---- 4. Execute with retry ----
             retry = node.retry or RetryPolicy(max_retries=0)
             last_error: Exception | None = None
-            self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
+            await self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
 
             for attempt in range(retry.max_retries + 1):
                 try:
@@ -227,7 +226,7 @@ class DAGExecutor:
                         exc,
                         delay,
                     )
-                    self._emit(
+                    await self._emit(
                         NodeResult(
                             node_name=node.name,
                             status=NodeStatus.RETRYING,
@@ -265,8 +264,8 @@ class DAGExecutor:
                 error=exc,
             )
         finally:
+            await self._emit(result)
             events[node.name].set()
-            self._emit(result)
         return result
 
     # ------------------------------------------------------------------
