@@ -39,10 +39,7 @@ async def get_run(run_id: int) -> RunDetail:
     record = await run_service.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
-    reviewing = sorted(
-        n for n, e in record.nodes.items() if isinstance(e, dict) and e.get("status") == NodeStatus.REVIEWING.value
-    )
-    return RunDetail(**record.model_dump(), reviewing=reviewing)
+    return RunDetail(**record.model_dump())
 
 
 @router.post("/{run_id}/approve/{node_name}", response_model=ApproveResponse)
@@ -52,6 +49,5 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
     if record is None or not isinstance(entry, dict) or entry.get("status") != NodeStatus.REVIEWING.value:
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
     await review_service.create_decision(run_id, node_name, {"approve": body.approve, "reason": body.reason})
-    # 决策先落库再续跑：resume 后的 approver 读得到决策
     await orchestrator.resume_record(record)
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

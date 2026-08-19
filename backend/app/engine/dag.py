@@ -463,6 +463,11 @@ class DAG:
         """Return the list of registered node names."""
         return list(self._nodes)
 
+    @property
+    def human_nodes(self) -> list[Node]:
+        """Nodes that pause for human review (``human_review`` metadata)."""
+        return [node for node in self._nodes.values() if node.metadata.get("human_review")]
+
     def __repr__(self) -> str:
         return f"DAG({self.name!r}, nodes={list(self._nodes)})"
 

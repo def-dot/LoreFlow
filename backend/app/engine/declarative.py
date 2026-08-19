@@ -62,6 +62,7 @@ inputs          initial context passed to :meth:`DAG.run`; stored on the
 
 from __future__ import annotations
 
+import yaml
 from pathlib import Path
 from typing import Any
 
@@ -80,19 +81,25 @@ _KIND_FIELDS = {
 }
 
 
-def _load_yaml(path: str | Path) -> Any:
-    """Read and parse a YAML config file (requires PyYAML)."""
+def read_yaml(path: str | Path) -> tuple[str, Any]:
+    """Read a YAML config file, returning ``(raw_text, config)`` (requires PyYAML).
+
+    ``config`` is always a mapping: empty YAML becomes ``{}``, and a
+    non-mapping top level raises ``ValueError``, as do read/parse errors.
+    """
     try:
-        import yaml
-    except ImportError as exc:
-        raise ImportError("从文件加载 DAG 需要 PyYAML —— 请运行: pip install pyyaml") from exc
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return yaml.safe_load(fh)
+        raw = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
         raise ValueError(f"无法读取配置文件 {path!r}: {exc}") from exc
+    try:
+        config = yaml.safe_load(raw)
     except yaml.YAMLError as exc:
         raise ValueError(f"配置文件 {path!r} 的 YAML 无效: {exc}") from exc
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        raise ValueError("顶层必须是映射(dict)")
+    return raw, config
 
 
 def load_dag(
@@ -105,7 +112,7 @@ def load_dag(
     if isinstance(source, dict):
         config = source
     elif isinstance(source, (str, Path)):
-        config = _load_yaml(source)
+        _, config = read_yaml(source)
     else:
         raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 

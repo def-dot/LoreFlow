@@ -22,7 +22,7 @@ async def _wait_terminal(client: AsyncClient, run_id: int, timeout: float = 15) 
             resp = await client.get(f"/api/v1/runs/{run_id}")
             assert resp.status_code == 200
             data = resp.json()["data"]
-            if data["status"] != "running":
+            if data["status"] in ("completed", "failed", "cancelled"):
                 return data
             await asyncio.sleep(0.05)
 
@@ -36,9 +36,9 @@ async def _wait_reviewing(client: AsyncClient, run_id: int, timeout: float = 15)
         while True:
             resp = await client.get(f"/api/v1/runs/{run_id}")
             data = resp.json()["data"]
-            if data["reviewing"]:
+            if any(n.get("status") == "reviewing" for n in data["nodes"].values()):
                 return data
-            if data["status"] != "running":
+            if data["status"] not in ("running", "reviewing"):
                 raise AssertionError(f"run 在审批前已结束: {data}")
             await asyncio.sleep(0.05)
 
@@ -109,11 +109,11 @@ async def test_run_lifecycle_approve(client: AsyncClient) -> None:
     run_id = body["data"]["run_id"]
 
     data = await _wait_reviewing(client, run_id)
-    assert data["status"] == "running"
+    assert data["status"] == "reviewing"  # 有节点待审核时 run 状态暴露为 reviewing
     assert data["finished_at"] is None  # 挂起不算结束
     assert data["error"] is None  # 挂起不算失败
-    assert "review" in data["reviewing"]
     assert data["nodes"]["review"]["status"] == "reviewing"
+    assert "merge" in data["nodes"]["review"]["payload"]  # 审核卡片展示的待审 payload
     assert data["nodes"]["fetch"]["status"] == "completed"
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
@@ -228,6 +228,7 @@ async def test_create_run_with_config_file(client: AsyncClient) -> None:
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
     assert data["config_file"] == "01_basic_chain.yaml"
+    assert all(n["status"] != "reviewing" for n in data["nodes"].values())  # 无人工审核节点
     assert data["nodes"]["report"]["status"] == "completed"
 
 
@@ -289,6 +290,7 @@ async def test_resume_stuck_run(client: AsyncClient) -> None:
     await orchestrator.resume_stuck_runs()
 
     data = await _wait_reviewing(client, run_id)
+    assert data["nodes"]["review"]["status"] == "reviewing"  # 05_human_review 有人工审核节点
     assert data["nodes"]["fetch"]["status"] == "completed"  # 已完成节点不重跑
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
@@ -310,7 +312,7 @@ async def test_resume_suspended_run_re_suspends(client: AsyncClient) -> None:
 
     await asyncio.sleep(0.1)  # 续跑任务无决策可消费 → 幂等重挂起退出
     data = (await client.get(f"/api/v1/runs/{run_id}")).json()["data"]
-    assert data["status"] == "running"
+    assert data["status"] == "reviewing"  # 重挂起后仍是"等待审核"状态
     assert data["nodes"]["review"]["status"] == "reviewing"
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})

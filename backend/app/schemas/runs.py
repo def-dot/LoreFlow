@@ -31,20 +31,20 @@ class RunListResponse(BaseModel):
 
 
 class NodeSnapshot(BaseModel):
-    """一个节点的状态快照（NodeResult.to_dict 的形状）。"""
+    """一个节点的状态快照（NodeResult.to_dict 的形状，人工审核节点附 payload）。"""
 
     status: str
     output: Any = None
     error: str | None = None
     attempts: int = 0
     duration_ms: float = 0
+    payload: Any = None
 
 
 class RunDetail(RunListItem):
     config_file: str
     mermaid: str
     nodes: dict[str, NodeSnapshot]
-    reviewing: list[str]
 
 
 class RunCreateRequest(BaseModel):

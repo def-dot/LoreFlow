@@ -1,6 +1,6 @@
 """Demo 流水线只读浏览 — 枚举 app/pipelines/*.yaml 并合成列表/详情。
 
-列表只做 yaml.safe_load（快、容错：单个文件坏了跳过并告警，不让整个
+列表只做轻量解析（快、容错：单个文件坏了跳过并告警，不让整个
 目录 500）；详情走 load_dag 的完整校验与图构建（mermaid/拓扑序）。
 approver 必须传 no-op：含 human 节点的流水线在构建时会校验 approver
 存在，但浏览不执行 dag.run()，no-op 永远不会被调用。
@@ -11,12 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
 from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
+from app.engine.declarative import read_yaml
 from app.engine.resolve import parse_retry
 from app.registry import all_types
 
@@ -28,38 +28,13 @@ async def _noop_approver(node_name: str, payload: dict[str, Any]) -> dict[str, A
     return {"approve": False}
 
 
-def _read_yaml(path: Path) -> tuple[str, dict[str, Any]]:
-    """读原始文本 + 解析 dict；读失败/YAML 无效/顶层非映射抛 ValueError。"""
-    raw = path.read_text(encoding="utf-8")
-    config = yaml.safe_load(raw)
-    if config is None:
-        config = {}
-    if not isinstance(config, dict):
-        raise ValueError("顶层必须是映射(dict)")
-    return raw, config
-
-
-def _resolve_demo_path(filename: str) -> Path:
-    """白名单校验：只允许 pipelines 目录下真实存在的 .yaml 裸文件名，杜绝路径穿越。"""
-    if (
-        not filename.endswith(".yaml")
-        or Path(filename).name != filename  # 含分隔符或 .. 的名字必然不等
-        or filename in {".", ".."}
-    ):
-        raise HTTPException(status_code=404, detail=f"流水线 {filename!r} 不存在")
-    path = settings.PIPELINES_DIR / filename
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"流水线 {filename!r} 不存在")
-    return path
-
-
 def list_pipelines() -> list[dict[str, Any]]:
     """枚举 pipelines 目录全部 .yaml；单个文件解析失败跳过并告警。"""
     entries: list[dict[str, Any]] = []
     for path in sorted(settings.PIPELINES_DIR.glob("*.yaml")):
         try:
-            _, config = _read_yaml(path)
-        except (OSError, ValueError, yaml.YAMLError) as exc:
+            _, config = read_yaml(path)
+        except ValueError as exc:
             logger.warning("Skip demo pipeline %s: %s", path.name, exc)
             continue
         entries.append({
@@ -128,13 +103,9 @@ def _node_row(name: str, spec: dict[str, Any], registry: dict[str, Any]) -> dict
 
 def get_pipeline_detail(filename: str) -> dict[str, Any]:
     """单个流水线的完整展示数据：图、节点行、YAML 原文。"""
-    path = _resolve_demo_path(filename)
-    try:
-        raw, config = _read_yaml(path)
-        dag = load_dag(config, approver=_noop_approver)
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        # pipelines 文件是服务端数据：坏了是 500 而不是客户端 4xx
-        raise HTTPException(status_code=500, detail=f"流水线 {filename!r} 解析失败: {exc}") from exc
+    path = settings.PIPELINES_DIR / filename
+    config = read_yaml(path)
+    dag = load_dag(config, approver=_noop_approver)
     registry = {t.name: t for t in all_types()}
     nodes_cfg = config.get("nodes") or {}
     rows = [_node_row(name, nodes_cfg.get(name) or {}, registry) for name in dag.topological_order()]

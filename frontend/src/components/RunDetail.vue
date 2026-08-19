@@ -1,13 +1,27 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { RunDetail } from '@/api/runs'
 import { statusTagType } from '@/utils/status'
 import MermaidDiagram from './MermaidDiagram.vue'
 import NodeStatusTable from './NodeStatusTable.vue'
 import ReviewCards from './ReviewCards.vue'
 
-defineProps<{ detail: RunDetail; deciding: boolean }>()
+const props = defineProps<{ detail: RunDetail; deciding: boolean }>()
 
 const emit = defineEmits<{ decide: [node: string, approve: boolean, reason: string | null] }>()
+
+// 节点名 → 状态，供 MermaidDiagram 按状态给图里的节点上色
+const nodeStatuses = computed(() =>
+  Object.fromEntries(Object.entries(props.detail.nodes).map(([name, node]) => [name, node.status])),
+)
+
+// 待审批节点：从节点快照筛出 status == "reviewing" 的，payload 供审核卡片展示
+const reviewing = computed(() =>
+  Object.entries(props.detail.nodes)
+    .filter(([, node]) => node.status === 'reviewing')
+    .map(([name, node]) => ({ name, payload: node.payload }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
 </script>
 
 <template>
@@ -23,17 +37,19 @@ const emit = defineEmits<{ decide: [node: string, approve: boolean, reason: stri
     <div class="panels">
       <section class="panel">
         <h2>Pipeline</h2>
-        <MermaidDiagram :source="detail.mermaid" />
+        <MermaidDiagram :source="detail.mermaid" :statuses="nodeStatuses" />
       </section>
       <section class="panel">
         <h2>Nodes</h2>
         <NodeStatusTable :detail="detail" />
-        <h2 class="review-title">Human review</h2>
-        <ReviewCards
-          :reviewing="detail.status === 'running' ? detail.reviewing : []"
-          :deciding="deciding"
-          @decide="(node, ok, reason) => emit('decide', node, ok, reason)"
-        />
+        <template v-if="reviewing.length">
+          <h2 class="review-title">Human review</h2>
+          <ReviewCards
+            :reviewing="reviewing"
+            :deciding="deciding"
+            @decide="(node, ok, reason) => emit('decide', node, ok, reason)"
+          />
+        </template>
       </section>
     </div>
   </div>

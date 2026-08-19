@@ -36,6 +36,19 @@ async def test_human_approve_completes_review() -> None:
     assert results["publish"].output == 42
 
 
+def test_dag_human_nodes_property() -> None:
+    """human_nodes 属性只列出人工审核节点，普通节点不在内。"""
+    dag = DAG("human_nodes")
+
+    @dag.node("data")
+    async def data(ctx: dict[str, Any]) -> dict:
+        return {}
+
+    dag.human_node("review", depends_on=["data"], approver=fake_approver({"approve": True}))
+
+    assert [node.name for node in dag.human_nodes] == ["review"]
+
+
 async def test_human_reject_cascades_skip() -> None:
     dag = DAG("human_reject")
 

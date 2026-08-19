@@ -20,6 +20,17 @@ const creating = ref(false)
 let runsTimer: ReturnType<typeof setInterval> | undefined
 let detailTimer: ReturnType<typeof setInterval> | undefined
 
+// run 终态：详情轮询观察到结束时，刷新一次左侧列表让状态标签跟上
+const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled']
+
+async function refreshRunsIfTerminal() {
+  const status = store.detail?.status
+  if (status && TERMINAL_STATUSES.includes(status)) {
+    await store.fetchRuns()
+    if (!store.hasRunning) stopRunsPolling()
+  }
+}
+
 function stopRunsPolling() {
   if (runsTimer) clearInterval(runsTimer)
   runsTimer = undefined
@@ -47,7 +58,10 @@ function startDetailPolling() {
   detailTimer = setInterval(async () => {
     try {
       await store.fetchDetail()
-      if (store.detail && store.detail.status !== 'running') stopDetailPolling()
+      if (store.detail && store.detail.status !== 'running') {
+        stopDetailPolling()
+        await refreshRunsIfTerminal()
+      }
     } catch {
       stopDetailPolling()
     }
@@ -79,7 +93,14 @@ async function startNewRun() {
 
 async function decide(node: string, ok: boolean, reason: string | null) {
   await store.decide(node, ok, reason)
-  if (store.detail?.status === 'running') startDetailPolling()
+  if (store.detail?.status === 'running') {
+    // 审批后 run 回到执行中：恢复两路轮询（列表在挂起期间已停）
+    startDetailPolling()
+    startRunsPolling()
+  } else {
+    // 续跑瞬间已到终态（无下一轮审核）：直接刷新列表
+    refreshRunsIfTerminal().catch(() => {})
+  }
 }
 
 onMounted(async () => {
