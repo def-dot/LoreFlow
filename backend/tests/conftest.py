@@ -14,6 +14,7 @@ from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 import app.core.database as db_mod
+import app.services.orchestrator as orchestrator
 from app.main import app
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
@@ -22,6 +23,18 @@ TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_o
 
 # 换库：数据库层所有函数经此全局取 session
 db_mod.AsyncSessionLocal = TestSessionLocal
+
+# SQLite 无 PG advisory lock：测试单进程无选主竞争，直接视为抢到锁。
+async def _acquire_test_lock() -> bool:
+    return True
+
+
+async def _release_test_lock(_raw: bool) -> None:
+    pass
+
+
+orchestrator._acquire_recovery_lock = _acquire_test_lock
+orchestrator._release_recovery_lock = _release_test_lock
 
 
 @pytest_asyncio.fixture(autouse=True)

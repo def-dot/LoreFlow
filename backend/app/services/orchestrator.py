@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core import database
 from app.core.config import settings
@@ -27,9 +28,6 @@ from app.models.run import RunRecord
 from app.services import reviews, runs
 
 logger = get_logger(__name__)
-
-#: 启动恢复选主的 advisory lock key（任意固定值）。
-RECOVERY_LOCK_KEY = 860606
 
 
 def make_approver(record: RunRecord) -> ApproverFunc:
@@ -127,39 +125,30 @@ async def resume_record(record: RunRecord) -> None:
     asyncio.create_task(run_pipeline(record, dag, resume=record.nodes))
 
 
-async def _acquire_recovery_lock() -> Any:
+async def _acquire_recovery_lock() -> AsyncConnection | None:
     """抢启动恢复选主权（session 级 advisory lock）：成功返回持有的连接，
-    失败返回 None。非 PG（SQLite 测试）直接视为抢到。"""
-    bind = database.AsyncSessionLocal.kw.get("bind")
-    if bind is None or bind.dialect.name != "postgresql":
-        return "sqlite"
-    raw = await bind.raw_connection()
-    driver = raw.driver_connection
-    got = await driver.fetchval("SELECT pg_try_advisory_lock($1)", RECOVERY_LOCK_KEY)
+    失败返回 None。"""
+    raw = await database.engine.raw_connection()
+    got = await raw.driver_connection.fetchval("SELECT pg_try_advisory_lock($1)", "lock")
     if not got:
         await raw.close()
         return None
     return raw
 
 
-async def _release_recovery_lock(raw: Any) -> None:
-    if raw == "sqlite":
-        return
-    await raw.driver_connection.execute("SELECT pg_advisory_unlock($1)", RECOVERY_LOCK_KEY)
+async def _release_recovery_lock(raw: AsyncConnection) -> None:
+    await raw.driver_connection.execute("SELECT pg_advisory_unlock()", "lock")
     await raw.close()
 
 
 async def resume_stuck_runs() -> None:
-    """启动时恢复上次进程退出时仍在 running 的 run（见 lifespan）。
-
-    advisory lock 选主、仅 leader 扫描续跑——多 worker 同时启动时
-    每个 run 恰好被恢复一次，不会重复执行。
+    """启动时恢复上次进程退出时仍在 running 的 run（见 lifespan）
     """
     raw = await _acquire_recovery_lock()
     if raw is None:
         return
     try:
-        rows, _ = await runs.list_runs()  # limit=None：启动扫描全部记录
+        rows, _ = await runs.list_runs()
         for record in rows:
             if record.status == "running":
                 await resume_record(record)
