@@ -90,8 +90,8 @@ onMounted(async () => {
               <el-table-column label="条件" min-width="100">
                 <template #default="{ row }">{{ row.condition_label ?? '—' }}</template>
               </el-table-column>
-              <el-table-column label="提示 / 循环体" min-width="130">
-                <template #default="{ row }">{{ row.prompt ?? row.body_summary ?? '—' }}</template>
+              <el-table-column label="说明" min-width="130">
+                <template #default="{ row }">{{ row.type_description ?? '—' }}</template>
               </el-table-column>
             </el-table>
           </section>

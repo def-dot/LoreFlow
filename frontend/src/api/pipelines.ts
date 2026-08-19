@@ -10,8 +10,6 @@ export interface PipelineNodeInfo {
   retry: string | null
   condition: string | null
   condition_label: string | null
-  prompt: string | null
-  body_summary: string | null
 }
 
 export interface PipelineListItem {

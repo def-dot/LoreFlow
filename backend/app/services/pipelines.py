@@ -8,7 +8,6 @@ approver 必须传 no-op：含 human 节点的流水线在构建时会校验 app
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -65,7 +64,8 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
 def _node_row(name: str, spec: dict[str, Any], registry: dict[str, Any]) -> dict[str, Any]:
     """把 YAML 节点 spec 合成展示行：类型名来自 spec，label/描述来自注册表。
 
-    human/loop 是引擎内置 kind，不在注册表里，给固定 label。
+    human/loop 是引擎内置 kind，不在注册表里，给固定 label；type_description
+    分别放审核提示和循环体摘要。
     """
     kind = spec.get("kind", "node")
     row: dict[str, Any] = {
@@ -78,8 +78,6 @@ def _node_row(name: str, spec: dict[str, Any], registry: dict[str, Any]) -> dict
         "retry": _retry_summary(parse_retry(spec.get("retry"))),
         "condition": spec.get("condition"),
         "condition_label": None,
-        "prompt": None,
-        "body_summary": None,
     }
     if kind == "node":
         row["type"] = spec.get("type")
@@ -89,22 +87,21 @@ def _node_row(name: str, spec: dict[str, Any], registry: dict[str, Any]) -> dict
             row["type_description"] = node_type.description
     elif kind == "human":
         row["type_label"] = "人工审核"
-        row["prompt"] = spec.get("prompt")
+        row["type_description"] = spec.get("prompt")
     elif kind == "loop":
         row["type_label"] = "循环"
         body = spec.get("body") or {}
-        row["body_summary"] = f"循环体 {len(body)} 个节点，上限 {spec.get('max_iterations', 100)} 轮"
+        row["type_description"] = f"循环体 {len(body)} 个节点，上限 {spec.get('max_iterations', 100)} 轮"
     if row["condition"]:
         cond = registry.get(row["condition"])
-        if cond:
-            row["condition_label"] = cond.label
+        row["condition_label"] = cond.label
     return row
 
 
 def get_pipeline_detail(filename: str) -> dict[str, Any]:
     """单个流水线的完整展示数据：图、节点行、YAML 原文。"""
     path = settings.PIPELINES_DIR / filename
-    config = read_yaml(path)
+    raw, config = read_yaml(path)
     dag = load_dag(config, approver=_noop_approver)
     registry = {t.name: t for t in all_types()}
     nodes_cfg = config.get("nodes") or {}

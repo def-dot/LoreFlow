@@ -41,7 +41,7 @@ async def test_pipeline_detail_human(client: AsyncClient) -> None:
     review = nodes["review"]
     assert review["kind"] == "human"
     assert review["type_label"] == "人工审核"
-    assert review["prompt"] == "请审核合并结果。"
+    assert review["type_description"] == "请审核合并结果。"
     assert review["condition"] == "demo_needs_review"
     assert review["condition_label"] == "演示按需审核"
 
@@ -58,7 +58,7 @@ async def test_pipeline_detail_loop(client: AsyncClient) -> None:
     assert batch["type_label"] == "循环"
     assert batch["condition"] == "demo_keep_iterating"
     assert batch["condition_label"] == "演示循环条件"
-    assert batch["body_summary"] == "循环体 1 个节点，上限 5 轮"
+    assert batch["type_description"] == "循环体 1 个节点，上限 5 轮"
 
 
 async def test_pipeline_detail_retry(client: AsyncClient) -> None:

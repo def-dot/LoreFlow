@@ -19,13 +19,11 @@ class PipelineNodeOut(BaseModel):
     kind: str  # node | human | loop
     type: str | None = None          # 注册表函数键（kind=node 才有）
     type_label: str | None = None    # 注册表 label；human=人工审核，loop=循环
-    type_description: str | None = None
+    type_description: str | None = None  # node=注册表描述；human=审核提示；loop=循环体摘要
     depends_on: list[str] = []
     retry: str | None = None         # 中文摘要，如 "重试 3 次，退避 0.05s×2（≤0.5s）"
     condition: str | None = None     # 条件谓词注册表键
     condition_label: str | None = None
-    prompt: str | None = None        # kind=human
-    body_summary: str | None = None  # kind=loop，如 "循环体 1 个节点，上限 5 轮"
 
 
 class PipelineDetail(PipelineListItem):
