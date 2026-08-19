@@ -1,6 +1,4 @@
-"""
-Database models — run records and human-review decisions.
-"""
+"""Database models — run records."""
 
 from typing import Any
 
@@ -22,16 +20,3 @@ class RunRecord(SQLModel, table=True):
     status: str = "pending"  # pending/running/completed/failed/cancelled
     error: str | None = None
     nodes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-
-
-class ReviewDecision(SQLModel, table=True):
-    """一条人工审批决策——审批器挂起时轮询这张表取决策。"""
-
-    __tablename__ = "review_decisions"
-
-    id: int | None = Field(default=None, primary_key=True)
-    run_id: int
-    node_name: str
-    approve: bool
-    reason: str | None = None
-    created_at: str | None = None

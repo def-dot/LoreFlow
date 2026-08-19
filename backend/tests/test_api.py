@@ -5,8 +5,8 @@ from typing import Any
 
 from httpx import AsyncClient
 
-from app.core import database
 from app.models.run import RunRecord
+from app.services import orchestrator
 from app.services import runs as run_service
 
 # ---------------------------------------------------------------------------
@@ -131,10 +131,11 @@ async def test_list_runs_sorted_desc(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/runs")
     body = resp.json()
     assert body["code"] == 200
-    runs = body["data"]["runs"]
+    runs = body["data"]
     assert [r["id"] for r in runs] == [second, first]
     fields = set(runs[0])
     assert fields == {"id", "name", "created_at", "finished_at", "status", "error"}
+    assert "T" not in runs[0]["created_at"]  # 响应层日期用空格分隔
 
 
 async def test_unknown_run_404(client: AsyncClient) -> None:
@@ -162,7 +163,7 @@ async def test_validation_error_422(client: AsyncClient) -> None:
 async def test_invalid_pipeline_400_no_run_record(client: AsyncClient, monkeypatch, tmp_path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("name: bad\nnodes:\n  a:\n    type: no_such_fn\n", encoding="utf-8")
-    monkeypatch.setattr(run_service, "PIPELINE_PATH", bad)
+    monkeypatch.setattr(orchestrator, "PIPELINE_PATH", bad)
 
     resp = await client.post("/api/v1/runs")
     assert resp.status_code == 400
@@ -172,7 +173,7 @@ async def test_invalid_pipeline_400_no_run_record(client: AsyncClient, monkeypat
 
     # 配置错误不产生垃圾 run 记录
     resp = await client.get("/api/v1/runs")
-    assert resp.json()["data"]["runs"] == []
+    assert resp.json()["data"] == []
 
 
 async def test_resume_stuck_run(client: AsyncClient) -> None:
@@ -193,11 +194,11 @@ async def test_resume_stuck_run(client: AsyncClient) -> None:
             },
         },
     )
-    await database.save(record)
+    await run_service.save(record)
     run_id = record.id
     assert run_id is not None
 
-    await run_service.resume_stuck_runs()
+    await orchestrator.resume_stuck_runs()
 
     data = await _wait_reviewing(client, run_id)
     assert data["nodes"]["fetch"]["status"] == "completed"  # 已完成节点不重跑

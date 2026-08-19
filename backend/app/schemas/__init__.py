@@ -7,7 +7,6 @@ from .runs import (
     RunCreateResponse,
     RunDetail,
     RunListItem,
-    RunListResponse,
 )
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     "RunCreateResponse",
     "RunDetail",
     "RunListItem",
-    "RunListResponse",
 ]

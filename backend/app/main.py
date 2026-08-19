@@ -13,7 +13,7 @@ Run::
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -23,16 +23,15 @@ from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
 from app.routers import health, node_types, runs
-from app.services import runs as run_service
+from app.services import orchestrator
 
+setup_logging()
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    setup_logging(use_file=settings.APP_ENV != "test")
-    # 重启恢复：上次进程退出时仍在 running 的记录从快照续跑
-    await run_service.resume_stuck_runs()
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    await orchestrator.resume_stuck_runs()
     yield
 
 

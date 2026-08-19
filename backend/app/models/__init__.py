@@ -1,5 +1,6 @@
 """Database models."""
 
-from .run import ReviewDecision, RunRecord
+from .review import ReviewDecision
+from .run import RunRecord
 
 __all__ = ["ReviewDecision", "RunRecord"]

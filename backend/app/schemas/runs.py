@@ -2,16 +2,23 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 
 class RunListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     created_at: str | None = None
     finished_at: str | None = None
     status: str
     error: str | None = None
+
+    @field_serializer("created_at", "finished_at")
+    def _format_dt(self, value: str | None) -> str | None:
+        """存储层是 ISO（带 T），响应层换成空格分隔的友好格式。"""
+        return value.replace("T", " ", 1) if value else value
 
 
 class NodeSnapshot(BaseModel):
@@ -29,10 +36,6 @@ class RunDetail(RunListItem):
     mermaid: str
     nodes: dict[str, NodeSnapshot]
     reviewing: list[str]
-
-
-class RunListResponse(BaseModel):
-    runs: list[RunListItem]
 
 
 class RunCreateResponse(BaseModel):
