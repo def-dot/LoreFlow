@@ -126,11 +126,11 @@ def as_functions() -> dict[str, Callable[..., Any]]:
     return {name: t.func for name, t in _REGISTRY.items()}
 
 
-def resolve_function(name: str, what: str) -> Callable[..., Any]:
+def resolve_function(name: str) -> Callable[..., Any]:
     """按名字查找已注册的函数；未注册时给出明确报错。"""
     func = as_functions().get(name)
     if func is None:
-        raise ValueError(f"{what} {name!r} 未注册")
+        raise ValueError(f"节点 {name!r} 未注册")
     return func
 
 

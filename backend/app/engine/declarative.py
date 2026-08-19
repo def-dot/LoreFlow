@@ -122,6 +122,7 @@ def load_dag(
         allowed = _KIND_FIELDS.get(kind)
         if allowed is None:
             raise ValueError(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
+        
         unknown = set(spec) - {"kind"} - allowed
         if unknown:
             raise ValueError(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
@@ -142,6 +143,7 @@ def load_dag(
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
                 raise ValueError(f"循环节点 {name!r} 需要非空的 'body' 映射")
+            
             if not spec.get("condition"):
                 raise ValueError(f"循环节点 {name!r} 需要 'condition' 函数键")
 
@@ -150,7 +152,7 @@ def load_dag(
             dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
-                condition=resolve_function(spec["condition"], f"循环 {name!r} 的条件"),
+                condition=resolve_function(spec["condition"]),
                 depends_on=deps,
                 max_iterations=int(spec.get("max_iterations", 100)),
                 retry=retry,
@@ -164,11 +166,11 @@ def load_dag(
             dag.add_node(
                 Node(
                     name=name,
-                    func=resolve_function(spec["type"], f"节点 {name!r} 的类型"),
+                    func=resolve_function(spec["type"]),
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
-                    condition=resolve_function(condition, f"节点 {name!r} 的条件") if condition else None,
+                    condition=resolve_function(condition) if condition else None,
                     metadata=spec.get("metadata") or {},
                 )
             )
