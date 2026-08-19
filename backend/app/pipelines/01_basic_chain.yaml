@@ -1,0 +1,32 @@
+# DAG Flow — 基础示例：串行依赖 + 并行分支 + 汇聚。
+#
+# 节点函数在 Python 侧注册（见 app/registry 的 NODE_TYPES），
+# 这个文件只声明编排结构。
+#
+# 加载方式：
+#     from app.engine import load_dag
+#     dag = load_dag("app/pipelines/01_basic_chain.yaml")
+#     results = await dag.run()
+
+name: basic_chain
+description: 基础示例：串行依赖、并行分支与汇聚。
+
+nodes:
+  fetch:
+    type: cfg_fetch            # 抓取数据，输出 {title, body}
+
+  clean:
+    type: cfg_clean
+    depends_on: [fetch]        # clean 与 enrich 并行执行
+
+  enrich:
+    type: cfg_enrich
+    depends_on: [fetch]
+
+  merge:
+    type: cfg_merge
+    depends_on: [clean, enrich]  # 两个分支都完成后汇聚
+
+  report:
+    type: cfg_report
+    depends_on: [merge]

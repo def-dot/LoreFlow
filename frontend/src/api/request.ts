@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 
 /**
@@ -28,6 +28,7 @@ request.interceptors.response.use(
 
 // 类型化请求助手：T 为信封 data 的类型
 export const api = {
-  get: <T>(url: string): Promise<T> => request.get(url) as unknown as Promise<T>,
+  get: <T>(url: string, config?: AxiosRequestConfig): Promise<T> =>
+    request.get(url, config) as unknown as Promise<T>,
   post: <T>(url: string, data?: unknown): Promise<T> => request.post(url, data) as unknown as Promise<T>,
 }

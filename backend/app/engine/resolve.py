@@ -52,13 +52,11 @@ def parse_retry(spec: Any) -> RetryPolicy | None:
     YAML ``retry: no`` (False) explicitly disables retry; ``retry: yes``
     (True) is ambiguous and rejected.
     """
-    if spec is None:
+    if spec is None or spec is False:
         return None
 
-    if isinstance(spec, bool):
-        if spec is False:
-            return None
-        raise ValueError("无效的 retry 配置: True（布尔值歧义，用 0 表示禁用）")
+    if spec is True:
+        raise ValueError(f"无效的 retry 配置: {spec!r}（retry: yes 有歧义，请用整数或映射）")
 
     if isinstance(spec, int):
         return RetryPolicy(max_retries=spec)

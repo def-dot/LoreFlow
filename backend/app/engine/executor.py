@@ -15,8 +15,8 @@ import logging
 import time
 from typing import Any
 
-from .node import Node, NodeEventFunc
-from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
+from .node import Node
+from .types import DAGExecutionError, NodeEventFunc, NodeResult, NodeStatus, RetryPolicy, SuspendExecution
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,7 @@ class DAGExecutor:
         result 推导。
         """
         result: NodeResult
+        suspended = False
         try:
             # ---- 1. Wait for dependencies ----
             for dep in node.depends_on:
@@ -255,6 +256,13 @@ class DAGExecutor:
                 node_name=node.name,
                 status=NodeStatus.CANCELLED,
             )
+        except SuspendExecution:
+            # 挂起：不产生终态结果（REVIEWING+payload 由 approver 直接落库，
+            # emit 会覆盖它），但必须唤醒下游——让级联节点也以挂起退出，
+            # 否则 gather 会永远等它们。
+            suspended = True
+            events[node.name].set()
+            raise
         except Exception as exc:
             # Should not happen — the code above is defensive, but guard anyway
             logger.exception("Unexpected error in executor for %s", node.name)
@@ -264,8 +272,9 @@ class DAGExecutor:
                 error=exc,
             )
         finally:
-            await self._emit(result)
-            events[node.name].set()
+            if not suspended:
+                await self._emit(result)
+                events[node.name].set()
         return result
 
     # ------------------------------------------------------------------

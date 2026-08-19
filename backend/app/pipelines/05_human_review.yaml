@@ -1,0 +1,39 @@
+# DAG Flow — 人工审核示例。
+#
+# review 节点挂起等待决策；approver 返回 {"approve": bool, "reason": str}。
+#   - 通过：review 完成，输出 {approved, payload, ...}，下游继续。
+#   - 拒绝：抛 HumanRejected → review 失败 → 下游（如 publish）级联跳过。
+#
+# 加载时必须提供 approver —— 终端交互用 terminal_approver，
+# Web 审批场景由 orchestrator.make_approver 提供：
+#     from app.engine import load_dag, terminal_approver
+#     dag = load_dag("app/pipelines/05_human_review.yaml", approver=terminal_approver)
+#     results = await dag.run()
+
+name: human_review
+description: 人工审核示例：review 节点挂起等待决策，通过则继续、拒绝则级联跳过下游。
+
+nodes:
+  fetch:
+    type: cfg_fetch
+
+  clean:
+    type: cfg_clean
+    depends_on: [fetch]
+
+  enrich:
+    type: cfg_enrich
+    depends_on: [fetch]
+
+  merge:
+    type: cfg_merge
+    depends_on: [clean, enrich]
+
+  review:
+    kind: human
+    depends_on: [merge]
+    prompt: "请审核合并结果：同意输入 y，拒绝输入 n。"
+
+  publish:
+    type: cfg_publish
+    depends_on: [review]

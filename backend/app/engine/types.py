@@ -3,6 +3,7 @@ Core types for the DAG Flow orchestration engine.
 """
 
 import random
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -94,9 +95,21 @@ class NodeResult:
         return f"NodeResult({self.node_name!r}, {self.status.value})"
 
 
+#: Signature for a node event listener: receives the finished NodeResult, returns nothing.
+NodeEventFunc = Callable[[NodeResult], Awaitable[None]]
+
+
 class DAGExecutionError(Exception):
     """Raised when the DAG execution fails (one or more nodes failed)."""
 
     def __init__(self, message: str, results: dict[str, NodeResult]):
         super().__init__(message)
         self.results = results
+
+
+class SuspendExecution(BaseException):
+    """内部控制流信号：人工审批节点挂起，run 干净退出等待 /approve。
+
+    BaseException 而非 Exception——穿过 executor 的重试循环与
+    run_pipeline 的失败兜底，只被显式 except SuspendExecution 捕获。
+    """

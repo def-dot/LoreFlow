@@ -4,7 +4,7 @@ from sqlmodel import Field, SQLModel
 
 
 class ReviewDecision(SQLModel, table=True):
-    """一条人工审批决策——审批器挂起时轮询这张表取决策。"""
+    """一条人工审批决策——审批器挂起检查/续跑时从这张表取走决策。"""
 
     __tablename__ = "review_decisions"
 

@@ -28,6 +28,13 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=422,
             content={"code": 422, "msg": "参数校验失败", "data": {"detail": detail}},
         )
+    
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={"code": 400, "msg": str(exc), "data": None},
+        )
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:

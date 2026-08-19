@@ -32,7 +32,7 @@ Quick start::
 from .dag import DAG, terminal_approver
 from .declarative import load_dag
 from .node import HumanRejected, Node
-from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
+from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy, SuspendExecution
 
 __all__ = [
     "DAG",
@@ -42,6 +42,7 @@ __all__ = [
     "NodeResult",
     "NodeStatus",
     "RetryPolicy",
+    "SuspendExecution",
     "load_dag",
     "terminal_approver",
 ]

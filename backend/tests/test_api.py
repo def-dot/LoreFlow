@@ -81,12 +81,24 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
 
     types = body["data"]["node_types"]
     names = {t["name"] for t in types}
-    expected = {"cfg_fetch", "cfg_clean", "cfg_enrich", "cfg_merge", "cfg_publish", "cfg_report", "cfg_needs_report"}
+    expected = {
+        "cfg_fetch",
+        "cfg_clean",
+        "cfg_enrich",
+        "cfg_merge",
+        "cfg_publish",
+        "cfg_report",
+        "cfg_needs_report",
+        "demo_flaky",
+        "demo_tick",
+        "demo_keep_iterating",
+        "demo_needs_review",
+    }
     assert expected <= names
     assert set(types[0]) == {"name", "kind", "label", "description"}
 
     conditions = [t["name"] for t in types if t["kind"] == "condition"]
-    assert conditions == ["cfg_needs_report"]
+    assert conditions == ["cfg_needs_report", "demo_keep_iterating", "demo_needs_review"]
 
 
 async def test_run_lifecycle_approve(client: AsyncClient) -> None:
@@ -98,6 +110,8 @@ async def test_run_lifecycle_approve(client: AsyncClient) -> None:
 
     data = await _wait_reviewing(client, run_id)
     assert data["status"] == "running"
+    assert data["finished_at"] is None  # 挂起不算结束
+    assert data["error"] is None  # 挂起不算失败
     assert "review" in data["reviewing"]
     assert data["nodes"]["review"]["status"] == "reviewing"
     assert data["nodes"]["fetch"]["status"] == "completed"
@@ -108,7 +122,7 @@ async def test_run_lifecycle_approve(client: AsyncClient) -> None:
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
     assert data["nodes"]["publish"]["status"] == "completed"
-    assert data["nodes"]["report"]["status"] == "completed"
+    assert data["nodes"]["merge"]["status"] == "completed"
     assert data["error"] is None
 
 
@@ -131,11 +145,40 @@ async def test_list_runs_sorted_desc(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/runs")
     body = resp.json()
     assert body["code"] == 200
-    runs = body["data"]
+    data = body["data"]
+    runs = data["items"]
+    assert data["total"] == 2 and data["offset"] == 0 and data["limit"] == 50
     assert [r["id"] for r in runs] == [second, first]
     fields = set(runs[0])
     assert fields == {"id", "name", "created_at", "finished_at", "status", "error"}
     assert "T" not in runs[0]["created_at"]  # 响应层日期用空格分隔
+
+
+async def test_list_runs_pagination(client: AsyncClient) -> None:
+    """offset/limit 分页：只取本页、total 为全局总数、越界返回空页。"""
+    for i in range(3):
+        record = RunRecord(
+            name=f"p{i}",
+            config_file="pipeline.yaml",
+            mermaid="graph TD\n",
+            created_at=f"2026-01-0{i+1}T00:00:00",
+            status="completed",
+            nodes={},
+        )
+        await run_service.save(record)
+
+    resp = await client.get("/api/v1/runs", params={"offset": 1, "limit": 1})
+    data = resp.json()["data"]
+    assert data["total"] == 3
+    assert [r["id"] for r in data["items"]] == [2]  # 最新在前：第 2 页 = id 2
+    assert data["offset"] == 1 and data["limit"] == 1
+
+    resp = await client.get("/api/v1/runs", params={"offset": 9})
+    data = resp.json()["data"]
+    assert data["items"] == [] and data["total"] == 3
+
+    resp = await client.get("/api/v1/runs", params={"limit": 0})
+    assert resp.status_code == 422
 
 
 async def test_unknown_run_404(client: AsyncClient) -> None:
@@ -163,9 +206,9 @@ async def test_validation_error_422(client: AsyncClient) -> None:
 async def test_invalid_pipeline_400_no_run_record(client: AsyncClient, monkeypatch, tmp_path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("name: bad\nnodes:\n  a:\n    type: no_such_fn\n", encoding="utf-8")
-    monkeypatch.setattr(orchestrator, "PIPELINE_PATH", bad)
+    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
 
-    resp = await client.post("/api/v1/runs")
+    resp = await client.post("/api/v1/runs", json={"config_file": "bad.yaml"})
     assert resp.status_code == 400
     body = resp.json()
     assert body["code"] == 400
@@ -173,14 +216,59 @@ async def test_invalid_pipeline_400_no_run_record(client: AsyncClient, monkeypat
 
     # 配置错误不产生垃圾 run 记录
     resp = await client.get("/api/v1/runs")
-    assert resp.json()["data"] == []
+    assert resp.json()["data"]["items"] == []
+
+
+async def test_create_run_with_config_file(client: AsyncClient) -> None:
+    """POST /runs 带 config_file：跑指定的 demo 流水线并持久化文件名。"""
+    resp = await client.post("/api/v1/runs", json={"config_file": "01_basic_chain.yaml"})
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["config_file"] == "01_basic_chain.yaml"
+    assert data["nodes"]["report"]["status"] == "completed"
+
+
+async def test_create_run_unknown_config_400(client: AsyncClient) -> None:
+    """未知 config_file 拒绝创建，且不产生垃圾 run 记录。"""
+    resp = await client.post("/api/v1/runs", json={"config_file": "no_such.yaml"})
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["code"] == 400
+    assert "未知的流水线配置" in body["msg"]
+
+    resp = await client.get("/api/v1/runs")
+    assert resp.json()["data"]["items"] == []
+
+
+async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
+    """重启恢复也按 config_file 找对应的 YAML（非主演示流水线）。"""
+    record = RunRecord(
+        name="basic_chain",
+        config_file="01_basic_chain.yaml",
+        mermaid="graph TD\n",
+        created_at="2026-01-01T00:00:00",
+        status="running",
+        nodes={},
+    )
+    await run_service.save(record)
+    run_id = record.id
+    assert run_id is not None
+
+    await orchestrator.resume_stuck_runs()
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["config_file"] == "01_basic_chain.yaml"
 
 
 async def test_resume_stuck_run(client: AsyncClient) -> None:
     """模拟崩溃重启：running 记录 + 部分节点快照 → resume 续跑。"""
     record = RunRecord(
         name="content_pipeline",
-        config_file="pipeline.yaml",
+        config_file="05_human_review.yaml",
         mermaid="graph TD\n",
         created_at="2026-01-01T00:00:00",
         status="running",
@@ -206,6 +294,27 @@ async def test_resume_stuck_run(client: AsyncClient) -> None:
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
     assert resp.status_code == 200
 
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["nodes"]["publish"]["status"] == "completed"
+
+
+async def test_resume_suspended_run_re_suspends(client: AsyncClient) -> None:
+    """挂起中的 run 被再次 resume（无新决策）：幂等重挂起，审批后照常完成。"""
+    resp = await client.post("/api/v1/runs")
+    run_id = resp.json()["data"]["run_id"]
+    await _wait_reviewing(client, run_id)
+
+    await asyncio.sleep(0.1)  # 首个 run 任务挂起退出（REVIEWING 已落库）
+    await orchestrator.resume_stuck_runs()  # 模拟第二次重启
+
+    await asyncio.sleep(0.1)  # 续跑任务无决策可消费 → 幂等重挂起退出
+    data = (await client.get(f"/api/v1/runs/{run_id}")).json()["data"]
+    assert data["status"] == "running"
+    assert data["nodes"]["review"]["status"] == "reviewing"
+
+    resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
+    assert resp.status_code == 200
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
     assert data["nodes"]["publish"]["status"] == "completed"

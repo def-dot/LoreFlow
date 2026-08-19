@@ -227,6 +227,7 @@ class DAG:
         name: str,
         depends_on: list[str] | None = None,
         prompt: str | None = None,
+        condition: ConditionFunc | None = None,
         retry: RetryPolicy | None = None,
         approver: ApproverFunc | None = None,
     ) -> Node:
@@ -242,6 +243,8 @@ class DAG:
             name: Unique node name.
             depends_on: Upstream nodes whose outputs are shown for review.
             prompt: Optional extra text shown with the review request.
+            condition: Optional predicate; if it returns False the review
+                       is skipped (the human is never asked).
             retry: Optional retry policy. ``HumanRejected`` is a normal
                    exception, so a policy with default ``retry_on`` will
                    simply ask the reviewer again after rejection.
@@ -286,6 +289,7 @@ class DAG:
             name=name,
             func=review_func,
             depends_on=depends_on or [],
+            condition=condition,
             retry=retry,
             metadata={"human_review": True},
         )

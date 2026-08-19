@@ -1,0 +1,32 @@
+# DAG Flow — 条件分支示例。
+#
+# condition 引用注册表里的条件谓词（单参数 ctx）。
+# 谓词返回 False 的节点跳过（状态 SKIPPED），下游不受影响、照常执行。
+#
+# 本例 cfg_needs_report 判断 merge 是否有输出，当前数据恒真；
+# 把 app/registry/functions.py 里它改成 return False，
+# report 就会以 SKIPPED 出现在结果里。
+
+name: condition_branching
+description: 条件分支示例：condition 谓词返回 False 时节点被跳过（SKIPPED）。
+
+nodes:
+  fetch:
+    type: cfg_fetch
+
+  clean:
+    type: cfg_clean
+    depends_on: [fetch]
+
+  enrich:
+    type: cfg_enrich
+    depends_on: [fetch]
+
+  merge:
+    type: cfg_merge
+    depends_on: [clean, enrich]
+
+  report:
+    type: cfg_report
+    depends_on: [merge]
+    condition: cfg_needs_report   # True 才执行；False 则 SKIPPED

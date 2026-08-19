@@ -1,15 +1,16 @@
 """Run 相关 API — 挂载在 /api/v1 下的 /runs 路由组"""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.core.response import UnifiedResponseRoute
 from app.engine import NodeStatus
 from app.schemas.runs import (
     ApproveRequest,
     ApproveResponse,
+    RunCreateRequest,
     RunCreateResponse,
     RunDetail,
-    RunListItem,
+    RunListResponse,
 )
 from app.services import orchestrator
 from app.services import reviews as review_service
@@ -19,19 +20,18 @@ router = APIRouter(prefix="/runs", route_class=UnifiedResponseRoute, tags=["runs
 
 
 @router.post("", response_model=RunCreateResponse, status_code=201)
-async def create_run() -> RunCreateResponse:
-    # 先校验配置（load_dag 构建失败抛 ValueError），通过后才落库——
-    # 配置错误直接 400，不产生垃圾 run 记录
-    try:
-        run_id = await orchestrator.create_run()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+async def create_run(body: RunCreateRequest | None = None) -> RunCreateResponse:
+    run_id = await orchestrator.create_run(config_file=body.config_file if body else None)
     return RunCreateResponse(run_id=run_id)
 
 
-@router.get("", response_model=list[RunListItem])
-async def list_runs() -> list[RunListItem]:
-    return await run_service.list_runs()
+@router.get("", response_model=RunListResponse)
+async def list_runs(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
+) -> RunListResponse:
+    rows, total = await run_service.list_runs(offset=offset, limit=limit)
+    return RunListResponse(items=rows, total=total, offset=offset, limit=limit)
 
 
 @router.get("/{run_id}", response_model=RunDetail)
@@ -49,7 +49,9 @@ async def get_run(run_id: int) -> RunDetail:
 async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> ApproveResponse:
     record = await run_service.get_run(run_id)
     entry = (record.nodes or {}).get(node_name) if record else None
-    if not isinstance(entry, dict) or entry.get("status") != NodeStatus.REVIEWING.value:
+    if record is None or not isinstance(entry, dict) or entry.get("status") != NodeStatus.REVIEWING.value:
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
     await review_service.create_decision(run_id, node_name, {"approve": body.approve, "reason": body.reason})
+    # 决策先落库再续跑：resume 后的 approver 读得到决策
+    await orchestrator.resume_record(record)
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

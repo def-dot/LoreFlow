@@ -1,0 +1,23 @@
+# DAG Flow — 重试与指数退避示例。
+#
+# demo_flaky 前两次调用抛 RuntimeError、第三次成功，
+# 配合下面的 retry 配置可观察 3 次尝试 + 退避等待（50ms 起、每次翻倍）。
+#
+# 注意：失败计数是进程级全局，同一进程第二次运行会直接成功。
+# retry 支持两种写法：
+#   简写  retry: 3        （只设 max_retries）
+#   完整映射（如下，可配退避与 retry_on）
+
+name: retry_backoff
+description: 重试与指数退避示例：节点失败后按退避策略自动重试。
+
+nodes:
+  flaky:
+    type: demo_flaky
+    retry:
+      max_retries: 3
+      backoff_base: 0.05      # 首次退避 50ms
+      backoff_factor: 2       # 之后每次翻倍：0.05 → 0.1 → 0.2 …
+      backoff_max: 0.5        # 退避封顶 0.5s
+      jitter: false           # demo 关闭随机抖动，耗时可预期
+      retry_on: [RuntimeError]

@@ -5,7 +5,7 @@ import MermaidDiagram from './MermaidDiagram.vue'
 import NodeStatusTable from './NodeStatusTable.vue'
 import ReviewCards from './ReviewCards.vue'
 
-defineProps<{ detail: RunDetail }>()
+defineProps<{ detail: RunDetail; deciding: boolean }>()
 
 const emit = defineEmits<{ decide: [node: string, approve: boolean, reason: string | null] }>()
 </script>
@@ -31,6 +31,7 @@ const emit = defineEmits<{ decide: [node: string, approve: boolean, reason: stri
         <h2 class="review-title">Human review</h2>
         <ReviewCards
           :reviewing="detail.status === 'running' ? detail.reviewing : []"
+          :deciding="deciding"
           @decide="(node, ok, reason) => emit('decide', node, ok, reason)"
         />
       </section>

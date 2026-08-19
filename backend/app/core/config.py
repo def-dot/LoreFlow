@@ -1,5 +1,7 @@
 """应用配置 - 使用 pydantic Settings 管理环境变量"""
 
+from pathlib import Path
+
 from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings
 
@@ -9,6 +11,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "dev"  # dev | staging | prod
     LOG_LEVEL: str = "INFO"
     WORKERS: int = 1  # 多 worker 各自 lifespan 会重复恢复未完成的 run，保持 1
+
+    # Pipelines — 声明式编排定义目录与缺省文件（app/pipelines）
+    PIPELINES_DIR: Path = Path(__file__).resolve().parent.parent / "pipelines"
 
     # Database
     POSTGRES_SERVER: str = "localhost"

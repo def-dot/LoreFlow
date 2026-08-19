@@ -24,16 +24,23 @@ export interface RunDetail extends RunListItem {
   reviewing: string[]
 }
 
-export function listRuns(): Promise<{ runs: RunListItem[] }> {
-  return api.get('/runs')
+export interface RunListPage {
+  items: RunListItem[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export function listRuns(offset = 0, limit = 50): Promise<RunListPage> {
+  return api.get('/runs', { params: { offset, limit } })
 }
 
 export function getRun(runId: number): Promise<RunDetail> {
   return api.get(`/runs/${runId}`)
 }
 
-export function startRun(): Promise<{ run_id: number }> {
-  return api.post('/runs')
+export function startRun(configFile: string): Promise<{ run_id: number }> {
+  return api.post('/runs', { config_file: configFile })
 }
 
 export function approve(

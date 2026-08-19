@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive } from 'vue'
 
-defineProps<{ reviewing: string[] }>()
+defineProps<{ reviewing: string[]; deciding: boolean }>()
 
 const emit = defineEmits<{ decide: [node: string, approve: boolean, reason: string | null] }>()
 
@@ -14,8 +14,22 @@ const reasons = reactive<Record<string, string>>({})
     <h3>{{ node }}</h3>
     <el-input v-model="reasons[node]" placeholder="拒绝原因（可选）" size="small" />
     <div class="buttons">
-      <el-button type="success" size="small" @click="emit('decide', node, true, null)">✓ Approve</el-button>
-      <el-button type="danger" size="small" @click="emit('decide', node, false, reasons[node] || null)">
+      <el-button
+        type="success"
+        size="small"
+        :loading="deciding"
+        :disabled="deciding"
+        @click="emit('decide', node, true, null)"
+      >
+        ✓ Approve
+      </el-button>
+      <el-button
+        type="danger"
+        size="small"
+        :loading="deciding"
+        :disabled="deciding"
+        @click="emit('decide', node, false, reasons[node] || null)"
+      >
         ✕ Reject
       </el-button>
     </div>

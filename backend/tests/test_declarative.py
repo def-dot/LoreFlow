@@ -52,6 +52,31 @@ async def test_load_dag_with_human_node() -> None:
     assert results["review"].status == NodeStatus.COMPLETED
 
 
+async def test_load_dag_human_with_condition(registered: Any) -> None:
+    """human 节点支持 condition —— False 时跳过审核，approver 不被调用。"""
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def needs_review(ctx: dict[str, Any]) -> bool:
+        return False
+
+    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append((node_name, payload))
+        return {"approve": True}
+
+    registered("needs_review", needs_review, "condition")
+
+    config = {
+        "nodes": {
+            "data": {"type": "cfg_fetch"},
+            "review": {"kind": "human", "depends_on": ["data"], "condition": "needs_review"},
+        },
+    }
+    dag = load_dag(config, approver=approver)
+    results = await dag.run()
+    assert results["review"].status == NodeStatus.SKIPPED
+    assert calls == []
+
+
 async def test_load_dag_loop(registered: Any) -> None:
     def keep_looping(ctx: dict[str, Any], iteration: int) -> bool:
         return iteration < 1
@@ -115,7 +140,7 @@ def test_validation_errors() -> None:
         load_dag({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}})
     with pytest.raises(ValueError, match="需要 'type'"):
         load_dag({"nodes": {"a": {}}})
-    with pytest.raises(ValueError, match="节点 'a' 的类型 'no_such_fn'"):
+    with pytest.raises(ValueError, match="节点 'no_such_fn' 未注册"):
         load_dag({"nodes": {"a": {"type": "no_such_fn"}}})
     with pytest.raises(ValueError, match="不在 DAG 中"):
         load_dag({"nodes": {"a": {"type": "cfg_fetch", "depends_on": ["ghost"]}}})

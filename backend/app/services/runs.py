@@ -7,17 +7,14 @@ services/orchestrator.py。持久化函数调用时才查找
 
 from __future__ import annotations
 
-from sqlmodel import select
+from sqlmodel import func, select
 
 from app.core import database
 from app.models.run import RunRecord
 
 
 async def save(record: RunRecord) -> None:
-    """把记录同步到库（原地，不换对象）。
-
-    首次插入（id is None）走 add：自增 id 回填到同一对象，这样提前
-    捕获了该对象的闭包（如 approver/sink）也能看到 id；之后走 merge。
+    """把记录同步到库。
     """
     async with database.AsyncSessionLocal() as session:
         if record.id is None:
@@ -29,16 +26,23 @@ async def save(record: RunRecord) -> None:
         await session.commit()
 
 
-async def list_runs() -> list[RunRecord]:
-    """All persisted run records, newest first."""
+async def list_runs(
+    offset: int = 0, limit: int | None = None
+) -> tuple[list[RunRecord], int]:
+    """分页取全部持久化 run（新在前），连同全局总数一起返回。
+
+    ``limit=None`` 表示不限条数——启动时 resume_stuck_runs 需要扫全部记录。
+    """
     async with database.AsyncSessionLocal() as session:
-        return list(
-            (
-                await session.exec(
-                    select(RunRecord).order_by(RunRecord.created_at.desc())
-                )
-            ).all()
+        stmt = (
+            select(RunRecord)
+            .order_by(RunRecord.created_at.desc(), RunRecord.id.desc())
+            .offset(offset)
+            .limit(limit)
         )
+        rows = list((await session.exec(stmt)).all())
+        total = (await session.exec(select(func.count(RunRecord.id)))).one()
+        return rows, total
 
 
 async def get_run(run_id: int) -> RunRecord | None:

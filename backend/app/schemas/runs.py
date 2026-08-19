@@ -21,6 +21,15 @@ class RunListItem(BaseModel):
         return value.replace("T", " ", 1) if value else value
 
 
+class RunListResponse(BaseModel):
+    """GET /runs 分页响应：本页条目 + 全局总数。"""
+
+    items: list[RunListItem]
+    total: int
+    offset: int
+    limit: int
+
+
 class NodeSnapshot(BaseModel):
     """一个节点的状态快照（NodeResult.to_dict 的形状）。"""
 
@@ -36,6 +45,12 @@ class RunDetail(RunListItem):
     mermaid: str
     nodes: dict[str, NodeSnapshot]
     reviewing: list[str]
+
+
+class RunCreateRequest(BaseModel):
+    """POST /runs 请求体：可选 config_file（缺省用人工审核演示流水线）。"""
+
+    config_file: str | None = None
 
 
 class RunCreateResponse(BaseModel):

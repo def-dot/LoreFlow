@@ -1,7 +1,11 @@
-"""Run 编排服务 — 执行生命周期：审批器/事件落库、执行、重启恢复。
+"""Run 编排服务 — 执行生命周期：审批器/事件落库、执行、挂起-恢复、启动选主。
 
 从 services/runs.py 抽出的执行侧逻辑，RunRecord 与审批决策的落库
-分别见 services/runs.py、services/reviews.py。create_run /
+分别见 services/runs.py、services/reviews.py。审批节点挂起（REVIEWING
+落库后 run 任务干净退出），/api/approve 写决策后 resume_record 续跑，
+与重启恢复共用同一套重放机制；决策消费是原子的（take_decision 单条
+DELETE..RETURNING），并发续跑恰好一个消费者。多 worker 启动恢复靠
+advisory lock 选主、仅 leader 执行扫描续跑。create_run /
 resume_stuck_runs 是对外入口（路由与 lifespan），其余为内部实现。
 """
 
@@ -11,32 +15,38 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
+from fastapi import HTTPException
+
+from app.core import database
+from app.core.config import settings
 from app.core.logging import get_logger
-from app.demo import PIPELINE_PATH
-from app.engine import DAG, NodeResult, NodeStatus, load_dag
-from app.engine.node import ApproverFunc, NodeEventFunc
+from app.engine import DAG, NodeResult, NodeStatus, SuspendExecution, load_dag
+from app.engine.node import ApproverFunc
+from app.engine.types import NodeEventFunc
 from app.models.run import RunRecord
 from app.services import reviews, runs
 
 logger = get_logger(__name__)
 
+#: 启动恢复选主的 advisory lock key（任意固定值）。
+RECOVERY_LOCK_KEY = 860606
+
 
 def make_approver(record: RunRecord) -> ApproverFunc:
-    """Build the approver for one run: 把节点状态置为 reviewing 并落库，然后
-    轮询决策表直到 /api/approve 写入决策。"""
+    """Build the approver for one run: 首次到达把节点状态置为 reviewing 落库后
+    挂起退出；续跑时先消费决策表——有决策直接返回，无决策再次挂起"""
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
+        decision = await reviews.take_decision(record.id, node_name)
+        if decision is not None:
+            entry["status"] = NodeStatus.RUNNING.value
+            await runs.save(record)
+            return decision
         entry["status"] = NodeStatus.REVIEWING.value
         entry["payload"] = payload
         await runs.save(record)
-        while True:
-            await asyncio.sleep(0.3)
-            decision = await reviews.take_decision(record.id, node_name)
-            if decision is not None:
-                entry["status"] = NodeStatus.RUNNING.value
-                await runs.save(record)
-                return decision
+        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批")
 
     return approver
 
@@ -60,36 +70,46 @@ async def run_pipeline(
     dag: DAG,
     resume: dict[str, dict[str, Any]] | None = None,
 ) -> None:
+    """执行一次 run：dag.run 返回 → completed；挂起 → 保持 running 干净退出
+    （等 /approve 续跑）；异常 → failed。finished_at 只在终态写入。"""
     try:
         await dag.run(resume=resume)
         record.status = "completed"
+        record.finished_at = datetime.now().isoformat(timespec="seconds")
+        await runs.save(record)
     except asyncio.CancelledError:
         record.status = "cancelled"
+        record.finished_at = datetime.now().isoformat(timespec="seconds")
+        await runs.save(record)
         raise
+    except SuspendExecution:
+        # 挂起
+        return
     except Exception as exc:
         record.error = f"{type(exc).__name__}: {exc}"
         record.status = "failed"
-    finally:
         record.finished_at = datetime.now().isoformat(timespec="seconds")
         await runs.save(record)
 
 
-async def create_run() -> int:
-    """校验配置并落库一个新 run，返回 run_id。
+async def create_run(config_file: str) -> int:
+    """校验配置并落库一个新 run，返回 run_id。config_file 缺省用人工审核演示。
     """
+    path = settings.PIPELINES_DIR / config_file
+    if not path.is_file():
+        raise ValueError(f"未知的流水线配置 {config_file!r}")
     record = RunRecord(
-        name=PIPELINE_PATH.name,
-        config_file=PIPELINE_PATH.name,
+        name=path.name,
+        config_file=path.name,
         mermaid="",
         created_at=datetime.now().isoformat(timespec="seconds"),
         status="running",
     )
     dag = load_dag(
-        PIPELINE_PATH,
+        path,
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
-    await runs.save(record)
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
     await runs.save(record)
@@ -98,30 +118,50 @@ async def create_run() -> int:
 
 
 async def resume_record(record: RunRecord) -> None:
-    """重启后恢复未完成的 run：已完成节点快照重建上下文、重跑剩余部分。
-
-    审批节点会重新挂起继续等决策——决策表里没被消费的决策会被恢复后
-    的审批器继续消费，审批不丢。"""
-    if not record.config_file:
-        record.status = "cancelled"
-        await runs.save(record)
-        return
-    try:
-        dag = load_dag(
-            PIPELINE_PATH.parent / record.config_file,
-            approver=make_approver(record),
-            on_event=make_event_sink(record),
-        )
-    except ValueError as exc:
-        record.status = "failed"
-        record.error = f"resume failed: {exc}"
-        await runs.save(record)
-        return
+    """审批触发或重启后恢复 run：重放 DAG 续跑。"""
+    dag = load_dag(
+        settings.PIPELINES_DIR / record.config_file,
+        approver=make_approver(record),
+        on_event=make_event_sink(record),
+    )
     asyncio.create_task(run_pipeline(record, dag, resume=record.nodes))
 
 
+async def _acquire_recovery_lock() -> Any:
+    """抢启动恢复选主权（session 级 advisory lock）：成功返回持有的连接，
+    失败返回 None。非 PG（SQLite 测试）直接视为抢到。"""
+    bind = database.AsyncSessionLocal.kw.get("bind")
+    if bind is None or bind.dialect.name != "postgresql":
+        return "sqlite"
+    raw = await bind.raw_connection()
+    driver = raw.driver_connection
+    got = await driver.fetchval("SELECT pg_try_advisory_lock($1)", RECOVERY_LOCK_KEY)
+    if not got:
+        await raw.close()
+        return None
+    return raw
+
+
+async def _release_recovery_lock(raw: Any) -> None:
+    if raw == "sqlite":
+        return
+    await raw.driver_connection.execute("SELECT pg_advisory_unlock($1)", RECOVERY_LOCK_KEY)
+    await raw.close()
+
+
 async def resume_stuck_runs() -> None:
-    """启动时恢复上次进程退出时仍在 running 的 run（见 lifespan）。"""
-    for record in await runs.list_runs():
-        if record.status == "running":
-            await resume_record(record)
+    """启动时恢复上次进程退出时仍在 running 的 run（见 lifespan）。
+
+    advisory lock 选主、仅 leader 扫描续跑——多 worker 同时启动时
+    每个 run 恰好被恢复一次，不会重复执行。
+    """
+    raw = await _acquire_recovery_lock()
+    if raw is None:
+        return
+    try:
+        rows, _ = await runs.list_runs()  # limit=None：启动扫描全部记录
+        for record in rows:
+            if record.status == "running":
+                await resume_record(record)
+    finally:
+        await _release_recovery_lock(raw)

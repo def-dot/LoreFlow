@@ -9,8 +9,10 @@ import type { RunDetail, RunListItem } from '@/api/runs'
 export const useRunsStore = defineStore('runs', {
   state: () => ({
     runs: [] as RunListItem[],
+    total: 0,
     detail: null as RunDetail | null,
     selectedId: null as number | null,
+    deciding: false, // 审批请求进行中：按钮防重复点击
   }),
 
   getters: {
@@ -20,7 +22,8 @@ export const useRunsStore = defineStore('runs', {
   actions: {
     async fetchRuns() {
       const data = await listRuns()
-      this.runs = data.runs
+      this.runs = data.items
+      this.total = data.total
     },
 
     async select(id: number) {
@@ -34,16 +37,21 @@ export const useRunsStore = defineStore('runs', {
       this.detail = await getRun(this.selectedId)
     },
 
-    async startNewRun() {
-      const { run_id } = await startRun()
+    async startNewRun(configFile: string) {
+      const { run_id } = await startRun(configFile)
       await this.select(run_id)
       await this.fetchRuns()
     },
 
     async decide(node: string, ok: boolean, reason: string | null) {
-      if (this.selectedId === null) return
-      await approve(this.selectedId, node, ok, ok ? null : (reason ?? 'Rejected in web UI'))
-      await this.fetchDetail()
+      if (this.selectedId === null || this.deciding) return
+      this.deciding = true
+      try {
+        await approve(this.selectedId, node, ok, ok ? null : (reason ?? 'Rejected in web UI'))
+        await this.fetchDetail()
+      } finally {
+        this.deciding = false
+      }
     },
   },
 })

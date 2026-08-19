@@ -2,7 +2,7 @@
 import type { RunListItem } from '@/api/runs'
 import { statusTagType } from '@/utils/status'
 
-defineProps<{ runs: RunListItem[]; selectedId: number | null }>()
+defineProps<{ runs: RunListItem[]; total: number; selectedId: number | null }>()
 
 const emit = defineEmits<{ select: [id: number] }>()
 </script>
@@ -11,7 +11,7 @@ const emit = defineEmits<{ select: [id: number] }>()
   <aside class="run-side">
     <div class="head">
       <h2>Runs</h2>
-      <span class="muted">{{ runs.length }}</span>
+      <span class="muted">{{ total }}</span>
     </div>
     <div class="run-list">
       <div

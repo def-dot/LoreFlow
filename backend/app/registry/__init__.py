@@ -1,8 +1,7 @@
 """
 结构化函数注册表 — 系统支持的节点类型目录。
 
-YAML 的 ``type:`` / ``condition:`` 只能引用这里注册的名字（引擎侧
-load_dag 会拒绝未知键）。每个条目带元数据（kind/label/description），
+YAML 的 ``type:`` / ``condition:`` 只能引用这里注册的名字。每个条目带元数据（kind/label/description），
 供 API 枚举与未来页面配置使用；:func:`as_functions` 投影成引擎消费的
 name → callable 映射。
 
@@ -26,6 +25,10 @@ from .functions import (
     cfg_needs_report,
     cfg_publish,
     cfg_report,
+    demo_flaky,
+    demo_keep_iterating,
+    demo_needs_review,
+    demo_tick,
 )
 
 NodeKind = Literal["function", "condition"]
@@ -96,6 +99,34 @@ NODE_TYPES: tuple[NodeType, ...] = (
         kind="condition",
         label="是否需要报告",
         description="条件谓词：merge 有输出才执行下游",
+    ),
+    NodeType(
+        name="demo_flaky",
+        func=demo_flaky,
+        kind="function",
+        label="演示重试",
+        description="前两次调用失败、第三次成功，演示 retry/backoff",
+    ),
+    NodeType(
+        name="demo_tick",
+        func=demo_tick,
+        kind="function",
+        label="演示循环计数",
+        description="每轮迭代 tick+1，结果累积在共享上下文",
+    ),
+    NodeType(
+        name="demo_keep_iterating",
+        func=demo_keep_iterating,
+        kind="condition",
+        label="演示循环条件",
+        description="循环谓词：iteration < 3 继续（多一个 iteration 参数）",
+    ),
+    NodeType(
+        name="demo_needs_review",
+        func=demo_needs_review,
+        kind="condition",
+        label="演示按需审核",
+        description="条件谓词：正文超过 30 字符才需要人工审核",
     ),
 )
 

@@ -68,13 +68,14 @@ from typing import Any
 from app.registry import resolve_function
 
 from .dag import DAG
-from .node import ApproverFunc, Node, NodeEventFunc
+from .node import ApproverFunc, Node
 from .resolve import parse_retry
+from .types import NodeEventFunc
 
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
     "node": {"type", "depends_on", "retry", "timeout", "condition", "metadata"},
-    "human": {"depends_on", "retry", "prompt"},
+    "human": {"depends_on", "retry", "prompt", "condition"},
     "loop": {"depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
 }
 
@@ -131,10 +132,12 @@ def load_dag(
         retry = parse_retry(spec.get("retry"))
 
         if kind == "human":
+            condition = spec.get("condition")
             dag.human_node(
                 name,
                 depends_on=deps,
                 prompt=spec.get("prompt"),
+                condition=resolve_function(condition) if condition else None,
                 retry=retry,
                 approver=approver,
             )

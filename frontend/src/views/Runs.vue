@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import { useRunsStore } from '@/stores/runs'
+import { usePipelinesStore } from '@/stores/pipelines'
 
 const store = useRunsStore()
+const pipelinesStore = usePipelinesStore()
+
+// 新建 run 时运行的流水线配置（下拉来自 /pipelines，默认主演示流水线）
+const configFile = ref('pipeline.yaml')
+// 防止 New run 按钮重复点击导致并发创建
+const creating = ref(false)
 
 // ---------------------------------------------------------------------------
 // 轮询（沿用旧 index.html 的两路 1s 轮询：列表有 running 就刷新列表；
@@ -59,9 +66,15 @@ async function select(id: number) {
 }
 
 async function startNewRun() {
-  await store.startNewRun()
-  startDetailPolling()
-  startRunsPolling()
+  if (creating.value) return
+  creating.value = true
+  try {
+    await store.startNewRun(configFile.value)
+    startDetailPolling()
+    startRunsPolling()
+  } finally {
+    creating.value = false
+  }
 }
 
 async function decide(node: string, ok: boolean, reason: string | null) {
@@ -79,6 +92,15 @@ onMounted(async () => {
   } catch {
     // 后端未启动时静默，等用户刷新
   }
+  pipelinesStore
+    .fetchPipelines()
+    .then(() => {
+      // 默认项不在目录里时退到列表第一项（后端缺省仍是 pipeline.yaml）
+      if (!pipelinesStore.pipelines.some((p) => p.filename === configFile.value)) {
+        configFile.value = pipelinesStore.pipelines[0]?.filename ?? configFile.value
+      }
+    })
+    .catch(() => {})
 })
 
 onUnmounted(() => {
@@ -90,12 +112,29 @@ onUnmounted(() => {
 <template>
   <div class="page">
     <header class="page-head">
-      <h1>DAG Flow</h1>
-      <el-button @click="startNewRun">▶ New run</el-button>
+      <el-select
+        v-model="configFile"
+        :disabled="!pipelinesStore.pipelines.length"
+        placeholder="选择流水线"
+        style="width: 260px"
+      >
+        <el-option
+          v-for="p in pipelinesStore.pipelines"
+          :key="p.filename"
+          :value="p.filename"
+          :label="`${p.name}（${p.filename}）`"
+        />
+      </el-select>
+      <el-button type="primary" :loading="creating" @click="startNewRun">▶ New run</el-button>
     </header>
     <main class="layout">
-      <RunList :runs="store.runs" :selected-id="store.selectedId" @select="select" />
-      <RunDetail v-if="store.detail" :detail="store.detail" @decide="decide" />
+      <RunList :runs="store.runs" :total="store.total" :selected-id="store.selectedId" @select="select" />
+      <RunDetail
+        v-if="store.detail"
+        :detail="store.detail"
+        :deciding="store.deciding"
+        @decide="decide"
+      />
       <div v-else class="muted">选择或创建一个 run 查看执行状态。</div>
     </main>
   </div>
