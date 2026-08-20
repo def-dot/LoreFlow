@@ -21,7 +21,7 @@ async def list_plugins() -> PluginListResponse:
 @router.post("/reload", response_model=PluginListResponse)
 async def reload_plugins() -> PluginListResponse:
     """重扫插件目录：新增/更新插件、清理已删除文件（坏文件跳过并记录 error）。"""
-    plugin_loader.sync_plugins()
+    plugin_loader.load_plugins()
     return PluginListResponse(
         plugins=[PluginOut(**asdict(p)) for p in plugin_loader.list_plugins()]
     )

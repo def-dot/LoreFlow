@@ -1,4 +1,4 @@
-"""插件加载 — load_plugins 启动加载与 sync_plugins 运行期重扫（新增/更新/清理/容错）"""
+"""插件加载 — load_plugins 扫描目录：新增/更新/清理删除/坏文件容错（启动与重载同路径）"""
 
 import sys
 from pathlib import Path
@@ -42,7 +42,6 @@ def test_load_plugins_scans_directory(monkeypatch, tmp_path, isolated_registry) 
     plugin_loader.load_plugins()
 
     assert REGISTRY["dir_probe"].label == "插件节点"
-    assert REGISTRY["dir_probe"].builtin is True  # @node 注册 → 与内置同等待遇
     assert "_skip" not in REGISTRY  # 下划线前缀跳过
     info = next(
         p for p in plugin_loader.list_plugins() if p.module == f"{tmp_path.name}.notify"
@@ -61,7 +60,7 @@ def test_sync_adds_new_file(monkeypatch, tmp_path, isolated_registry) -> None:
     plugin_loader.load_plugins()
 
     _write(tmp_path / "b.py", '@node(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
-    plugin_loader.sync_plugins()
+    plugin_loader.load_plugins()
 
     assert "a_probe" in REGISTRY and "b_probe" in REGISTRY
     assert {p.filename for p in plugin_loader.list_plugins()} == {"a.py", "b.py"}
@@ -74,7 +73,7 @@ def test_sync_removes_deleted_file(monkeypatch, tmp_path, isolated_registry) -> 
     plugin_loader.load_plugins()
 
     path.unlink()
-    plugin_loader.sync_plugins()
+    plugin_loader.load_plugins()
 
     assert "a_probe" not in REGISTRY  # 僵尸类型被清理
     assert plugin_loader.list_plugins() == []
@@ -91,12 +90,30 @@ def test_sync_broken_new_file_rolls_back(monkeypatch, tmp_path, isolated_registr
         '@node(label="半成品", description="")\nasync def broken_probe(ctx: dict) -> str:\n    return "b"\n'
         'raise RuntimeError("boom")\n',
     )
-    plugin_loader.sync_plugins()
+    plugin_loader.load_plugins()
 
     assert "a_probe" in REGISTRY
     assert "broken_probe" not in REGISTRY  # 部分注册被回滚
     info = next(p for p in plugin_loader.list_plugins() if p.filename == "broken.py")
     assert info.node_names == [] and "boom" in info.error
+
+
+def test_sync_updates_existing_file(monkeypatch, tmp_path, isolated_registry) -> None:
+    """同一文件内容变化：新增节点注册进来，删除节点消失。"""
+    path = tmp_path / "a.py"
+    _write(path, '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
+    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    plugin_loader.load_plugins()
+    assert "a_probe" in REGISTRY
+
+    # 更新：删除 a_probe，新增 b_probe
+    _write(path, '@node(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
+    plugin_loader.load_plugins()
+
+    assert "a_probe" not in REGISTRY
+    assert REGISTRY["b_probe"].label == "B"
+    info = next(p for p in plugin_loader.list_plugins() if p.module == f"{tmp_path.name}.a")
+    assert info.node_names == ["b_probe"] and info.error is None
 
 
 def test_sync_broken_update_keeps_old_version(monkeypatch, tmp_path, isolated_registry) -> None:
@@ -107,7 +124,7 @@ def test_sync_broken_update_keeps_old_version(monkeypatch, tmp_path, isolated_re
     plugin_loader.load_plugins()
 
     _write(path, "raise RuntimeError('boom')\n")
-    plugin_loader.sync_plugins()
+    plugin_loader.load_plugins()
 
     assert REGISTRY["a_probe"].label == "A"  # 旧版本仍然生效
     info = next(p for p in plugin_loader.list_plugins() if p.filename == "a.py")

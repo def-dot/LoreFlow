@@ -6,21 +6,21 @@ import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
 from app.engine.resolve import parse_retry
-from app.registry import NodeType, register, unregister
+from app.registry import REGISTRY, NodeType
 
 
 @pytest.fixture
 def registered() -> Any:
-    """临时注册测试用的节点函数，测试结束后自动撤销。"""
+    """临时注册测试用的节点函数，测试结束后自动撤销（直接读写 REGISTRY）。"""
     added: list[str] = []
 
     def _reg(name: str, func: Any, kind: Literal["function", "condition"]) -> None:
-        register(NodeType(name=name, func=func, kind=kind, label=name, description=name))
+        REGISTRY[name] = NodeType(name=name, func=func, kind=kind, label=name, description=name)
         added.append(name)
 
     yield _reg
     for name in added:
-        unregister(name)
+        REGISTRY.pop(name, None)
 
 
 async def test_load_dag_from_dict_runs() -> None:
@@ -109,7 +109,7 @@ def test_registry_only_lookup() -> None:
 
     # 点路径不是注册名字，同样被拒绝
     with pytest.raises(ValueError, match="未注册"):
-        load_dag({"nodes": {"b": {"type": "app.registry.functions.cfg_fetch"}}})
+        load_dag({"nodes": {"b": {"type": "app.registry.nodes.cfg_fetch"}}})
 
 
 def test_parse_retry_forms() -> None:
