@@ -69,6 +69,18 @@ async def test_pipeline_detail_retry(client: AsyncClient) -> None:
     assert flaky["retry"] == "重试 3 次，退避 0.05s×2（≤0.5s），仅 RuntimeError，无抖动"
 
 
+async def test_pipeline_detail_plugin(client: AsyncClient) -> None:
+    """插件节点与内置节点混用：detail 里解析出插件 label/description。"""
+    resp = await client.get("/api/v1/pipelines/07_plugin_demo.yaml")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    notify = {n["name"]: n for n in data["nodes"]}["notify"]
+    assert notify["type"] == "notify_message"
+    assert notify["type_label"] == "生成通知"
+    assert notify["condition"] == "notify_long_body"
+    assert notify["condition_label"] == "长文通知"
+
+
 async def test_pipeline_unknown_404(client: AsyncClient) -> None:
     """未知文件名走白名单 404（中文 msg + 空信封）。"""
     resp = await client.get("/api/v1/pipelines/nope.yaml")

@@ -9,11 +9,7 @@ const route = useRoute()
     <nav class="top-nav">
       <span class="brand">DAG Flow</span>
       <router-link to="/" class="nav-link" :class="{ active: route.name === 'runs' }">Runs</router-link>
-      <router-link
-        to="/pipelines"
-        class="nav-link"
-        :class="{ active: route.name === 'pipelines' }"
-      >Pipelines</router-link>
+      <router-link to="/plugins" class="nav-link" :class="{ active: route.name === 'plugins' }">节点目录</router-link>
     </nav>
     <router-view />
   </div>

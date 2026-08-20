@@ -63,15 +63,24 @@ inputs          initial context passed to :meth:`DAG.run`; stored on the
 from __future__ import annotations
 
 import yaml
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from app.registry import resolve_function
+from app.registry import REGISTRY
 
 from .dag import DAG
 from .node import ApproverFunc, Node
 from .resolve import parse_retry
 from .types import NodeEventFunc
+
+
+def _resolve_function(name: str) -> Callable[..., Any]:
+    """按名字查全局注册表；未注册时抛中文 ValueError（异常处理器映射为 400）。"""
+    node_type = REGISTRY.get(name)
+    if node_type is None:
+        raise ValueError(f"节点 {name!r} 未注册")
+    return node_type.func
 
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
@@ -144,7 +153,7 @@ def load_dag(
                 name,
                 depends_on=deps,
                 prompt=spec.get("prompt"),
-                condition=resolve_function(condition) if condition else None,
+                condition=_resolve_function(condition) if condition else None,
                 retry=retry,
                 approver=approver,
             )
@@ -162,7 +171,7 @@ def load_dag(
             dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
-                condition=resolve_function(spec["condition"]),
+                condition=_resolve_function(spec["condition"]),
                 depends_on=deps,
                 max_iterations=int(spec.get("max_iterations", 100)),
                 retry=retry,
@@ -176,11 +185,11 @@ def load_dag(
             dag.add_node(
                 Node(
                     name=name,
-                    func=resolve_function(spec["type"]),
+                    func=_resolve_function(spec["type"]),
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
-                    condition=resolve_function(condition) if condition else None,
+                    condition=_resolve_function(condition) if condition else None,
                     metadata=spec.get("metadata") or {},
                 )
             )

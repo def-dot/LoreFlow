@@ -8,7 +8,10 @@ import ReviewCards from './ReviewCards.vue'
 
 const props = defineProps<{ detail: RunDetail; deciding: boolean }>()
 
-const emit = defineEmits<{ decide: [node: string, approve: boolean, reason: string | null] }>()
+const emit = defineEmits<{
+  decide: [node: string, approve: boolean, reason: string | null]
+  viewConfig: []
+}>()
 
 // 节点名 → 状态，供 MermaidDiagram 按状态给图里的节点上色
 const nodeStatuses = computed(() =>
@@ -32,6 +35,7 @@ const reviewing = computed(() =>
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
         {{ detail.status === 'running' ? 'running…' : detail.status }}
       </el-tag>
+      <el-button size="small" plain @click="emit('viewConfig')">查看配置</el-button>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
     <div class="panels">

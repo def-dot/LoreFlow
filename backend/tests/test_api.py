@@ -73,7 +73,7 @@ async def test_health(client: AsyncClient) -> None:
 
 
 async def test_node_types_catalog(client: AsyncClient) -> None:
-    """注册表目录：枚举全部类型，条件谓词单独成类，不含函数实现。"""
+    """注册表目录：内置 + 插件类型全部枚举，条件谓词单独成类，不含函数实现。"""
     resp = await client.get("/api/v1/node-types")
     assert resp.status_code == 200
     body = resp.json()
@@ -98,7 +98,10 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
     assert set(types[0]) == {"name", "kind", "label", "description"}
 
     conditions = [t["name"] for t in types if t["kind"] == "condition"]
-    assert conditions == ["cfg_needs_report", "demo_keep_iterating", "demo_needs_review"]
+    assert conditions == ["cfg_needs_report", "demo_keep_iterating", "demo_needs_review", "notify_long_body"]
+
+    notify = {t["name"]: t for t in types}["notify_message"]  # 插件类型随目录自动出现
+    assert notify["kind"] == "function" and notify["label"] == "生成通知"
 
 
 async def test_run_lifecycle_approve(client: AsyncClient) -> None:

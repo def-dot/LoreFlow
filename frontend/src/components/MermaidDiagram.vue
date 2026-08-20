@@ -1,3 +1,11 @@
+<script lang="ts">
+// 模块级渲染计数器：跨组件实例全局唯一。
+// mermaid.render 会按 id 从整个 document 移除同名元素（清理上次渲染残留），
+// 若每个实例各自从 1 计数，RunDetail 的图与预览 drawer 的图会撞 id，
+// 后渲染者把先渲染者的 SVG 从 DOM 删掉 → 图凭空消失。
+let renderSeq = 0
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import mermaid from 'mermaid'
@@ -66,8 +74,6 @@ function decorate(source: string, statuses?: Record<string, string>): string {
   }
   return lines.join('\n')
 }
-
-let renderSeq = 0
 
 async function render() {
   if (!graphEl.value) return

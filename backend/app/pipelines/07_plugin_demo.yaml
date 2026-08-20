@@ -1,0 +1,34 @@
+# DAG Flow — 插件示例。
+#
+# notify_message / notify_long_body 由 custom_plugins/notify.py 提供：
+#   - 配置：settings.PLUGINS_DIR（默认 custom_plugins/，启动时自动扫描加载）
+#   - 用法：与内置节点完全一致，type:/condition: 直接引用即可
+#
+# 加载方式（需先加载插件或由服务启动自动加载）：
+#     from app.engine import load_dag
+#     dag = load_dag("app/pipelines/07_plugin_demo.yaml")
+#     results = await dag.run()
+
+name: plugin_demo
+description: 插件示例：NODE_MODULES 加载的插件节点与内置节点混用。
+
+nodes:
+  fetch:
+    type: cfg_fetch
+
+  clean:
+    type: cfg_clean
+    depends_on: [fetch]
+
+  enrich:
+    type: cfg_enrich
+    depends_on: [fetch]
+
+  merge:
+    type: cfg_merge
+    depends_on: [clean, enrich]
+
+  notify:
+    type: notify_message
+    depends_on: [merge]
+    condition: notify_long_body

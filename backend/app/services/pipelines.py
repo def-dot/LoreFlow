@@ -17,7 +17,7 @@ from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
 from app.engine.declarative import read_yaml
 from app.engine.resolve import parse_retry
-from app.registry import all_types
+from app.registry import REGISTRY
 
 logger = get_logger(__name__)
 
@@ -103,7 +103,7 @@ def get_pipeline_detail(filename: str) -> dict[str, Any]:
     path = settings.PIPELINES_DIR / filename
     raw, config = read_yaml(path)
     dag = load_dag(config, approver=_noop_approver)
-    registry = {t.name: t for t in all_types()}
+    registry = REGISTRY
     nodes_cfg = config.get("nodes") or {}
     rows = [_node_row(name, nodes_cfg.get(name) or {}, registry) for name in dag.topological_order()]
     return {

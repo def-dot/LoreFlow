@@ -3,7 +3,7 @@ Value conversion for the declarative layer.
 
 Turns config fragments — exception names, retry specs — into engine
 objects (exception classes, ``RetryPolicy``). Function-key resolution
-lives in :mod:`app.registry` (``resolve_function``).
+lives in :mod:`app.registry` (``REGISTRY``).
 """
 
 from __future__ import annotations

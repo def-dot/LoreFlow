@@ -16,6 +16,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 import app.core.database as db_mod
 import app.services.orchestrator as orchestrator
 from app.main import app
+from app.registry.plugins import load_plugins
+
+load_plugins()  # 模拟 lifespan 的插件加载（ASGITransport 不运行 lifespan）
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 test_engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})

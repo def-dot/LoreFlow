@@ -1,6 +1,6 @@
 # DAG Flow — 基础示例：串行依赖 + 并行分支 + 汇聚。
 #
-# 节点函数在 Python 侧注册（见 app/registry 的 NODE_TYPES），
+# 节点函数在 Python 侧用 @node 装饰器注册（见 app/registry），
 # 这个文件只声明编排结构。
 #
 # 加载方式：

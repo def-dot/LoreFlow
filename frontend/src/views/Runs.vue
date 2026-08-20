@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
+import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
 import { useRunsStore } from '@/stores/runs'
 import { usePipelinesStore } from '@/stores/pipelines'
 
@@ -12,6 +13,31 @@ const pipelinesStore = usePipelinesStore()
 const configFile = ref('pipeline.yaml')
 // 防止 New run 按钮重复点击导致并发创建
 const creating = ref(false)
+
+// ---------------------------------------------------------------------------
+// 流水线预览 drawer：新建 run 前预览所选流水线的定义；run 详情里的
+// 「查看配置」也复用同一个 drawer（用 run 的 config_file 加载）
+// ---------------------------------------------------------------------------
+const previewOpen = ref(false)
+const previewLoading = ref(false)
+const previewError = ref<string | null>(null)
+
+async function openPreview(filename: string) {
+  previewOpen.value = true
+  previewLoading.value = true
+  previewError.value = null
+  try {
+    await pipelinesStore.select(filename)
+  } catch {
+    previewError.value = '加载流水线失败，请检查后端是否可用。'
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function viewConfigOfSelectedRun() {
+  openPreview(store.detail?.config_file ?? configFile.value)
+}
 
 // ---------------------------------------------------------------------------
 // 轮询（沿用旧 index.html 的两路 1s 轮询：列表有 running 就刷新列表；
@@ -146,6 +172,9 @@ onUnmounted(() => {
           :label="`${p.name}（${p.filename}）`"
         />
       </el-select>
+      <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">
+        👁 预览
+      </el-button>
       <el-button type="primary" :loading="creating" @click="startNewRun">▶ New run</el-button>
     </header>
     <main class="layout">
@@ -155,9 +184,15 @@ onUnmounted(() => {
         :detail="store.detail"
         :deciding="store.deciding"
         @decide="decide"
+        @view-config="viewConfigOfSelectedRun"
       />
       <div v-else class="muted">选择或创建一个 run 查看执行状态。</div>
     </main>
+    <el-drawer v-model="previewOpen" title="流水线预览" size="680px">
+      <div v-if="previewLoading" class="muted">加载中…</div>
+      <div v-else-if="previewError" class="muted">{{ previewError }}</div>
+      <PipelineDetailPanel v-else-if="pipelinesStore.detail" :detail="pipelinesStore.detail" />
+    </el-drawer>
   </div>
 </template>
 

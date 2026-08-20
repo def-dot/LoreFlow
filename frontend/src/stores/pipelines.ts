@@ -4,7 +4,7 @@ import type { PipelineDetail, PipelineListItem } from '@/api/pipelines'
 
 /**
  * demo 流水线目录与详情（只读浏览）。列表供 Runs 页下拉选择，
- * 详情供 Pipelines 页展示 DAG/节点表/YAML 源码。
+ * 详情供 Runs 页预览 drawer 展示 DAG/节点表/YAML 源码。
  */
 export const usePipelinesStore = defineStore('pipelines', {
   state: () => ({
