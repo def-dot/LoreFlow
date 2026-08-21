@@ -1,0 +1,22 @@
+# DAG Flow — 内容发布两级审批：输入内容 → 编辑初审 → 主编终审 → 发布。
+
+name: 两级审核
+description: 内容发布两级审批：编辑初审、主编终审，两审都通过才发布。
+
+nodes:
+  输入内容:
+    type: cfg_fetch
+
+  编辑初审:
+    kind: human
+    depends_on: [输入内容]
+    prompt: "请检查标题与正文，同意 y / 拒绝 n。"
+
+  主编终审:
+    kind: human
+    depends_on: [编辑初审]
+    prompt: "一审已通过，同意 y / 拒绝 n。"
+
+  发布:
+    type: cfg_publish
+    depends_on: [主编终审]

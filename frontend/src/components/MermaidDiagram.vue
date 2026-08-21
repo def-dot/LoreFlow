@@ -45,9 +45,10 @@ const sanitizeId = (name: string) => name.replace(/[ -]/g, '_')
 const legend = computed(() => {
   if (!props.statuses) return []
   const used = new Set(Object.values(props.statuses))
-  // 图里存在但还没任何快照的节点 → 视为 pending
+  // 图里存在但还没任何快照的节点 → 视为 pending。
+  // 节点名可以是中文（如 08 的 输入内容），用 \p{L}\p{N}（u 标志）而非 \w
   const statusIds = new Set(Object.keys(props.statuses).map(sanitizeId))
-  const ids = [...props.source.matchAll(/^\s{4}([\w]+)\["/gm)].map((m) => m[1])
+  const ids = [...props.source.matchAll(/^\s{4}([\p{L}\p{N}_]+)\["/gmu)].map((m) => m[1])
   if (ids.some((id) => !statusIds.has(id))) used.add('pending')
   return [...used].filter((s) => STATUS_STYLES[s])
 })
@@ -115,6 +116,11 @@ watch(
 }
 .mermaid-graph :deep(svg) {
   max-width: 100%;
+}
+/* 节点小字行（<i>：类型键 · label）—— 缩小字号、弱化颜色（与图例一致） */
+.mermaid-graph :deep(.nodeLabel i) {
+  font-size: 11px;
+  color: #9aa4b2;
 }
 .legend {
   display: flex;

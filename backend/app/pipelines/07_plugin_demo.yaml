@@ -9,7 +9,7 @@
 #     dag = load_dag("app/pipelines/07_plugin_demo.yaml")
 #     results = await dag.run()
 
-name: plugin_demo
+name: 插件示例
 description: 插件示例：NODE_MODULES 加载的插件节点与内置节点混用。
 
 nodes:

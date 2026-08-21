@@ -250,7 +250,7 @@ async def test_create_run_unknown_config_400(client: AsyncClient) -> None:
 async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
     """重启恢复也按 config_file 找对应的 YAML（非主演示流水线）。"""
     record = RunRecord(
-        name="basic_chain",
+        name="基础链路",
         config_file="01_basic_chain.yaml",
         mermaid="graph TD\n",
         created_at="2026-01-01T00:00:00",

@@ -8,7 +8,7 @@
 # → 共跑 3 轮，ctx["tick"] == 3；
 # loop 节点的输出即累积后的整个上下文。
 
-name: loop_iteration
+name: 循环迭代
 description: 循环示例：loop 按条件重复执行 body 子流水线，带 max_iterations 安全上限。
 
 nodes:

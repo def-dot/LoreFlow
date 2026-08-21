@@ -169,7 +169,7 @@ onUnmounted(() => {
           v-for="p in pipelinesStore.pipelines"
           :key="p.filename"
           :value="p.filename"
-          :label="`${p.name}（${p.filename}）`"
+          :label="p.name"
         />
       </el-select>
       <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">

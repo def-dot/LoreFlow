@@ -16,7 +16,7 @@ async def test_pipelines_list(client: AsyncClient) -> None:
     assert set(pipelines[0]) == {"filename", "name", "description", "node_count"}
 
     main = {p["filename"]: p for p in pipelines}["05_human_review.yaml"]
-    assert main["name"] == "human_review"
+    assert main["name"] == "人工审核"
     assert main["description"]
     assert main["node_count"] == 6
     assert all(p["name"] and p["node_count"] >= 1 for p in pipelines)
@@ -27,9 +27,12 @@ async def test_pipeline_detail_human(client: AsyncClient) -> None:
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert set(data) == {"filename", "name", "description", "node_count", "mermaid", "source", "nodes"}
-    assert data["name"] == "human_conditional"
+    assert data["name"] == "按需审核"
     assert data["mermaid"].startswith("graph TD")
-    assert "name: human_conditional" in data["source"]
+    # 节点名做主行、注册表类型键+label 以小字附后（[?] 是 condition 标记）
+    assert 'fetch["fetch<br/><i>cfg_fetch · 抓取原始数据</i>"]' in data["mermaid"]
+    assert 'review["review<br/><i>人工审核 [?]</i>"]' in data["mermaid"]
+    assert "name: 按需审核" in data["source"]
 
     nodes = {n["name"]: n for n in data["nodes"]}
     fetch = nodes["fetch"]
@@ -53,6 +56,7 @@ async def test_pipeline_detail_loop(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/pipelines/04_loop_iteration.yaml")
     assert resp.status_code == 200
     data = resp.json()["data"]
+    assert 'batch["batch<br/><i>循环</i>"]' in data["mermaid"]
     batch = {n["name"]: n for n in data["nodes"]}["batch"]
     assert batch["kind"] == "loop"
     assert batch["type_label"] == "循环"
@@ -65,6 +69,7 @@ async def test_pipeline_detail_retry(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/pipelines/03_retry_backoff.yaml")
     assert resp.status_code == 200
     data = resp.json()["data"]
+    assert 'flaky["flaky<br/><i>demo_flaky · 演示重试 [R3]</i>"]' in data["mermaid"]
     flaky = {n["name"]: n for n in data["nodes"]}["flaky"]
     assert flaky["retry"] == "重试 3 次，退避 0.05s×2（≤0.5s），仅 RuntimeError，无抖动"
 

@@ -7,7 +7,7 @@
 # 想看到审核真正发生：把 app/registry/functions.py 里
 # demo_needs_review 的阈值改成 20 再跑。
 
-name: human_conditional
+name: 按需审核
 description: 按需审核示例：human 节点带 condition，不满足时自动跳过审核、不挂起流水线。
 
 nodes:

@@ -10,7 +10,7 @@
 #     dag = load_dag("app/pipelines/05_human_review.yaml", approver=terminal_approver)
 #     results = await dag.run()
 
-name: human_review
+name: 人工审核
 description: 人工审核示例：review 节点挂起等待决策，通过则继续、拒绝则级联跳过下游。
 
 nodes:

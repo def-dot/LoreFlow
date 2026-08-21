@@ -213,7 +213,8 @@ class DAG:
             depends_on=depends_on or [],
             retry=retry,
             timeout=timeout,
-            metadata={"loop": True, "max_iterations": max_iterations},
+            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）
+            metadata={"loop": True, "max_iterations": max_iterations, "label": "循环"},
         )
         self.add_node(node)
         return node
@@ -297,7 +298,8 @@ class DAG:
             depends_on=depends_on or [],
             condition=condition,
             retry=retry,
-            metadata={"human_review": True},
+            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）
+            metadata={"human_review": True, "label": "人工审核"},
         )
         self.add_node(node)
         return node
@@ -437,19 +439,29 @@ class DAG:
     # ------------------------------------------------------------------
 
     def to_mermaid(self) -> str:
-        """Render the DAG as a Mermaid flowchart (for docs / debugging)."""
+        """Render the DAG as a Mermaid flowchart (for docs / debugging).
+
+        节点主行是 YAML 里定义的节点名（快照/日志/API 的关联键）；小字行
+        展示节点类型 —— 注册表键 + label（``metadata["type"]``/``["label"]``，
+        见 load_dag），后接 [?]/[Rn] 标记。human/loop 没有 注册表类型，
+        只显示 label。
+        """
         lines = ["graph TD"]
         for node in self._nodes.values():
             nid = node.name.replace(" ", "_").replace("-", "_")
-            extras = []
+            small = []
+            type_name = node.metadata.get("type")
+            label = node.metadata.get("label")
+            if type_name:
+                small.append(f"{type_name} · {label}" if label else type_name)
+            elif label:
+                small.append(label)
             if node.condition:
-                extras.append("[?]")
+                small.append("[?]")
             if node.retry and node.retry.max_retries:
-                extras.append(f"[R{node.retry.max_retries}]")
-            label = node.name
-            if extras:
-                label += f"<br/><i>{' '.join(extras)}</i>"
-            lines.append(f'    {nid}["{label}"]')
+                small.append(f"[R{node.retry.max_retries}]")
+            text = node.name + (f"<br/><i>{' '.join(small)}</i>" if small else "")
+            lines.append(f'    {nid}["{text}"]')
             for dep in node.depends_on:
                 did = dep.replace(" ", "_").replace("-", "_")
                 lines.append(f"    {did} --> {nid}")

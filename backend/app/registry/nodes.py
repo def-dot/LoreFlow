@@ -35,10 +35,18 @@ async def cfg_merge(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"title": ctx["enrich"], "body": ctx["clean"]}
 
 
-@node(label="发布", description="发布人工审核通过的合并结果")
+@node(label="发布", description="发布人工审核通过的内容")
 async def cfg_publish(ctx: dict[str, Any]) -> str:
-    reviewed = ctx["review"]
-    return f"Published: {reviewed['payload']['merge']['title']}"
+    """取最近一次人工审核的 payload（人工节点输出固定含 decision/payload），
+    从中找出带 title 的内容输出（如 merge / fetch 的 {title, body}）。
+    """
+    reviews = [v for v in ctx.values() if isinstance(v, dict) and "decision" in v and "payload" in v]
+    payload = reviews[-1]["payload"] if reviews else ctx
+    titled = next(
+        (v for v in reversed(list(payload.values())) if isinstance(v, dict) and "title" in v),
+        {},
+    )
+    return f"Published: {titled.get('title', '(untitled)')}"
 
 
 @node(kind="condition", label="是否需要报告", description="条件谓词：merge 有输出才执行下游")

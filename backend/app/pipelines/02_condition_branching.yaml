@@ -7,7 +7,7 @@
 # 把 app/registry/functions.py 里它改成 return False，
 # report 就会以 SKIPPED 出现在结果里。
 
-name: condition_branching
+name: 条件分支
 description: 条件分支示例：condition 谓词返回 False 时节点被跳过（SKIPPED）。
 
 nodes:

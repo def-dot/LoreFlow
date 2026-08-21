@@ -8,7 +8,7 @@
 #   简写  retry: 3        （只设 max_retries）
 #   完整映射（如下，可配退避与 retry_on）
 
-name: retry_backoff
+name: 重试退避
 description: 重试与指数退避示例：节点失败后按退避策略自动重试。
 
 nodes:

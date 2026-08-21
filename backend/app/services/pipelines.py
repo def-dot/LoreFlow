@@ -61,7 +61,7 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
     return "，".join(parts)
 
 
-def _node_row(name: str, spec: dict[str, Any], registry: dict[str, Any]) -> dict[str, Any]:
+def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     """把 YAML 节点 spec 合成展示行：类型名来自 spec，label/描述来自注册表。
 
     human/loop 是引擎内置 kind，不在注册表里，给固定 label；type_description
@@ -81,7 +81,7 @@ def _node_row(name: str, spec: dict[str, Any], registry: dict[str, Any]) -> dict
     }
     if kind == "node":
         row["type"] = spec.get("type")
-        node_type = registry.get(row["type"]) if row["type"] else None
+        node_type = REGISTRY.get(row["type"]) if row["type"] else None
         if node_type:
             row["type_label"] = node_type.label
             row["type_description"] = node_type.description
@@ -93,7 +93,7 @@ def _node_row(name: str, spec: dict[str, Any], registry: dict[str, Any]) -> dict
         body = spec.get("body") or {}
         row["type_description"] = f"循环体 {len(body)} 个节点，上限 {spec.get('max_iterations', 100)} 轮"
     if row["condition"]:
-        cond = registry.get(row["condition"])
+        cond = REGISTRY.get(row["condition"])
         row["condition_label"] = cond.label
     return row
 
@@ -103,9 +103,8 @@ def get_pipeline_detail(filename: str) -> dict[str, Any]:
     path = settings.PIPELINES_DIR / filename
     raw, config = read_yaml(path)
     dag = load_dag(config, approver=_noop_approver)
-    registry = REGISTRY
     nodes_cfg = config.get("nodes") or {}
-    rows = [_node_row(name, nodes_cfg.get(name) or {}, registry) for name in dag.topological_order()]
+    rows = [_node_row(name, nodes_cfg.get(name) or {}) for name in dag.topological_order()]
     return {
         "filename": path.name,
         "name": dag.name,

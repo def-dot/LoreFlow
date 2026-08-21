@@ -8,7 +8,7 @@
 #     dag = load_dag("app/pipelines/01_basic_chain.yaml")
 #     results = await dag.run()
 
-name: basic_chain
+name: 基础链路
 description: 基础示例：串行依赖、并行分支与汇聚。
 
 nodes:

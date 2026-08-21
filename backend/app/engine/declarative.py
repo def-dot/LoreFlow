@@ -51,7 +51,9 @@ condition       function key for a predicate: ``(ctx) -> bool`` for node
 prompt          (kind: human) extra text shown to the reviewer
 body            (kind: loop) mapping of body nodes, same schema as ``nodes``
 max_iterations  (kind: loop) safety cap, default 100
-metadata        (kind: node) arbitrary key-value pairs
+metadata        (kind: node) arbitrary key-value pairs; the registry type key
+                and label are injected as defaults (``type``/``label``, shown
+                by DAG.to_mermaid), same-named keys here override them
 
 Top-level fields
 ----------------
@@ -67,7 +69,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from app.registry import REGISTRY
+from app.registry import REGISTRY, NodeType
 
 from .dag import DAG
 from .node import ApproverFunc, Node
@@ -75,12 +77,17 @@ from .resolve import parse_retry
 from .types import NodeEventFunc
 
 
-def _resolve_function(name: str) -> Callable[..., Any]:
+def _resolve_type(name: str) -> NodeType:
     """按名字查全局注册表；未注册时抛中文 ValueError（异常处理器映射为 400）。"""
     node_type = REGISTRY.get(name)
     if node_type is None:
         raise ValueError(f"节点 {name!r} 未注册")
-    return node_type.func
+    return node_type
+
+
+def _resolve_function(name: str) -> Callable[..., Any]:
+    """按名字解析注册表中的函数本体（条件谓词等只需要 func 时用）。"""
+    return _resolve_type(name).func
 
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
@@ -182,15 +189,22 @@ def load_dag(
             if "type" not in spec:
                 raise ValueError(f"节点 {name!r} 需要 'type'（函数键）")
             condition = spec.get("condition")
+            node_type = _resolve_type(spec["type"])
+            # 注册表类型键与 label 写进 metadata 供 to_mermaid 展示；YAML 的
+            # metadata 在后，同名 key（如自定义 label）可覆盖默认值
             dag.add_node(
                 Node(
                     name=name,
-                    func=_resolve_function(spec["type"]),
+                    func=node_type.func,
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
                     condition=_resolve_function(condition) if condition else None,
-                    metadata=spec.get("metadata") or {},
+                    metadata={
+                        "type": node_type.name,
+                        "label": node_type.label,
+                        **(spec.get("metadata") or {}),
+                    },
                 )
             )
 
