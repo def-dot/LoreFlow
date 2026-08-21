@@ -47,7 +47,7 @@ export const useRunsStore = defineStore('runs', {
       if (this.selectedId === null || this.deciding) return
       this.deciding = true
       try {
-        await approve(this.selectedId, node, ok, ok ? null : (reason ?? 'Rejected in web UI'))
+        await approve(this.selectedId, node, ok, ok ? null : reason)
         await this.fetchDetail()
       } finally {
         this.deciding = false

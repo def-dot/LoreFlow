@@ -38,7 +38,7 @@ def make_approver(record: RunRecord) -> ApproverFunc:
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
         
-        if entry.get("output", {}).get("decision"):
+        if entry.get('output') and entry["output"].get("decision"):
             # 重跑时已审核过
             return entry["output"]["decision"]
         
@@ -56,12 +56,7 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
 
 def make_event_sink(record: RunRecord) -> NodeEventFunc:
-    """节点状态变化写进快照并落库。
-
-    RUNNING 事件保留快照里的 decision：executor 在调用节点函数（approver
-    认领决策）之前就发 RUNNING，重放时若不保留，决策会被整表覆盖抹掉，
-    已批准过的节点重新挂起。RETRYING/终态自然覆盖清除，拒绝重试与
-    loop 新迭代不会误复用上一次的决策。"""
+    """节点状态变化写进快照并落库。"""
 
     async def on_event(result: NodeResult) -> None:
         record.nodes[result.node_name] = result.to_dict()
@@ -91,7 +86,7 @@ async def run_pipeline(
         # 挂起：节点+run 两层状态已由 approver 落库，这里不重复写
         return
     except Exception as exc:
-        record.error = f"{type(exc).__name__}: {exc}"
+        record.error = str(exc)
         record.status = "failed"
     finally:
         if record.status != "reviewing":  # 挂起非终态：finished_at 不写
