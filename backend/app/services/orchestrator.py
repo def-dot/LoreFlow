@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -59,18 +59,10 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
 
 def make_event_sink(record: RunRecord) -> NodeEventFunc:
-    """Build the on_event sink for one run: 节点状态变化写进快照并落库。
-
-    approver 认领后把决策写进快照，而 RUNNING 事件会整表覆盖快照——
-    RUNNING 属于同一次到达的进行时，保留 decision 供崩溃重放复用；
-    RETRYING/终态意味着该次到达结束或新到达开始，清除旧决策，防止
-    拒绝重试与 loop 迭代误复用上一次的决策。"""
+    """Build the on_event sink for one run: 节点状态变化写进快照并落库。"""
 
     async def on_event(result: NodeResult) -> None:
-        decision = (record.nodes.get(result.node_name) or {}).get("decision")
         record.nodes[result.node_name] = result.to_dict()
-        if decision is not None and result.status == NodeStatus.RUNNING:
-            record.nodes[result.node_name]["decision"] = decision
         try:
             await runs.save(record)
         except Exception as exc:
