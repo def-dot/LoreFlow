@@ -275,9 +275,8 @@ class DAG:
             if decision.get("approve"):
                 logger.info("[%s] approved by human reviewer", name)
                 return {
-                    "approved": True,
                     "payload": payload,
-                    "reason": decision.get("reason"),
+                    "decision": decision,
                     "approved_at": datetime.now().isoformat(timespec="seconds"),
                 }
 
@@ -285,7 +284,11 @@ class DAG:
             logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
             raise HumanRejected(
                 reason,
-                output={"approved": False, "reason": reason, "payload": payload},
+                output={
+                    "payload": payload,
+                    "decision": decision,
+                    "approved_at": datetime.now().isoformat(timespec="seconds"),
+                },
             )
 
         node = Node(

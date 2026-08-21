@@ -38,15 +38,12 @@ def make_approver(record: RunRecord) -> ApproverFunc:
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
         
-        if entry.get("decision"):
+        if entry.get("output", {}).get("decision"):
             # 重跑时已审核过
-            return entry["decision"]
+            return entry["output"]["decision"]
         
         decision = await reviews.claim_decision(record.id, node_name)
         if decision is not None:
-            entry["status"] = NodeStatus.RUNNING.value
-            entry["decision"] = decision
-            await runs.save(record)
             return decision
         
         entry["status"] = NodeStatus.REVIEWING.value
@@ -67,10 +64,7 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
     loop 新迭代不会误复用上一次的决策。"""
 
     async def on_event(result: NodeResult) -> None:
-        decision = (record.nodes.get(result.node_name) or {}).get("decision")
         record.nodes[result.node_name] = result.to_dict()
-        if decision is not None and result.status == NodeStatus.RUNNING:
-            record.nodes[result.node_name]["decision"] = decision
         try:
             await runs.save(record)
         except Exception as exc:
