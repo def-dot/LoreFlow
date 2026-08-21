@@ -17,6 +17,6 @@ class RunRecord(SQLModel, table=True):
     mermaid: str = ""  # pipeline 图源码（创建 run 时快照进记录）
     created_at: str | None = None
     finished_at: str | None = None
-    status: str = "pending"  # pending/running/completed/failed/cancelled
+    status: str = "pending"  # pending/running/reviewing/completed/failed/cancelled
     error: str | None = None
     nodes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))

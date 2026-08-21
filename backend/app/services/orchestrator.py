@@ -2,7 +2,7 @@
 
 从 services/runs.py 抽出的执行侧逻辑，RunRecord 与审批决策的落库
 分别见 services/runs.py、services/reviews.py。审批节点挂起（节点 REVIEWING
-落库、run 状态置为 reviewing 后 run 任务干净退出），/api/approve 写决策后
+与 run reviewing 同一次落库后 run 任务干净退出），/api/approve 写决策后
 resume_record 续跑，
 与重启恢复共用同一套重放机制；决策认领是原子的（claim_decision 单条
 UPDATE..RETURNING），并发续跑恰好一个消费者，行保留作审计痕迹。认领后
@@ -45,20 +45,21 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
-        # 崩溃窗口重放：决策已认领且写进快照但节点没跑完 → 原样复用
+        
         if entry.get("decision"):
-            entry["status"] = NodeStatus.RUNNING.value
-            await runs.save(record)
-            return cast(dict[str, Any], entry["decision"])
+            # 重跑时已审核过
+            return entry["decision"]
+        
         decision = await reviews.claim_decision(record.id, node_name)
         if decision is not None:
             entry["status"] = NodeStatus.RUNNING.value
             entry["decision"] = decision
             await runs.save(record)
             return decision
+        
         entry["status"] = NodeStatus.REVIEWING.value
         entry["payload"] = payload
-        entry.pop("decision", None)
+        record.status = "reviewing"
         await runs.save(record)
         raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批")
 
@@ -91,8 +92,9 @@ async def run_pipeline(
     dag: DAG,
     resume: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """执行一次 run：dag.run 返回 → completed；挂起 → 保持 running 干净退出
-    （等 /approve 续跑）；异常 → failed。finished_at 只在终态写入。"""
+    """执行一次 run：dag.run 返回 → completed；挂起 → 两层 reviewing 已由
+    approver 同一次 save 落库，干净退出（等 /approve 续跑）；异常 → failed。
+    finished_at 只在终态写入。"""
     try:
         await dag.run(resume=resume)
         record.status = "completed"
@@ -100,12 +102,14 @@ async def run_pipeline(
         record.status = "cancelled"
         raise
     except SuspendExecution:
-        record.status = "reviewing"
+        # 挂起：节点+run 两层状态已由 approver 落库，这里不重复写
+        return
     except Exception as exc:
         record.error = f"{type(exc).__name__}: {exc}"
         record.status = "failed"
     finally:
-        record.finished_at = datetime.now().isoformat(timespec="seconds")
+        if record.status != "reviewing":  # 挂起非终态：finished_at 不写
+            record.finished_at = datetime.now().isoformat(timespec="seconds")
         await runs.save(record)
 
 
