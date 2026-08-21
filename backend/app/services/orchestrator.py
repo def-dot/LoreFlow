@@ -33,15 +33,7 @@ logger = get_logger(__name__)
 
 
 def make_approver(record: RunRecord) -> ApproverFunc:
-    """Build the approver for one run: 首次到达把节点状态置为 reviewing、
-    run 状态也置为 reviewing（对外暴露"需要人工审核"）落库后挂起退出；
-    续跑时先认领决策表——有决策把节点状态改回 running 直接返回，
-    无决策再次挂起。
-
-    认领后的决策同时写进节点快照（entry["decision"]）：进程在"认领到
-    节点完成"窗口内崩溃时，重启重放看到快照里的决策原样复用，不会把
-    已批准过的节点重新挂起（RETRYING/终态事件会清除该键，见
-    make_event_sink，拒绝重试与 loop 新迭代不会被旧决策误带）。"""
+    """人工审核时挂起;审核后恢复"""
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
