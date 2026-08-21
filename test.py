@@ -1,56 +1,36 @@
-import types
+import asyncio
 
-# 1. 模拟全局注册表
-REGISTRY = {}
+class SuspendExecution(Exception):
+    """自定义挂起异常"""
+    pass
 
-# --------------------------------------------------
-# 模拟第一次加载插件文件
-# --------------------------------------------------
-def load_plugin_v1():
-    # 模拟 exec 执行插件源码
-    code = """
-def notify():
-    return "v1: 旧代码"
-"""
-    scope = {}
-    exec(code, scope)
-    REGISTRY["notify"] = scope["notify"]
+async def task_b():
+    print("Task B 开始运行...")
+    await asyncio.sleep(0.5)
+    # 模拟 Task B 抛出异常
+    raise SuspendExecution("Task B 触发了挂起异常！")
 
-load_plugin_v1()
+async def task_a(b_task: asyncio.Task):
+    print("Task A 开始等待 Task B 完成...")
+    # 等待 Task B 执行结束
+    await asyncio.sleep(1)
+    
+    print("Task A 尝试获取 Task B 的结果...")
+    try:
+        # 调用 result() 时，Task B 内部的异常会在 Task A 中抛出
+        res = b_task.result()
+        print(f"Task B 结果: {res}")
+    except SuspendExecution as e:
+        print(f"Task A 捕获到了 Task B 的异常: {e}")
 
-# 2. 模拟构建并启动一个 Run (DAG 构建阶段)
-class Node:
-    def __init__(self, name, func):
-        self.name = name
-        self.func = func # 抄走函数引用
+async def main():
+    # 启动 Task B
+    b_task = asyncio.create_task(task_b())
+    # 将 Task B 的句柄传给 Task A
+    a_task = asyncio.create_task(task_a(b_task))
+    
+    # 等待 Task A 执行完毕
+    await a_task
 
-running_run_node = Node("notification_step", REGISTRY["notify"])
-
-print("=== 重载前 ===")
-print(f"注册表中的函数地址 : {hex(id(REGISTRY['notify']))}")
-print(f"Node节点持有的地址 : {hex(id(running_run_node.func))}")
-print(f"节点执行结果       : {running_run_node.func()}\n")
-
-
-# --------------------------------------------------
-# 3. 模拟热重载插件 (重新 exec 文件)
-# --------------------------------------------------
-def reload_plugin_v2():
-    code = """
-def notify():
-    return "v2: 新代码"
-"""
-    scope = {}
-    exec(code, scope) # 再次执行 def，在内存创建全新函数对象
-    REGISTRY["notify"] = scope["notify"] # 仅覆盖注册表里的 key
-
-reload_plugin_v2()
-
-print("=== 重载后 ===")
-print(f"注册表中的函数地址 : {hex(id(REGISTRY['notify']))} (已被替换为新对象)")
-print(f"旧 Node 持有的地址  : {hex(id(running_run_node.func))} (依然指向旧对象)")
-print(f"旧 Node 执行结果    : {running_run_node.func()} (依然运行旧逻辑)")
-
-# 4. 新起的 Run 才会拿到新代码
-new_run_node = Node("notification_step", REGISTRY["notify"])
-print(f"新 Node 执行结果    : {new_run_node.func()} (拿到新逻辑)")
+if __name__ == "__main__":
+    asyncio.run(main())

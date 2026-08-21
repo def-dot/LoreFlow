@@ -2,7 +2,7 @@
 #
 # review 节点挂起等待决策；approver 返回 {"approve": bool, "reason": str}。
 #   - 通过：review 完成，输出 {approved, payload, ...}，下游继续。
-#   - 拒绝：抛 HumanRejected → review 失败 → 下游（如 publish）级联跳过。
+#   - 拒绝：抛 HumanRejected（拒绝详情记入 output）→ review 失败 → 下游（如 publish）级联跳过。
 #
 # 加载时必须提供 approver —— 终端交互用 terminal_approver，
 # Web 审批场景由 orchestrator.make_approver 提供：

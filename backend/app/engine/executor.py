@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from .node import Node
+from .node import HumanRejected, Node
 from .types import DAGExecutionError, NodeEventFunc, NodeResult, NodeStatus, RetryPolicy, SuspendExecution
 
 logger = logging.getLogger(__name__)
@@ -205,6 +205,17 @@ class DAGExecutor:
                     )
                     return result
 
+                except HumanRejected as exc:
+                    # 人工拒绝是终局决策：不进重试循环，FAILED 结果携带拒绝详情
+                    result = NodeResult(
+                        node_name=node.name,
+                        status=NodeStatus.FAILED,
+                        output=exc.output,
+                        error=exc,
+                        attempts=attempt + 1,
+                    )
+                    return result
+
                 except Exception as exc:
                     last_error = exc
 
@@ -257,11 +268,7 @@ class DAGExecutor:
                 status=NodeStatus.CANCELLED,
             )
         except SuspendExecution:
-            # 挂起：不产生终态结果（REVIEWING+payload 由 approver 直接落库，
-            # emit 会覆盖它），但必须唤醒下游——让级联节点也以挂起退出，
-            # 否则 gather 会永远等它们。
-            suspended = True
-            events[node.name].set()
+            # 挂起：不产生终态结果（REVIEWING+payload 由 approver 直接落库，唤醒下游——让级联节点也以挂起退出
             raise
         except Exception as exc:
             # Should not happen — the code above is defensive, but guard anyway
@@ -272,9 +279,9 @@ class DAGExecutor:
                 error=exc,
             )
         finally:
-            if not suspended:
+            if result:
                 await self._emit(result)
-                events[node.name].set()
+            events[node.name].set()
         return result
 
     # ------------------------------------------------------------------

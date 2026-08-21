@@ -18,8 +18,17 @@ ConditionFunc = Callable[[dict[str, Any]], bool]
 #: and returns a decision dict: ``{"approve": bool, "reason": Optional[str]}``.
 ApproverFunc = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
+
 class HumanRejected(Exception):
-    """Raised by a human review node when the reviewer rejects the payload."""
+    """Raised by a human review node when the reviewer rejects the payload.
+
+    Carries the rejection details as ``output``; the executor special-cases
+    it (终局决策，不进重试循环) and records them in the FAILED node result.
+    """
+
+    def __init__(self, reason: str, output: Any = None):
+        super().__init__(reason)
+        self.output = output
 
 
 @dataclass

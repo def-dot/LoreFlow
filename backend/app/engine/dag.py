@@ -237,7 +237,8 @@ class DAG:
         review the current context. Approving completes the node with
         the reviewed payload; rejecting raises :exc:`HumanRejected`,
         which fails the node and cascades to skip all downstream nodes
-        (standard failure semantics).
+        (standard failure semantics). The rejection details are carried
+        in the FAILED node result's ``output``.
 
         Args:
             name: Unique node name.
@@ -245,9 +246,8 @@ class DAG:
             prompt: Optional extra text shown with the review request.
             condition: Optional predicate; if it returns False the review
                        is skipped (the human is never asked).
-            retry: Optional retry policy. ``HumanRejected`` is a normal
-                   exception, so a policy with default ``retry_on`` will
-                   simply ask the reviewer again after rejection.
+            retry: Optional retry policy. 拒绝是终局决策（HumanRejected 被
+                   executor 专用捕获，不进重试循环），retry 对拒绝无效。
             approver: Async callable ``(node_name, payload) ->
                       {"approve": bool, "reason": Optional[str]}``.
                       Required. Use :func:`terminal_approver` for
@@ -283,7 +283,10 @@ class DAG:
 
             reason = decision.get("reason") or "被人工审核拒绝"
             logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
-            raise HumanRejected(reason)
+            raise HumanRejected(
+                reason,
+                output={"approved": False, "reason": reason, "payload": payload},
+            )
 
         node = Node(
             name=name,

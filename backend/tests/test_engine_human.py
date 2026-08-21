@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, NodeResult, NodeStatus, SuspendExecution
+from app.engine import DAG, DAGExecutionError, NodeResult, NodeStatus, RetryPolicy, SuspendExecution
 from app.engine.node import ApproverFunc
 
 
@@ -71,7 +71,31 @@ async def test_human_reject_cascades_skip() -> None:
     results = excinfo.value.results
     assert results["review"].status == NodeStatus.FAILED
     assert "no good" in str(results["review"].error)
+    assert results["review"].output["approved"] is False  # 拒绝详情记入 output
+    assert results["review"].output["reason"] == "no good"
     assert results["publish"].status == NodeStatus.SKIPPED
+
+
+async def test_human_reject_bypasses_retry() -> None:
+    """拒绝是终局决策：返回 FailedOutput 不进重试循环，attempts 保持 1。"""
+    events: list[NodeResult] = []
+
+    async def on_event(result: NodeResult) -> None:
+        events.append(result)
+
+    dag = DAG("reject_no_retry", on_event=on_event)
+    dag.human_node(
+        "review",
+        retry=RetryPolicy(max_retries=2),
+        approver=fake_approver({"approve": False, "reason": "no"}),
+    )
+
+    with pytest.raises(DAGExecutionError) as excinfo:
+        await dag.run()
+    results = excinfo.value.results
+    assert results["review"].status == NodeStatus.FAILED
+    assert results["review"].attempts == 1
+    assert not any(e.status == NodeStatus.RETRYING for e in events)
 
 
 async def test_human_node_condition_false_skips_review() -> None:
