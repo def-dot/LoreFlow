@@ -106,12 +106,12 @@ def _load(path: Path) -> None:
         if conflicts:
             logger.error("Plugin %s conflicts on nodes: %s", path.name, ", ".join(sorted(conflicts)))
             error = f"节点冲突：{', '.join(sorted(conflicts))} 已被内置节点或其他插件占用"
-            for node_name in new_nodes:
-                unregister(node_name)
-            for node_name in conflicts:
-                REGISTRY[node_name] = existed_nodes[node_name]
+            
         else:
             logger.info("Loaded plugin %s (registered %d: %s)", path.name, len(new_nodes), ", ".join(sorted(new_nodes)))
+
+    if error:
+        REGISTRY = existed_nodes 
 
     _LOADED[module_name] = PluginInfo(
         filename=path.name,
