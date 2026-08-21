@@ -59,10 +59,18 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
 
 def make_event_sink(record: RunRecord) -> NodeEventFunc:
-    """Build the on_event sink for one run: 节点状态变化写进快照并落库。"""
+    """节点状态变化写进快照并落库。
+
+    RUNNING 事件保留快照里的 decision：executor 在调用节点函数（approver
+    认领决策）之前就发 RUNNING，重放时若不保留，决策会被整表覆盖抹掉，
+    已批准过的节点重新挂起。RETRYING/终态自然覆盖清除，拒绝重试与
+    loop 新迭代不会误复用上一次的决策。"""
 
     async def on_event(result: NodeResult) -> None:
+        decision = (record.nodes.get(result.node_name) or {}).get("decision")
         record.nodes[result.node_name] = result.to_dict()
+        if decision is not None and result.status == NodeStatus.RUNNING:
+            record.nodes[result.node_name]["decision"] = decision
         try:
             await runs.save(record)
         except Exception as exc:
