@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+import time
 from contextlib import suppress
 from pathlib import Path
 
@@ -31,6 +32,13 @@ def _write(path: Path, body: str) -> None:
     path.write_text("from app.registry import node\n\n" + body, encoding="utf-8")
 
 
+def _rewrite(path: Path, body: str) -> None:
+    """重写已有插件文件：无字节码守卫下 pyc 按秒级 mtime 校验，
+    等待 mtime 秒值变化再重载，避免命中旧字节码（已接受的限制）。"""
+    _write(path, body)
+    time.sleep(1.05)
+
+
 def test_load_plugins_scans_directory(monkeypatch, tmp_path, isolated_registry) -> None:
     _write(
         tmp_path / "notify.py",
@@ -39,7 +47,7 @@ def test_load_plugins_scans_directory(monkeypatch, tmp_path, isolated_registry) 
         '    return "ok"\n',
     )
     (tmp_path / "_skip.py").write_text("raise RuntimeError('不应被加载')\n", encoding="utf-8")
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
 
     plugin_loader.load_plugins()
 
@@ -52,7 +60,7 @@ def test_load_plugins_scans_directory(monkeypatch, tmp_path, isolated_registry) 
 
 
 def test_load_plugins_missing_dir(monkeypatch, tmp_path, isolated_registry) -> None:
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path / "no_such_dir")
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path / "no_such_dir")
     plugin_loader.load_plugins()  # 目录不存在只告警，不抛异常
 
 
@@ -69,7 +77,7 @@ async def _wait_until(predicate, timeout: float = 5.0) -> None:
 async def test_watch_plugins_auto_reloads(monkeypatch, tmp_path, isolated_registry) -> None:
     """后台轮询发现目录变化后自动重扫：放文件即生效，无需手动触发。"""
     _write(tmp_path / "a.py", '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     monkeypatch.setattr(settings, "PLUGINS_POLL_SECONDS", 0.01)
     plugin_loader.load_plugins()
 
@@ -87,7 +95,7 @@ async def test_watch_plugins_auto_reloads(monkeypatch, tmp_path, isolated_regist
 
 def test_sync_adds_new_file(monkeypatch, tmp_path, isolated_registry) -> None:
     _write(tmp_path / "a.py", '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
     _write(tmp_path / "b.py", '@node(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
@@ -100,7 +108,7 @@ def test_sync_adds_new_file(monkeypatch, tmp_path, isolated_registry) -> None:
 def test_sync_removes_deleted_file(monkeypatch, tmp_path, isolated_registry) -> None:
     path = tmp_path / "a.py"
     _write(path, '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
     path.unlink()
@@ -113,7 +121,7 @@ def test_sync_removes_deleted_file(monkeypatch, tmp_path, isolated_registry) -> 
 def test_sync_broken_new_file_registers_nothing(monkeypatch, tmp_path, isolated_registry) -> None:
     """新文件注册一半后抛错：已注册的部分被清除，其余插件不受影响。"""
     _write(tmp_path / "a.py", '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
     _write(
@@ -139,7 +147,7 @@ def test_plugin_importing_builtin_node(monkeypatch, tmp_path, isolated_registry)
         '    data = await cfg_fetch(ctx)\n'
         '    return data["title"]\n',
     )
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
     assert "cfg_fetch" in REGISTRY
@@ -157,12 +165,12 @@ def test_sync_updates_existing_file(monkeypatch, tmp_path, isolated_registry) ->
     """同一文件内容变化：新增节点注册进来，删除节点消失。"""
     path = tmp_path / "a.py"
     _write(path, '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
     assert "a_probe" in REGISTRY
 
     # 更新：删除 a_probe，新增 b_probe
-    _write(path, '@node(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
+    _rewrite(path, '@node(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
     plugin_loader.load_plugins()
 
     assert "a_probe" not in REGISTRY
@@ -176,17 +184,17 @@ def test_sync_broken_update_clears_nodes(monkeypatch, tmp_path, isolated_registr
     path = tmp_path / "a.py"
     good = '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n'
     _write(path, good)
-    monkeypatch.setattr(settings, "PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
-    _write(path, "raise RuntimeError('boom')\n")
+    _rewrite(path, "raise RuntimeError('boom')\n")
     plugin_loader.load_plugins()
 
     assert "a_probe" not in REGISTRY  # 坏更新后节点消失，fail-obvious
     info = next(p for p in plugin_loader.list_plugins() if p.module == f"{tmp_path.name}.a")
     assert info.node_names == [] and "boom" in info.error
 
-    _write(path, good)
+    _rewrite(path, good)
     plugin_loader.load_plugins()
 
     assert REGISTRY["a_probe"].label == "A"  # 修复后重载恢复

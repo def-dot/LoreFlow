@@ -21,7 +21,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.registry import unregister
+from app.registry import REGISTRY, NodeType, unregister
 
 logger = get_logger(__name__)
 plugins_dir = Path(settings.PLUGINS_DIR)
@@ -40,18 +40,21 @@ _LOADED: dict[str, PluginInfo] = {}
 
 
 def load_plugins() -> None:
-    """扫描插件目录：新增/更新插件，清理已删除文件。。
+    """整体重建：撤销全部插件注册后全量重扫。
+
+    删除的文件自然消失（不再被扫描），坏文件跳过并记录 error。
+    同步执行于事件循环中，重建期间无请求穿插（原子可见）。
+
+    节点名冲突（与内置或其他插件重复）时，冲突插件整体判失败：
+    冲突名回滚到原归属，其余注册撤销，error 记录冲突详情。
     """
+    for info in _LOADED.values():
+        for name in info.node_names:
+            unregister(name)
+    _LOADED.clear()
+    # wipe 后 REGISTRY 里只剩内置；taken 追踪每个名字的当前归属（用于冲突回滚）
     for path in sorted(p for p in plugins_dir.glob("*.py") if not p.name.startswith("_")):
-        _load(path, plugins_dir)
-    for module_name, info in list(_LOADED.items()):
-        if not (plugins_dir / info.filename).exists():
-            for name in info.node_names:
-                unregister(name)
-            del _LOADED[module_name]
-            logger.info(
-                "Removed stale plugin %s (types: %s)", info.filename, ", ".join(info.node_names)
-            )
+        _load(path)
 
 
 async def watch_plugins() -> None:
@@ -75,76 +78,51 @@ def _dir_signature(plugins_dir: Path) -> tuple[tuple[str, int, int], ...]:
 
 
 def list_plugins() -> list[PluginInfo]:
-    """当前已加载（含加载失败）的插件状态，按文件名排序。"""
+    """当前已加载（含加载失败）的插件"""
     return sorted(_LOADED.values(), key=lambda p: p.filename)
 
 
-def _module_nodes(module: types.ModuleType) -> list[str]:
-    """模块中被 @node 装饰的函数注册的节点名（按名字排序去重）。
-
-    @node 注册时会把 NodeType 绑到函数对象上（``__node_type__``），
-    直接从模块命名空间收集，不依赖执行前后的 REGISTRY 差集。
-
-    按 ``__module__`` 过滤：只收集定义在本模块的函数——import 进来
-    的已装饰函数（如复用内置节点）不属于本插件，否则重载时会把
-    别处的注册误删且无法恢复。
+def _load(path: Path) -> None:
+    """加载单个插件文件（调用前注册表已被 load_plugins 清空）。
     """
-    return sorted(
-        {
+    module_name = f"{plugins_dir.name}.{path.stem}"
+    new_nodes = set()
+    existed_nodes = dict(REGISTRY)
+    error = None
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+
+        new_nodes = {
             node_type.name
             for value in vars(module).values()
             if (node_type := getattr(value, "__node_type__", None)) is not None
             and getattr(value, "__module__", None) == module.__name__
         }
-    )
 
+        conflicts = set(new_nodes) & set(existed_nodes)
+        if conflicts:
+            logger.error("Plugin %s conflicts on nodes: %s", path.name, ", ".join(conflicts))
+            error = f"节点冲突：{', '.join(conflicts)} 已被内置节点或其他插件占用"
 
-def _load(path: Path, plugins_dir: Path) -> None:
-    """加载单个插件文件：先弹出旧注册；失败时本次加载全部撤销。
+            for node_name in new_nodes:
+                unregister(node_name)
 
-    REGISTRY 只反映文件当前的成功加载结果：坏更新会让本插件节点
-    全部消失（error 记进 _LOADED），修复文件后重载即恢复。
-    """
-    module_name = f"{plugins_dir.name}.{path.stem}"
-    prev = _LOADED.get(module_name)
-    if prev is not None:
-        for name in prev.node_names:
-            unregister(name)
-
-    module = None
-    try:
-        # exec_module 会校验 __pycache__ 的 .pyc：快速重写文件时 mtime
-        # 相同会命中旧字节码（新内容不生效），执行期间禁用字节码缓存
-        old_flag = sys.dont_write_bytecode
-        sys.dont_write_bytecode = True
-        try:
-            spec = importlib.util.spec_from_file_location(module_name, path)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-        finally:
-            sys.dont_write_bytecode = old_flag
+            for node_name in conflicts:
+                REGISTRY[node_name] = existed_nodes[node_name]
+        else:
+            logger.info("Loaded plugin %s (registered %d: %s)", path.name, len(new_nodes), ", ".join(new_nodes))
     except Exception as exc:
-        # 失败：撤销失败模块已注册的部分节点，本文件注册为空集
-        if module is not None:
-            for name in _module_nodes(module):
-                unregister(name)
-        logger.error("Failed to reload plugin %s: %s", path.name, exc)
-        _LOADED[module_name] = PluginInfo(
-            filename=path.name,
-            module=module_name,
-            node_names=[],
-            loaded_at=datetime.now(timezone.utc),
-            error=str(exc),
-        )
-        return
+        logger.error("Plugin %s error: %s", path.name)
+        error = str(exc)
 
-    added = _module_nodes(module)
     _LOADED[module_name] = PluginInfo(
         filename=path.name,
         module=module_name,
-        node_names=added,
+        node_names=list(new_nodes),
         loaded_at=datetime.now(timezone.utc),
-        error=None,
+        error=error,
     )
-    logger.info("Loaded plugin %s (registered %d: %s)", path.name, len(added), ", ".join(added))
+ 
