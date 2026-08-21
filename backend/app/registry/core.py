@@ -64,3 +64,9 @@ def node(
         return func
 
     return decorator
+
+
+def unregister(name: str) -> NodeType | None:
+    """从全局注册表删除一个节点。
+    """
+    return REGISTRY.pop(name, None)

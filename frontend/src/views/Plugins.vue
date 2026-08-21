@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
-import { listPlugins, reloadPlugins, type PluginInfo } from '@/api/plugins'
+import { listPlugins, type PluginInfo } from '@/api/plugins'
 
 const plugins = ref<PluginInfo[]>([])
 const nodeTypes = ref<NodeTypeInfo[]>([])
 const loading = ref(false)
-const reloading = ref(false)
 
 // 内置节点 = 全量类型目录减去插件注册的名字（框架自带，只读展示）
 const builtinNodes = computed(() => {
@@ -28,20 +26,6 @@ async function fetchAll() {
   }
 }
 
-async function reload() {
-  if (reloading.value) return
-  reloading.value = true
-  try {
-    // 重载后插件注册名可能变化，类型目录一并刷新
-    const [p, n] = await Promise.all([reloadPlugins(), listNodeTypes()])
-    plugins.value = p.plugins
-    nodeTypes.value = n.node_types
-    ElMessage.success('插件已重载')
-  } finally {
-    reloading.value = false
-  }
-}
-
 function fmtTime(iso: string) {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
@@ -54,7 +38,7 @@ onMounted(fetchAll)
   <div class="page">
     <header class="page-head">
       <h1>节点目录</h1>
-      <span class="muted">YAML 中 type:/condition: 可引用的全部类型；插件放入 custom_plugins/ 后点重载即生效。</span>
+      <span class="muted">YAML 中 type:/condition: 可引用的全部类型；修改插件文件后数秒内自动生效。</span>
     </header>
 
     <main class="panel">
@@ -86,8 +70,6 @@ onMounted(fetchAll)
         <div class="card-head">
           <h2>插件</h2>
           <span class="muted">settings.PLUGINS_DIR（默认 backend/custom_plugins/）</span>
-          <div class="spacer" />
-          <el-button type="primary" :loading="reloading" @click="reload">⟳ 重载</el-button>
         </div>
         <el-table v-loading="loading" :data="plugins" empty-text="暂无已加载插件">
           <el-table-column prop="filename" label="文件" min-width="160" />
@@ -132,9 +114,6 @@ onMounted(fetchAll)
 .page-head h1 {
   font-size: 18px;
   margin: 0;
-}
-.spacer {
-  flex: 1;
 }
 .panel {
   padding: 18px 20px;

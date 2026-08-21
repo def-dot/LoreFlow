@@ -13,8 +13,9 @@ Run::
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
-from app.registry.plugins import load_plugins
+from app.registry.plugins import load_plugins, watch_plugins
 from app.routers import health, node_types, pipelines, plugins, runs
 from app.services import orchestrator
 
@@ -33,8 +34,14 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
-    await orchestrator.resume_stuck_runs()
-    yield
+    watcher = asyncio.create_task(watch_plugins())
+    try:
+        await orchestrator.resume_stuck_runs()
+        yield
+    finally:
+        watcher.cancel()
+        with suppress(asyncio.CancelledError):
+            await watcher
 
 
 app = FastAPI(

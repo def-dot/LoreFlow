@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     # Pipelines — 声明式编排定义目录与缺省文件（app/pipelines）
     PIPELINES_DIR: Path = Path(__file__).resolve().parent.parent / "pipelines"
 
-    # Node plugins — 自定义插件目录：启动时自动加载其中 *.py 模块（@node 导入即注册）
+    # Node plugins — 自定义插件目录：启动时加载，之后后台轮询自动重扫（@node 导入即注册）
     PLUGINS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "custom_plugins"
+    PLUGINS_POLL_SECONDS: int = 3  # 插件目录变更检测间隔
 
     # Database
     POSTGRES_SERVER: str = "localhost"
