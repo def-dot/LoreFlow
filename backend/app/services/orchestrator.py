@@ -98,18 +98,15 @@ async def run_pipeline(
         record.status = "completed"
     except asyncio.CancelledError:
         record.status = "cancelled"
-        record.finished_at = datetime.now().isoformat(timespec="seconds")
-        await runs.save(record)
         raise
     except SuspendExecution:
         record.status = "reviewing"
-        await runs.save(record)
-        return
     except Exception as exc:
         record.error = f"{type(exc).__name__}: {exc}"
         record.status = "failed"
-    record.finished_at = datetime.now().isoformat(timespec="seconds")
-    await runs.save(record)
+    finally:
+        record.finished_at = datetime.now().isoformat(timespec="seconds")
+        await runs.save(record)
 
 
 async def create_run(config_file: str | None = None) -> int:
