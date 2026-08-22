@@ -1,10 +1,25 @@
 <script setup lang="ts">
 import type { RunListItem } from '@/api/runs'
-import { statusTagType } from '@/utils/status'
+import { statusColor } from '@/utils/status'
 
 defineProps<{ runs: RunListItem[]; total: number; selectedId: number | null }>()
 
 const emit = defineEmits<{ select: [id: number] }>()
+
+// 侧栏时间只留一小格（MM-DD HH:mm），完整时间放 title 悬停查看
+function fmtShort(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function fmtFull(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
 </script>
 
 <template>
@@ -21,8 +36,14 @@ const emit = defineEmits<{ select: [id: number] }>()
         :class="{ sel: r.id === selectedId }"
         @click="emit('select', r.id)"
       >
-        <el-tag :type="statusTagType(r.status)" size="small" disable-transitions>{{ r.status }}</el-tag>
-        <span class="rid">{{ r.name }} · {{ r.created_at ?? '' }}</span>
+        <span
+          class="dot"
+          :class="{ live: r.status === 'running' || r.status === 'reviewing' }"
+          :style="{ background: statusColor(r.status) }"
+          :title="r.status"
+        ></span>
+        <span class="name" :title="r.name">{{ r.name }}</span>
+        <span class="time" :title="fmtFull(r.created_at)">{{ fmtShort(r.created_at) }}</span>
       </div>
       <div v-if="!runs.length" class="muted">No runs yet — click “New run” to start one.</div>
     </div>
@@ -64,8 +85,37 @@ const emit = defineEmits<{ select: [id: number] }>()
   border-color: #3b82f6;
   background: #1c2433;
 }
-.rid {
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.dot.live {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
-  color: #9aa4b2;
+  color: #c6cdd8;
+}
+.time {
+  flex: none;
+  font-size: 11px;
+  color: #6f7885;
+  font-variant-numeric: tabular-nums;
 }
 </style>

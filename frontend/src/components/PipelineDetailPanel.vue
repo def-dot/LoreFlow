@@ -11,16 +11,13 @@ function kindTagType(kind: string) {
 
 <template>
   <div>
-    <div class="detail-head">
-      <span class="muted">{{ detail.name }}</span>
-      <span class="muted">{{ detail.filename }}</span>
-      <el-tag size="small" disable-transitions>{{ detail.node_count }} nodes</el-tag>
-    </div>
+    <!-- 无自身头部：仅用于 Runs 页 drawer，名称/文件名由 drawer 标题展示 -->
+    <!-- description 描述整条流水线：置顶导语，先读说明再看图，图中的重试/条件标记才有解释 -->
+    <p v-if="detail.description" class="muted desc">{{ detail.description }}</p>
     <div class="panels">
       <section class="panel">
         <h2>Pipeline</h2>
         <MermaidDiagram :source="detail.mermaid" />
-        <p v-if="detail.description" class="muted desc">{{ detail.description }}</p>
       </section>
       <section class="panel">
         <h2>Nodes</h2>
@@ -64,13 +61,6 @@ function kindTagType(kind: string) {
 </template>
 
 <style scoped>
-.detail-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
 /* 自适应：drawer 里单列，宽容器里双列 */
 .panels {
   display: grid;
@@ -84,7 +74,7 @@ function kindTagType(kind: string) {
   padding: 14px;
 }
 .desc {
-  margin: 10px 0 0;
+  margin: 0 0 14px;
 }
 .source-panel {
   margin-top: 18px;

@@ -23,7 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core import database
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.engine import DAG, NodeResult, NodeStatus, SuspendExecution, load_dag
+from app.engine import (
+    DAG,
+    DAGExecutionError,
+    NodeResult,
+    NodeStatus,
+    SuspendExecution,
+    load_dag,
+)
 from app.engine.node import ApproverFunc
 from app.engine.types import NodeEventFunc
 from app.models.run import RunRecord
@@ -68,6 +75,18 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
     return on_event
 
 
+def _failure_summary(exc: Exception) -> str:
+    """run 失败摘要：DAGExecutionError 只列出失败节点名，这里把各节点
+    的失败原因（异常类型 + 消息）逐行附上，供 Runs 页 run-error 展示。"""
+    if not isinstance(exc, DAGExecutionError):
+        return str(exc)
+    lines = [str(exc)]
+    for name, result in exc.results.items():
+        if result.status == NodeStatus.FAILED and result.error is not None:
+            lines.append(f"  {name}: {type(result.error).__name__}: {result.error}")
+    return "\n".join(lines)
+
+
 async def run_pipeline(
     record: RunRecord,
     dag: DAG,
@@ -86,7 +105,7 @@ async def run_pipeline(
         # 挂起：节点+run 两层状态已由 approver 落库，这里不重复写
         return
     except Exception as exc:
-        record.error = str(exc)
+        record.error = _failure_summary(exc)
         record.status = "failed"
     finally:
         if record.status != "reviewing":  # 挂起非终态：finished_at 不写
