@@ -64,6 +64,9 @@ class DAG:
         name: A human-readable label for this workflow (used in logs & diagrams).
         default_inputs: Initial context applied when :meth:`run` is called
                         without explicit ``inputs``.
+        required_inputs: Keys that must be present in the inputs at
+                        :meth:`run` time (no default to fall back on).
+                        Missing keys raise ``ValueError`` before any node runs.
         on_event: Optional async callback invoked on every node state change
                   (running/retrying/completed/failed/skipped/cancelled) and
                   awaited. Useful for live progress monitoring (e.g. a web UI).
@@ -73,10 +76,12 @@ class DAG:
         self,
         name: str = "dag",
         default_inputs: dict[str, Any] | None = None,
+        required_inputs: list[str] | None = None,
         on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
     ):
         self.name = name
         self.default_inputs = default_inputs if default_inputs else {}
+        self.required_inputs = list(required_inputs) if required_inputs else []
         self.on_event = on_event
         self._nodes: dict[str, Node] = {}
 
@@ -205,7 +210,10 @@ class DAG:
             else:
                 logger.warning("[%s] max iterations (%d) reached", name, max_iterations)
 
-            return ctx
+            # 输出 = 累积上下文的快照（浅拷贝）：直接返回 ctx 会让执行器的
+            # ctx[name] = output 形成自引用，JSON 序列化（快照落库）报
+            # Circular reference detected，run 卡死在 running
+            return dict(ctx)
 
         node = Node(
             name=name,
@@ -417,7 +425,7 @@ class DAG:
             A dict mapping every node name to its :class:`NodeResult`.
 
         Raises:
-            ValueError: If the DAG fails validation.
+            ValueError: If the DAG fails validation or required inputs are missing.
             DAGExecutionError: If any nodes failed.
         """
         errors = self.validate()
@@ -426,6 +434,11 @@ class DAG:
 
         if inputs is None:
             inputs = self.default_inputs
+
+        # 必填输入在跑任何节点前校验：缺参的 run 不该执行到一半才 KeyError
+        missing = [k for k in self.required_inputs if k not in (inputs or {})]
+        if missing:
+            raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
         if logger.isEnabledFor(logging.DEBUG):

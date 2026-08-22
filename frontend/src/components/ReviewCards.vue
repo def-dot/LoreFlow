@@ -14,7 +14,7 @@ function payloadText(payload: unknown): string {
 </script>
 
 <template>
-  <div v-if="!reviewing.length" class="muted">No review awaiting decision.</div>
+  <div v-if="!reviewing.length" class="muted">暂无待审核节点。</div>
   <div v-for="item in reviewing" :key="item.name" class="review-card">
     <h3>{{ item.name }}</h3>
     <pre class="payload">{{ payloadText(item.payload) }}</pre>
@@ -27,7 +27,7 @@ function payloadText(payload: unknown): string {
         :disabled="deciding"
         @click="emit('decide', item.name, true, null)"
       >
-        ✓ Approve
+        ✓ 通过
       </el-button>
       <el-button
         type="danger"
@@ -36,33 +36,40 @@ function payloadText(payload: unknown): string {
         :disabled="deciding"
         @click="emit('decide', item.name, false, reasons[item.name] || null)"
       >
-        ✕ Reject
+        ✕ 驳回
       </el-button>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* 人工介入时刻：抬升面板 + 琥珀左条（与 running 的青色形成机器/人对位） */
 .review-card {
-  border: 1px solid #3a4150;
-  border-radius: 8px;
-  padding: 10px 12px;
+  background: rgba(22, 28, 54, 0.85);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--amber);
+  border-radius: 10px;
+  padding: 12px 14px;
   margin-bottom: 12px;
 }
 .review-card h3 {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
 }
 .payload {
   margin: 0 0 10px;
   max-height: 200px;
   overflow: auto;
-  padding: 8px;
-  background: #16181d;
-  border: 1px solid #2a2f38;
-  border-radius: 6px;
-  color: #9aa4b2;
-  font-size: 12px;
+  padding: 10px;
+  background: #0c1122;
+  border: 1px solid #1a2038;
+  border-radius: 8px;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
   white-space: pre-wrap;
 }
 .buttons {

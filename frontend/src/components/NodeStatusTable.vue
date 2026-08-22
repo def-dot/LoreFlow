@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { NodeSnapshot, RunDetail } from '@/api/runs'
-import { statusTagType } from '@/utils/status'
+import { statusLabel, statusTagType } from '@/utils/status'
 
 const props = defineProps<{ detail: RunDetail }>()
 
@@ -24,15 +24,15 @@ function cellText(row: Row): string {
 
 <template>
   <el-table :data="rows" size="small" max-height="420">
-    <el-table-column prop="name" label="Node" min-width="120" />
-    <el-table-column label="Status" width="110">
+    <el-table-column prop="name" label="节点" min-width="120" />
+    <el-table-column label="状态" width="110">
       <template #default="{ row }">
-        <el-tag :type="statusTagType(row.status)" size="small" disable-transitions>{{ row.status }}</el-tag>
+        <el-tag :type="statusTagType(row.status)" size="small" disable-transitions>{{ statusLabel(row.status) }}</el-tag>
       </template>
     </el-table-column>
-    <el-table-column prop="attempts" label="Attempts" width="90" />
-    <el-table-column prop="duration_ms" label="ms" width="70" />
-    <el-table-column label="Output / Error" min-width="200">
+    <el-table-column prop="attempts" label="尝试次数" width="90" />
+    <el-table-column prop="duration_ms" label="耗时(ms)" width="90" />
+    <el-table-column label="输出 / 错误" min-width="200">
       <template #default="{ row }">
         <pre class="cell-pre">{{ cellText(row) }}</pre>
       </template>
@@ -41,13 +41,19 @@ function cellText(row: Row): string {
 </template>
 
 <style scoped>
+/* 输出/错误单元格：等宽控制台读出样式 */
 .cell-pre {
   margin: 0;
   max-width: 400px;
   max-height: 90px;
   overflow: auto;
-  color: #9aa4b2;
-  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(10, 14, 27, 0.65);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
   white-space: pre-wrap;
 }
 </style>

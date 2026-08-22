@@ -9,6 +9,7 @@ let renderSeq = 0
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import mermaid from 'mermaid'
+import { statusLabel } from '@/utils/status'
 
 const props = defineProps<{
   source: string
@@ -18,9 +19,26 @@ const props = defineProps<{
 
 const graphEl = ref<HTMLElement>()
 
-mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' })
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark',
+  securityLevel: 'loose',
+  // 融入靛蓝图纸：节点底用面板色、线用次级文字色
+  themeVariables: {
+    background: 'transparent',
+    primaryColor: '#161c36',
+    primaryBorderColor: '#2e3860',
+    primaryTextColor: '#e9edf9',
+    lineColor: '#626b8c',
+    edgeLabelBackground: '#10152a',
+    clusterBkg: 'transparent',
+    fontSize: '13px',
+    fontFamily: "ui-monospace, 'Cascadia Code', Consolas, 'SF Mono', monospace",
+  },
+})
 
-// 状态 → mermaid classDef 样式（与 element-plus 深色 tag 色系一致）
+// 状态 → mermaid classDef 样式：青 = 机器流转，琥珀 = 人工介入，
+// 虚线 = 尚未/未真正执行（pending / skipped / retrying）
 interface StatusStyle {
   fill: string
   stroke: string
@@ -29,14 +47,14 @@ interface StatusStyle {
 }
 
 const STATUS_STYLES: Record<string, StatusStyle> = {
-  completed: { fill: '#1c3a26', stroke: '#67c23a', color: '#c8efc0' },
-  running: { fill: '#123352', stroke: '#409eff', color: '#bfe0ff' },
-  reviewing: { fill: '#3a2e10', stroke: '#e6a23c', color: '#ffe2ae' },
-  retrying: { fill: '#3a2e10', stroke: '#e6a23c', color: '#ffe2ae', dashed: true },
-  failed: { fill: '#3a1d1d', stroke: '#f56c6c', color: '#ffc7c7' },
-  skipped: { fill: '#23262d', stroke: '#909399', color: '#c6cbd3', dashed: true },
-  cancelled: { fill: '#23262d', stroke: '#909399', color: '#c6cbd3' },
-  pending: { fill: '#1f232b', stroke: '#5c6675', color: '#9aa4b2', dashed: true },
+  completed: { fill: '#12281d', stroke: '#57c88a', color: '#c9f2dc' },
+  running: { fill: '#0d2927', stroke: '#4dc4b2', color: '#c2efe6' },
+  reviewing: { fill: '#2e2410', stroke: '#f0c24b', color: '#ffe9b0' },
+  retrying: { fill: '#2e2410', stroke: '#f0c24b', color: '#ffe9b0', dashed: true },
+  failed: { fill: '#321a1c', stroke: '#ef7370', color: '#ffd3d0' },
+  skipped: { fill: '#171c30', stroke: '#8790b0', color: '#c3c9de', dashed: true },
+  cancelled: { fill: '#171c30', stroke: '#8790b0', color: '#c3c9de' },
+  pending: { fill: '#131830', stroke: '#4a5478', color: '#9aa3c4', dashed: true },
 }
 
 // 与后端 dag.to_mermaid 一致的节点 id 消毒规则：空格/连字符 → 下划线
@@ -78,7 +96,7 @@ function decorate(source: string, statuses?: Record<string, string>): string {
 
 async function render() {
   if (!graphEl.value) return
-  const source = decorate(props.source || 'graph TD\n  none[No pipeline]', props.statuses)
+  const source = decorate(props.source || 'graph TD\n  none[暂无流水线]', props.statuses)
   renderSeq += 1
   try {
     const { svg } = await mermaid.render(`mermaid-${renderSeq}`, source)
@@ -104,7 +122,7 @@ watch(
     <div v-if="legend.length" class="legend">
       <span v-for="status in legend" :key="status" class="legend-item">
         <i class="dot" :style="{ background: STATUS_STYLES[status].stroke }" />
-        {{ status }}
+        {{ statusLabel(status) }}
       </span>
     </div>
   </div>
@@ -120,7 +138,7 @@ watch(
 /* 节点小字行（<i>：类型键 · label）—— 缩小字号、弱化颜色（与图例一致） */
 .mermaid-graph :deep(.nodeLabel i) {
   font-size: 11px;
-  color: #9aa4b2;
+  color: var(--ink-3);
 }
 .legend {
   display: flex;
@@ -128,7 +146,7 @@ watch(
   gap: 6px 14px;
   margin-top: 10px;
   font-size: 12px;
-  color: #9aa4b2;
+  color: var(--ink-3);
 }
 .legend-item {
   display: inline-flex;

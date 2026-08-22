@@ -1,65 +1,5 @@
 """
 Declarative configuration layer for DAG Flow.
-
-Define a workflow's *wiring* in YAML/JSON instead of Python code.
-Only the node functions (the actual work) need to be implemented and
-registered — the orchestration itself (dependencies, retries,
-conditions, human review, loops) lives in the config file.
-
-Example YAML::
-
-    name: content_pipeline
-
-    nodes:
-      fetch:
-        type: cfg_fetch        # function key in the registry
-        retry: 2               # shorthand for RetryPolicy(max_retries=2)
-
-      clean:
-        type: cfg_clean
-        depends_on: [fetch]
-
-      review:
-        kind: human            # human-in-the-loop review node
-        depends_on: [clean]
-        prompt: "Please check the result."
-
-      publish:
-        type: cfg_publish
-        depends_on: [review]
-
-Usage::
-
-    from app.engine import load_dag, terminal_approver
-
-    # ``type``/``condition`` 键必须是 app.registry 中注册过的名字:
-    dag = load_dag("pipeline.yaml", approver=terminal_approver)
-    results = await dag.run()   # uses dag.default_inputs from the YAML
-
-Node spec fields
-----------------
-kind            ``node`` (default) | ``human`` | ``loop``
-type            function key registered in *app.registry*;
-depends_on      list of upstream node names
-retry           int (max_retries shorthand) or a RetryPolicy field mapping:
-                max_retries, backoff_base, backoff_factor, backoff_max,
-                retry_on (list of exception names), jitter
-timeout         per-node timeout in seconds
-condition       function key for a predicate: ``(ctx) -> bool`` for node
-                branching; ``(ctx, iteration) -> bool`` for loops, where
-                True means "keep looping"
-prompt          (kind: human) extra text shown to the reviewer
-body            (kind: loop) mapping of body nodes, same schema as ``nodes``
-max_iterations  (kind: loop) safety cap, default 100
-metadata        (kind: node) arbitrary key-value pairs; the registry type key
-                and label are injected as defaults (``type``/``label``, shown
-                by DAG.to_mermaid), same-named keys here override them
-
-Top-level fields
-----------------
-name            DAG name (default ``"dag"``)
-inputs          initial context passed to :meth:`DAG.run`; stored on the
-                returned DAG as ``dag.default_inputs``
 """
 
 from __future__ import annotations
@@ -95,6 +35,71 @@ _KIND_FIELDS = {
     "human": {"depends_on", "retry", "prompt", "condition"},
     "loop": {"depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
 }
+
+#: Fields accepted per key in a ``params`` mapping; anything else raises.
+_PARAM_FIELDS = {"label", "description", "default", "required"}
+
+
+def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
+    """归一化输入参数声明 → ``(参数行, default_inputs, required_inputs)``。
+
+    两种声明形式产出统一的参数行 ``{name, label, description, default,
+    has_default, required}``（供 API/前端表单渲染）：
+
+    - 富形式：顶层 ``params``，每键 spec ``{label, description, default,
+      required}``，引擎用的默认值/必填键由 spec 派生
+    - 简式：``inputs``（默认值映射）+ ``required_inputs``（裸键列表），
+      行内 label 退化为键名、无说明
+
+    两种形式互斥（同键两处声明必然二义）。
+    """
+    params = config.get("params")
+    if params is not None and ("inputs" in config or "required_inputs" in config):
+        raise ValueError("params 不能与 inputs/required_inputs 混用，统一用 params 声明")
+
+    if params is None:
+        required = config.get("required_inputs") or []
+        if not isinstance(required, list) or not all(isinstance(k, str) and k for k in required):
+            raise ValueError(f"required_inputs 必须是非空字符串列表，实际是 {required!r}")
+        defaults = config.get("inputs") or {}
+        overlapped = sorted(set(required) & set(defaults))
+        if overlapped:
+            raise ValueError(f"required_inputs 与 inputs 默认值重叠（必填键不应有默认值）: {', '.join(overlapped)}")
+        rows = [{"name": k, "label": k, "description": None, "default": None, "has_default": False, "required": True} for k in required]
+        rows += [{"name": k, "label": k, "description": None, "default": v, "has_default": True, "required": False} for k, v in defaults.items()]
+        return rows, defaults, list(required)
+
+    if not isinstance(params, dict) or not params:
+        raise ValueError(f"params 必须是非空映射(dict)，实际是 {params!r}")
+    rows: list[dict[str, Any]] = []
+    defaults: dict[str, Any] = {}
+    required: list[str] = []
+    for name, spec in params.items():
+        if not isinstance(spec, dict):
+            raise ValueError(f"参数 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
+        unknown = set(spec) - _PARAM_FIELDS
+        if unknown:
+            raise ValueError(f"参数 {name!r}: 不支持的字段 {sorted(unknown)}")
+        for text_field in ("label", "description"):
+            if spec.get(text_field) is not None and not isinstance(spec[text_field], str):
+                raise ValueError(f"参数 {name!r}: {text_field} 必须是字符串")
+        is_required = bool(spec.get("required"))
+        has_default = "default" in spec
+        if is_required and has_default:
+            raise ValueError(f"参数 {name!r}: 必填参数不应有默认值")
+        if is_required:
+            required.append(name)
+        elif has_default:
+            defaults[name] = spec["default"]
+        rows.append({
+            "name": name,
+            "label": spec.get("label") or name,
+            "description": spec.get("description"),
+            "default": spec.get("default"),
+            "has_default": has_default,
+            "required": is_required,
+        })
+    return rows, defaults, required
 
 
 def read_yaml(path: str | Path) -> tuple[str, Any]:
@@ -132,9 +137,12 @@ def load_dag(
     else:
         raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 
+    _, defaults, required = parse_params(config)
+
     dag = DAG(
         config.get("name", "dag"),
-        default_inputs=config.get("inputs"),
+        default_inputs=defaults,
+        required_inputs=required,
         on_event=on_event,
     )
 
@@ -211,4 +219,9 @@ def load_dag(
     errors = dag.validate()
     if errors:
         raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
+
+    # 输入键与节点名共享 ctx 命名空间：必填/默认键重名会被节点输出覆盖，直接拒绝
+    clash = sorted((set(required) | set(defaults)) & set(dag.node_names))
+    if clash:
+        raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
     return dag

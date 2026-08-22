@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { RunDetail } from '@/api/runs'
-import { statusTagType } from '@/utils/status'
+import { statusLabel, statusTagType } from '@/utils/status'
 import MermaidDiagram from './MermaidDiagram.vue'
 import NodeStatusTable from './NodeStatusTable.vue'
 import ReviewCards from './ReviewCards.vue'
@@ -25,29 +25,41 @@ const reviewing = computed(() =>
     .map(([name, node]) => ({ name, payload: node.payload }))
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
+
+// 创建时的运行时输入快照：数量以 chip 展示，完整 JSON 悬浮查看
+// （后端旧版本无 inputs 字段，?? {} 兜底）
+const inputCount = computed(() => Object.keys(props.detail.inputs ?? {}).length)
+const inputsJson = computed(() => JSON.stringify(props.detail.inputs ?? {}, null, 2))
 </script>
 
 <template>
   <div class="detail">
     <div class="detail-head">
-      <span class="muted">{{ detail.name }}</span>
-      <span class="muted">#{{ detail.id }}<template v-if="detail.created_at"> · {{ detail.created_at }}</template></span>
+      <span class="run-name">{{ detail.name }}</span>
+      <span class="run-meta">#{{ detail.id }}<template v-if="detail.created_at"> · {{ detail.created_at }}</template></span>
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
-        {{ detail.status === 'running' ? 'running…' : detail.status }}
+        {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
+      <el-tooltip v-if="inputCount" placement="bottom">
+        <template #content>
+          <!-- tooltip 挂 body，scoped 样式够不到 → 内联 -->
+          <pre style="margin: 0; max-width: 420px; max-height: 300px; overflow: auto; white-space: pre-wrap">{{ inputsJson }}</pre>
+        </template>
+        <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
+      </el-tooltip>
       <el-button size="small" plain @click="emit('viewConfig', detail.config_file, detail.id)">查看配置</el-button>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
     <div class="panels">
       <section class="panel">
-        <h2>Pipeline</h2>
+        <h2>流水线</h2>
         <MermaidDiagram :source="detail.mermaid" :statuses="nodeStatuses" />
       </section>
       <section class="panel">
-        <h2>Nodes</h2>
+        <h2>节点</h2>
         <NodeStatusTable :detail="detail" />
         <template v-if="reviewing.length">
-          <h2 class="review-title">Human review</h2>
+          <h2 class="review-title">人工审核</h2>
           <ReviewCards
             :reviewing="reviewing"
             :deciding="deciding"
@@ -63,12 +75,37 @@ const reviewing = computed(() =>
 .detail-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
 }
+.run-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.run-meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+/* 运行时输入快照 chip：与 run-meta 同级弱化展示，悬浮看完整 JSON */
+.run-inputs {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: default;
+}
 .run-error {
-  color: #f87171;
+  color: #ffc9c7;
+  background: rgba(239, 115, 112, 0.08);
+  border: 1px solid rgba(239, 115, 112, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
   white-space: pre-wrap;
   flex-basis: 100%;
 }
@@ -78,13 +115,17 @@ const reviewing = computed(() =>
   gap: 18px;
 }
 .panel {
-  background: #1a1d23;
-  border: 1px solid #2a2f38;
-  border-radius: 10px;
-  padding: 14px;
+  background: rgba(16, 21, 42, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+/* 人工审核节标题用琥珀刻度条（与审核卡同语义） */
+h2.review-title::before {
+  background: var(--amber);
 }
 .review-title {
-  margin-top: 14px;
+  margin-top: 16px;
 }
 @media (max-width: 900px) {
   .panels {

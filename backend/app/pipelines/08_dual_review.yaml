@@ -1,13 +1,23 @@
+# 两级审核 — 待发布内容为运行时必填参数（params 富声明，无默认值）：
+#   新建运行「⚙ 参数」表单里填 标题/正文 两个必填字段（可切 JSON 模式）
+#   缺 title / content → 400 拒绝创建（前端弹层会标 * 拦截）
+# 两级审批（编辑初审 → 主编终审）通过后发布。
 name: 两级审核
-description: 内容发布两级审批：编辑初审、主编终审，两审都通过才发布。
+description: 内容发布两级审批：编辑初审、主编终审，两审都通过才发布。title（标题）与 content（正文）为必填输入。
+
+params:
+  title:
+    required: true
+    label: 标题
+    description: 待审文章标题
+  content:
+    required: true
+    label: 正文
+    description: 待审文章正文
 
 nodes:
-  输入内容:
-    type: cfg_fetch
-
   编辑初审:
     kind: human
-    depends_on: [输入内容]
     prompt: "请检查标题与正文，同意 y / 拒绝 n。"
 
   主编终审:

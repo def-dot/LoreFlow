@@ -1,5 +1,6 @@
 """循环 — 条件终止 / max_iterations 封顶 / body 失败继续"""
 
+import json
 from typing import Any
 
 from app.engine import DAG, Node, NodeStatus
@@ -87,3 +88,26 @@ async def test_loop_node_requires_body() -> None:
     dag = DAG("loop_empty")
     with pytest.raises(ValueError):
         dag.loop_node("loop", body_nodes=[], condition=lambda ctx, i: False)
+
+
+async def test_loop_output_snapshot_no_self_reference() -> None:
+    """loop 输出是累积上下文的快照：不含自身键、可 JSON 序列化。
+    直接返回活引用 ctx 会因执行器 ctx[name] = output 形成自引用，
+    快照落库（JSON 列）报 Circular reference detected，run 卡死在 running。"""
+    dag = DAG("loop_snap")
+
+    async def tick(ctx: dict[str, Any]) -> int:
+        return ctx.get("tick", 0) + 1
+
+    dag.loop_node(
+        "batch",
+        body_nodes=[Node(name="tick", func=tick)],
+        condition=lambda ctx, i: ctx.get("tick", 0) < 3,
+        max_iterations=5,
+    )
+
+    results = await dag.run()
+    assert results["batch"].status == NodeStatus.COMPLETED
+    assert results["batch"].output["tick"] == 3
+    assert "batch" not in results["batch"].output  # 无自引用
+    json.dumps(results["batch"].output)  # 序列化不抛异常

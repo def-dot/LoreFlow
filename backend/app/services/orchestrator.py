@@ -94,9 +94,15 @@ async def run_pipeline(
 ) -> None:
     """执行一次 run：dag.run 返回 → completed；挂起 → 两层 reviewing 已由
     approver 同一次 save 落库，干净退出（等 /approve 续跑）；异常 → failed。
-    finished_at 只在终态写入。"""
+    finished_at 只在终态写入。
+
+    输入回放：YAML 顶层 ``inputs`` 打底，创建 run 时的运行时输入
+    （record.inputs，同名键优先）覆盖后传入 ``dag.run`` —— 创建与
+    审批/重启 resume 都走这里，运行时输入因此不丢。
+    """
+    inputs = {**(dag.default_inputs or {}), **(record.inputs or {})}
     try:
-        await dag.run(resume=resume)
+        await dag.run(inputs=inputs, resume=resume)
         record.status = "completed"
     except asyncio.CancelledError:
         record.status = "cancelled"
@@ -113,13 +119,18 @@ async def run_pipeline(
         await runs.save(record)
 
 
-async def create_run(config_file: str | None = None) -> int:
+async def create_run(
+    config_file: str | None = None,
+    inputs: dict[str, Any] | None = None,
+) -> int:
     """校验配置并落库一个新 run，返回 run_id。config_file 缺省用人工审核演示。
+    inputs 为运行时输入，快照进 record 供 resume 回放（见 run_pipeline）。
     """
     config_file = config_file or "05_human_review.yaml"
     path = settings.PIPELINES_DIR / config_file
     if not path.is_file():
         raise ValueError(f"未知的流水线配置 {config_file!r}")
+    inputs = dict(inputs) if inputs else {}
     record = RunRecord(
         name=path.name,
         config_file=path.name,
@@ -132,8 +143,17 @@ async def create_run(config_file: str | None = None) -> int:
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
+    # 必填输入在落库前校验：缺参的 run 不该创建出来（引擎 run() 还会再兜底一次）
+    missing = [k for k in dag.required_inputs if k not in inputs]
+    if missing:
+        raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")
+    # 输入键与节点名共享同一个 ctx 命名空间，重名会被节点输出覆盖 —— 直接拒绝
+    clash = sorted(set(inputs) & set(dag.nodes))
+    if clash:
+        raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
+    record.inputs = inputs
     await runs.save(record)
     asyncio.create_task(run_pipeline(record, dag))
     return record.id

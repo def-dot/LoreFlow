@@ -13,20 +13,43 @@ async def test_pipelines_list(client: AsyncClient) -> None:
 
     pipelines = body["data"]["pipelines"]
     assert len(pipelines) >= 6
-    assert set(pipelines[0]) == {"filename", "name", "description", "node_count"}
+    assert set(pipelines[0]) == {
+        "filename", "name", "description", "node_count", "inputs", "required_inputs", "params",
+    }
 
     main = {p["filename"]: p for p in pipelines}["05_human_review.yaml"]
     assert main["name"] == "人工审核"
     assert main["description"]
     assert main["node_count"] == 6
+    assert main["inputs"] == {} and main["required_inputs"] == [] and main["params"] == []
     assert all(p["name"] and p["node_count"] >= 1 for p in pipelines)
+
+    # 08/09 用 params 富声明 → 列表直接可读统一参数行（参数弹层表单渲染用）
+    by_file = {p["filename"]: p for p in pipelines}
+    assert by_file["08_dual_review.yaml"]["required_inputs"] == ["title", "content"]
+    assert by_file["09_required_input.yaml"]["required_inputs"] == ["query"]
+    assert by_file["09_required_input.yaml"]["inputs"] == {"topic": "默认主题"}
+
+    params_08 = {p["name"]: p for p in by_file["08_dual_review.yaml"]["params"]}
+    assert params_08["title"]["label"] == "标题"
+    assert params_08["title"]["required"] is True and params_08["title"]["has_default"] is False
+    assert params_08["content"]["description"]
+    params_09 = {p["name"]: p for p in by_file["09_required_input.yaml"]["params"]}
+    assert params_09["query"]["required"] is True
+    assert params_09["topic"] == {
+        "name": "topic", "label": "主题", "description": "检索主题，不填用默认值",
+        "default": "默认主题", "has_default": True, "required": False,
+    }
 
 
 async def test_pipeline_detail_human(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/pipelines/06_human_conditional.yaml")
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert set(data) == {"filename", "name", "description", "node_count", "mermaid", "source", "nodes"}
+    assert set(data) == {
+        "filename", "name", "description", "node_count", "mermaid", "source", "nodes",
+        "inputs", "required_inputs", "params",
+    }
     assert data["name"] == "按需审核"
     assert data["mermaid"].startswith("graph TD")
     # 节点名做主行、注册表类型键+label 以小字附后（[?] 是 condition 标记）

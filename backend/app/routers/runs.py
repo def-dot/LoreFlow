@@ -1,5 +1,7 @@
 """Run 相关 API — 挂载在 /api/v1 下的 /runs 路由组"""
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.response import UnifiedResponseRoute
@@ -11,6 +13,7 @@ from app.schemas.runs import (
     RunCreateResponse,
     RunDetail,
     RunListResponse,
+    RunListSummary,
 )
 from app.services import orchestrator
 from app.services import reviews as review_service
@@ -21,7 +24,10 @@ router = APIRouter(prefix="/runs", route_class=UnifiedResponseRoute, tags=["runs
 
 @router.post("", response_model=RunCreateResponse, status_code=201)
 async def create_run(body: RunCreateRequest | None = None) -> RunCreateResponse:
-    run_id = await orchestrator.create_run(config_file=body.config_file if body else None)
+    run_id = await orchestrator.create_run(
+        config_file=body.config_file if body else None,
+        inputs=body.inputs if body else None,
+    )
     return RunCreateResponse(run_id=run_id)
 
 
@@ -29,9 +35,21 @@ async def create_run(body: RunCreateRequest | None = None) -> RunCreateResponse:
 async def list_runs(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
+    status: Literal["pending", "running", "reviewing", "completed", "failed", "cancelled"]
+    | None = Query(None, description="按 run 状态筛选"),
+    config_file: str | None = Query(None, max_length=200, description="按流水线文件名筛选"),
 ) -> RunListResponse:
-    rows, total = await run_service.list_runs(offset=offset, limit=limit)
-    return RunListResponse(items=rows, total=total, offset=offset, limit=limit)
+    rows, total = await run_service.list_runs(
+        offset=offset, limit=limit, status=status, config_file=config_file
+    )
+    counts = await run_service.run_counts()
+    return RunListResponse(
+        items=rows,
+        total=total,
+        offset=offset,
+        limit=limit,
+        summary=RunListSummary(**counts),
+    )
 
 
 @router.get("/{run_id}", response_model=RunDetail)

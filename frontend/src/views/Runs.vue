@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
+import type { ParamSpec } from '@/api/pipelines'
 import { useRunsStore } from '@/stores/runs'
 import { usePipelinesStore } from '@/stores/pipelines'
 
@@ -11,8 +13,106 @@ const pipelinesStore = usePipelinesStore()
 
 // 新建 run 时运行的流水线配置（下拉来自 /pipelines，默认主演示流水线）
 const configFile = ref('pipeline.yaml')
-// 防止 New run 按钮重复点击导致并发创建
+// 防止「新建运行」按钮重复点击导致并发创建
 const creating = ref(false)
+
+// ---------------------------------------------------------------------------
+// 运行时输入参数：流水线声明了 params 时按声明渲染表单（label/说明/默认值/
+// 必填一目了然）；未声明或切「JSON 模式」时退回原始 JSON 文本。
+// 空 → 只用 YAML 默认 inputs；无效 JSON → 拦截提交并提示。
+// ---------------------------------------------------------------------------
+const inputsText = ref('')
+// 表单模式的字段值（字符串输入，提交时解析）
+const paramValues = ref<Record<string, string>>({})
+// 声明了 params 的流水线默认表单模式；未声明的只有 JSON 文本
+const jsonMode = ref(false)
+
+const parsedInputs = computed<{ value?: Record<string, unknown>; error: string | null; count: number }>(() => {
+  const text = inputsText.value.trim()
+  if (!text) return { error: null, count: 0 }
+  try {
+    const value = JSON.parse(text)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return { error: '必须是 JSON 对象，如 {"topic": "..."}', count: 0 }
+    }
+    return { value, error: null, count: Object.keys(value).length }
+  } catch {
+    return { error: 'JSON 格式无效', count: 0 }
+  }
+})
+
+// 所选流水线的输入声明（列表接口已带 params/inputs/required_inputs，无需再取详情）
+const selectedPipeline = computed(() =>
+  pipelinesStore.pipelines.find((p) => p.filename === configFile.value),
+)
+const paramSpecs = computed(() => selectedPipeline.value?.params ?? [])
+const requiredInputs = computed(() => selectedPipeline.value?.required_inputs ?? [])
+const defaultInputs = computed(() => selectedPipeline.value?.inputs ?? {})
+const hasDefaults = computed(() => Object.keys(defaultInputs.value).length > 0)
+const defaultsJson = computed(() => JSON.stringify(defaultInputs.value, null, 2))
+
+// 切换流水线时清空表单值：不同流水线的参数集不同，旧值没有意义
+watch(configFile, () => {
+  paramValues.value = {}
+})
+
+// 字段文本 → 提交值：空串 = 未提供；数字/布尔/JSON 字面量按 JSON 解析，其余原样字符串
+function parseFieldValue(raw: string): unknown {
+  const text = raw.trim()
+  if (/^-?\d+(\.\d+)?$/.test(text) || text === 'true' || text === 'false' || /^[{\[]/.test(text)) {
+    try {
+      return JSON.parse(text)
+    } catch {
+      // 形似 JSON 但不合法：按原字符串提交
+    }
+  }
+  return raw
+}
+
+// 表单模式实际提交的参数：只收非空字段（留空 = 用默认值或不传）
+const formInputs = computed(() => {
+  const value: Record<string, unknown> = {}
+  for (const spec of paramSpecs.value) {
+    const raw = (paramValues.value[spec.name] ?? '').trim()
+    if (raw !== '') value[spec.name] = parseFieldValue(raw)
+  }
+  return value
+})
+
+// 当前模式下随「新建运行」提交的参数（表单实时收集 / JSON 文本解析）
+const submitInputs = computed<{ value?: Record<string, unknown>; error: string | null; count: number }>(
+  () => {
+    if (jsonMode.value || !paramSpecs.value.length) return parsedInputs.value
+    const value = formInputs.value
+    return { value, error: null, count: Object.keys(value).length }
+  },
+)
+
+// 必填键缺失：JSON 无效时视为全部缺失（无法确认已提供）；提交前拦截 + 后端兜底 400
+const missingRequired = computed(() => {
+  const provided = submitInputs.value.error ? {} : (submitInputs.value.value ?? {})
+  return requiredInputs.value.filter((k) => !(k in provided))
+})
+
+// JSON 模式 placeholder：示例键取自所选流水线实际声明的参数，避免误导
+const jsonPlaceholder = computed(() => {
+  const keys = [...requiredInputs.value, ...Object.keys(defaultInputs.value)]
+  if (keys.length) return `JSON 对象，键取自参数声明，如 {"${keys[0]}": ...}`
+  return 'JSON 对象（该流水线未声明参数，一般无需填写）'
+})
+
+// 参数字段的 placeholder：默认值预览 / 必填 / 可选
+function paramPlaceholder(spec: ParamSpec): string {
+  if (spec.has_default) {
+    const text = JSON.stringify(spec.default) ?? ''
+    return `默认: ${text.length > 32 ? `${text.slice(0, 32)}…` : text}`
+  }
+  return spec.required ? '必填' : '可选，不填则不传'
+}
+
+function fillDefaults() {
+  inputsText.value = defaultsJson.value
+}
 
 // ---------------------------------------------------------------------------
 // 流水线详情 drawer：顶部「预览」看所选流水线，run 详情里的「查看配置」
@@ -130,9 +230,17 @@ async function select(id: number) {
 
 async function startNewRun() {
   if (creating.value) return
+  if (submitInputs.value.error) {
+    ElMessage.warning(submitInputs.value.error)
+    return
+  }
+  if (missingRequired.value.length) {
+    ElMessage.warning(`缺少必填参数: ${missingRequired.value.join('、')}`)
+    return
+  }
   creating.value = true
   try {
-    await store.startNewRun(configFile.value)
+    await store.startNewRun(configFile.value, submitInputs.value.value)
     startDetailPolling()
     startRunsPolling()
   } finally {
@@ -198,10 +306,105 @@ onUnmounted(() => {
       <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">
         👁 预览
       </el-button>
-      <el-button type="primary" :loading="creating" @click="startNewRun">▶ New run</el-button>
+      <el-popover placement="bottom-start" :width="380" trigger="click">
+        <template #reference>
+          <el-button plain :disabled="!pipelinesStore.pipelines.length">
+            ⚙ 参数<template v-if="submitInputs.count"> · {{ submitInputs.count }}</template>
+          </el-button>
+        </template>
+        <div class="inputs-pop">
+          <div class="inputs-pop-head">
+            <span class="inputs-pop-title">运行时输入参数</span>
+            <el-button
+              v-if="paramSpecs.length"
+              size="small"
+              text
+              type="primary"
+              @click="jsonMode = !jsonMode"
+            >
+              {{ jsonMode ? '表单模式' : 'JSON 模式' }}
+            </el-button>
+          </div>
+
+          <!-- 表单模式：按流水线声明逐参数渲染，label/说明/默认值/必填直接可见 -->
+          <template v-if="!jsonMode && paramSpecs.length">
+            <div v-for="spec in paramSpecs" :key="spec.name" class="param-field">
+              <div class="param-label">
+                {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
+                <span v-else class="param-optional">可选</span>
+              </div>
+              <el-input
+                v-model="paramValues[spec.name]"
+                size="small"
+                spellcheck="false"
+                :placeholder="paramPlaceholder(spec)"
+              />
+              <div v-if="spec.description" class="param-desc">{{ spec.description }}</div>
+            </div>
+            <div v-if="missingRequired.length" class="inputs-error">
+              缺少必填参数: {{ missingRequired.join('、') }}，「新建运行」将被拦截
+            </div>
+            <div v-else-if="submitInputs.count" class="inputs-hint">
+              已填 {{ submitInputs.count }} 个参数，随「新建运行」提交；留空字段用默认值或不传。
+            </div>
+            <div v-else class="inputs-hint">留空字段用 YAML 默认值或不传；未填必填项将被拦截。</div>
+          </template>
+
+          <!-- JSON 模式 / 未声明参数的流水线：原始 JSON 文本 -->
+          <template v-else>
+            <div v-if="requiredInputs.length" class="inputs-required">
+              <span>必填：</span>
+              <el-tag
+                v-for="k in requiredInputs"
+                :key="k"
+                size="small"
+                :type="missingRequired.includes(k) ? 'danger' : 'success'"
+                disable-transitions
+              >
+                {{ k }}{{ missingRequired.includes(k) ? ' *' : ' ✓' }}
+              </el-tag>
+            </div>
+            <el-input
+              v-model="inputsText"
+              type="textarea"
+              :rows="5"
+              spellcheck="false"
+              :placeholder="jsonPlaceholder"
+            />
+            <div v-if="parsedInputs.error" class="inputs-error">{{ parsedInputs.error }}</div>
+            <div v-else-if="missingRequired.length" class="inputs-error">
+              缺少必填参数: {{ missingRequired.join('、') }}，「新建运行」将被拦截
+            </div>
+            <div v-else-if="parsedInputs.count" class="inputs-hint">
+              已解析 {{ parsedInputs.count }} 个参数，随「新建运行」提交；同名键优先于 YAML 默认 inputs。
+            </div>
+            <div v-else class="inputs-hint">留空则只用流水线 YAML 的默认 inputs。</div>
+            <template v-if="hasDefaults">
+              <div class="inputs-defaults-head">
+                <span class="inputs-defaults-title">默认参数（YAML，只读）</span>
+                <el-button size="small" text type="primary" @click="fillDefaults">填入默认值</el-button>
+              </div>
+              <pre class="inputs-defaults">{{ defaultsJson }}</pre>
+            </template>
+          </template>
+        </div>
+      </el-popover>
+      <el-button type="primary" :loading="creating" @click="startNewRun">▶ 新建运行</el-button>
     </header>
     <main class="layout">
-      <RunList :runs="store.runs" :total="store.total" :selected-id="store.selectedId" @select="select" />
+      <RunList
+        :runs="store.runs"
+        :total="store.total"
+        :selected-id="store.selectedId"
+        :loading-more="store.loadingMore"
+        :status="store.filters.status"
+        :config-file="store.filters.configFile"
+        :pipeline-options="pipelinesStore.pipelines"
+        @set-status="store.setFilters({ status: $event })"
+        @set-config="store.setFilters({ configFile: $event })"
+        @select="select"
+        @more="store.loadMoreRuns()"
+      />
       <RunDetail
         v-if="store.detail"
         :detail="store.detail"
@@ -209,7 +412,7 @@ onUnmounted(() => {
         @decide="decide"
         @view-config="viewRunConfig"
       />
-      <div v-else class="muted">选择或创建一个 run 查看执行状态。</div>
+      <div v-else class="muted">选择或创建一条运行查看执行状态。</div>
     </main>
     <el-drawer v-model="previewOpen" size="min(920px, 94vw)">
       <template #title>
@@ -221,7 +424,7 @@ onUnmounted(() => {
               · {{ pipelinesStore.detail?.node_count ?? previewItem?.node_count }} 节点
             </template>
           </span>
-          <el-tag v-if="previewFrom.kind === 'run'" size="small" type="info">Run #{{ previewFrom.runId }}</el-tag>
+          <el-tag v-if="previewFrom.kind === 'run'" size="small" type="info">运行 #{{ previewFrom.runId }}</el-tag>
         </div>
       </template>
       <div v-loading="previewLoading" class="drawer-body">
@@ -243,15 +446,104 @@ onUnmounted(() => {
   margin-bottom: 0;
 }
 .page-head {
-  padding: 12px 20px;
-  border-bottom: 1px solid #2a2f38;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 .page-head h1 {
   font-size: 18px;
   margin: 0;
+}
+/* 参数 popover：等宽字体输入与页面 mono 语言一致（详情 meta、文件名） */
+.inputs-pop :deep(textarea) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.inputs-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.inputs-pop-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* 表单模式单参数字段：label + 输入框 + 说明 */
+.param-field {
+  margin-bottom: 8px;
+}
+.param-label {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 3px;
+}
+.param-star {
+  color: #ff8f8a;
+}
+.param-optional {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.param-desc {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.inputs-error {
+  color: #ff8f8a;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.inputs-hint {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin-top: 6px;
+  line-height: 1.5;
+}
+/* 必填键标签行：缺失红色 *、已提供绿色 ✓ */
+.inputs-required {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+}
+.inputs-defaults-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+.inputs-defaults-title {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.inputs-defaults {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 160px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  background: rgba(16, 21, 42, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 .layout {
   display: grid;
@@ -270,12 +562,14 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  font-size: 16px;
+  font-size: 15px;
 }
 .drawer-title .name {
   font-weight: 600;
+  color: var(--ink);
 }
 .drawer-title .file {
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .drawer-body {

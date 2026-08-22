@@ -45,6 +45,25 @@ async def _wait_reviewing(client: AsyncClient, run_id: int, timeout: float = 15)
     return await asyncio.wait_for(poll(), timeout=timeout)
 
 
+async def _wait_node_reviewing(
+    client: AsyncClient, run_id: int, node: str, timeout: float = 15
+) -> dict[str, Any]:
+    """轮询 run 直到指定节点进入待审批（多级审核时上一下快照可能仍是
+    reviewing，等"任意节点"会竞态，必须等目标节点自己的快照就位）。"""
+
+    async def poll() -> dict[str, Any]:
+        while True:
+            resp = await client.get(f"/api/v1/runs/{run_id}")
+            data = resp.json()["data"]
+            if data["nodes"].get(node, {}).get("status") == "reviewing":
+                return data
+            if data["status"] not in ("running", "reviewing"):
+                raise AssertionError(f"run 在 {node} 审批前已结束: {data}")
+            await asyncio.sleep(0.05)
+
+    return await asyncio.wait_for(poll(), timeout=timeout)
+
+
 async def _create_and_approve(client: AsyncClient, approve: bool = True) -> int:
     """建一个 run 并走完审批流，返回 run_id。"""
     resp = await client.post("/api/v1/runs")
@@ -155,7 +174,7 @@ async def test_list_runs_sorted_desc(client: AsyncClient) -> None:
     assert data["total"] == 2 and data["offset"] == 0 and data["limit"] == 50
     assert [r["id"] for r in runs] == [second, first]
     fields = set(runs[0])
-    assert fields == {"id", "name", "created_at", "finished_at", "status", "error"}
+    assert fields == {"id", "name", "created_at", "finished_at", "status", "error", "config_file"}
     assert "T" not in runs[0]["created_at"]  # 响应层日期用空格分隔
 
 
@@ -184,6 +203,58 @@ async def test_list_runs_pagination(client: AsyncClient) -> None:
 
     resp = await client.get("/api/v1/runs", params={"limit": 0})
     assert resp.status_code == 422
+
+
+async def test_list_runs_filters(client: AsyncClient) -> None:
+    """status/config_file 筛选：total 为筛选后总数；summary 为全局计数，
+    不随筛选变化（前端轮询/电流据此判断，筛过的视图不能停摆）。"""
+    seeds = [
+        ("completed", "01_basic_chain.yaml"),
+        ("failed", "01_basic_chain.yaml"),
+        ("running", "02_condition_branching.yaml"),
+        ("reviewing", "05_human_review.yaml"),
+    ]
+    for i, (status, config) in enumerate(seeds):
+        await run_service.save(
+            RunRecord(
+                name=f"f{i}",
+                config_file=config,
+                mermaid="graph TD\n",
+                created_at=f"2026-02-0{i + 1}T00:00:00",
+                status=status,
+                nodes={},
+            )
+        )
+
+    # 状态筛选 + 全局 summary（running=1，非终态=running+reviewing=2）
+    resp = await client.get("/api/v1/runs", params={"status": "completed"})
+    data = resp.json()["data"]
+    assert data["total"] == 1
+    assert [r["status"] for r in data["items"]] == ["completed"]
+    assert data["summary"] == {"running": 1, "active": 2}
+
+    # 流水线筛选
+    resp = await client.get("/api/v1/runs", params={"config_file": "01_basic_chain.yaml"})
+    data = resp.json()["data"]
+    assert data["total"] == 2
+    assert all(r["config_file"] == "01_basic_chain.yaml" for r in data["items"])
+
+    # 组合筛选
+    resp = await client.get(
+        "/api/v1/runs", params={"status": "failed", "config_file": "01_basic_chain.yaml"}
+    )
+    data = resp.json()["data"]
+    assert data["total"] == 1 and data["items"][0]["status"] == "failed"
+
+    # 无效状态枚举 422
+    resp = await client.get("/api/v1/runs", params={"status": "bogus"})
+    assert resp.status_code == 422
+
+    # 筛选无结果：空页但 summary 仍是全局值
+    resp = await client.get("/api/v1/runs", params={"config_file": "no_such.yaml"})
+    data = resp.json()["data"]
+    assert data["items"] == [] and data["total"] == 0
+    assert data["summary"]["active"] == 2
 
 
 async def test_unknown_run_404(client: AsyncClient) -> None:
@@ -325,3 +396,247 @@ async def test_resume_suspended_run_re_suspends(client: AsyncClient) -> None:
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
     assert data["nodes"]["publish"]["status"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# 运行时输入 inputs
+# ---------------------------------------------------------------------------
+
+
+async def test_create_run_with_inputs(client: AsyncClient, monkeypatch, tmp_path) -> None:
+    """带 inputs 创建：值进入共享上下文（demo_tick 在 tick 基础上 +1），
+    同名键运行时优先于 YAML 默认值；详情回显输入快照。"""
+    pipe = tmp_path / "inputs_demo.yaml"
+    pipe.write_text(
+        "name: inputs_demo\n"
+        "inputs:\n"
+        "  tick: 1\n"
+        "nodes:\n"
+        "  counter:\n"
+        "    type: demo_tick\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
+
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "inputs_demo.yaml", "inputs": {"tick": 41}},
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["inputs"] == {"tick": 41}  # 运行时输入快照回显
+    assert data["nodes"]["counter"]["output"] == 42  # 覆盖了 YAML 默认 tick=1
+
+
+async def test_inputs_yaml_default_kept_when_not_overridden(client: AsyncClient, monkeypatch, tmp_path) -> None:
+    """运行时未覆盖的键沿用 YAML 默认值：只传无关键，tick 仍取 YAML 的 1。"""
+    pipe = tmp_path / "inputs_demo.yaml"
+    pipe.write_text(
+        "name: inputs_demo\n"
+        "inputs:\n"
+        "  tick: 1\n"
+        "nodes:\n"
+        "  counter:\n"
+        "    type: demo_tick\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
+
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "inputs_demo.yaml", "inputs": {"unrelated": "x"}},
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["nodes"]["counter"]["output"] == 2  # YAML 默认 tick=1 生效
+
+
+async def test_inputs_survive_review_resume(client: AsyncClient, monkeypatch, tmp_path) -> None:
+    """审批挂起 → /approve 走 resume_record 重新 load_dag 续跑：
+    record.inputs 回放进上下文，下游节点仍能读到运行时输入。"""
+    pipe = tmp_path / "inputs_review.yaml"
+    pipe.write_text(
+        "name: inputs_review\n"
+        "nodes:\n"
+        "  review:\n"
+        "    kind: human\n"
+        '    prompt: "请审核"\n'
+        "  counter:\n"
+        "    type: demo_tick\n"
+        "    depends_on: [review]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
+
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "inputs_review.yaml", "inputs": {"tick": 6}},
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    await _wait_reviewing(client, run_id)
+    data = (await client.get(f"/api/v1/runs/{run_id}")).json()["data"]
+    assert data["nodes"]["review"]["payload"]["tick"] == 6  # 输入也进审核卡片 payload
+
+    resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
+    assert resp.status_code == 200
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["nodes"]["counter"]["output"] == 7  # resume 后 tick=6 仍在上下文
+
+
+async def test_inputs_restart_resume_replays_inputs(client: AsyncClient, monkeypatch, tmp_path) -> None:
+    """重启恢复（resume_stuck_runs）同样回放 inputs：reviewing 记录带输入快照。"""
+    pipe = tmp_path / "inputs_review.yaml"
+    pipe.write_text(
+        "name: inputs_review\n"
+        "nodes:\n"
+        "  review:\n"
+        "    kind: human\n"
+        '    prompt: "请审核"\n'
+        "  counter:\n"
+        "    type: demo_tick\n"
+        "    depends_on: [review]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
+
+    record = RunRecord(
+        name="inputs_review",
+        config_file="inputs_review.yaml",
+        mermaid="graph TD\n",
+        created_at="2026-01-01T00:00:00",
+        status="reviewing",
+        nodes={"review": {"status": "reviewing", "payload": {"tick": 6}}},
+        inputs={"tick": 6},
+    )
+    await run_service.save(record)
+    run_id = record.id
+    assert run_id is not None
+
+    await orchestrator.resume_stuck_runs()  # 无决策 → 幂等重挂起
+    await asyncio.sleep(0.1)
+
+    resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
+    assert resp.status_code == 200
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["nodes"]["counter"]["output"] == 7  # 重启恢复路径也回放 inputs
+
+
+async def test_create_run_inputs_clash_node_name_400(client: AsyncClient) -> None:
+    """输入键与节点名冲突（共享 ctx 命名空间会被节点输出覆盖）→ 400 且不产生 run 记录。"""
+    resp = await client.post("/api/v1/runs", json={"inputs": {"review": 1}})
+    assert resp.status_code == 400
+    assert "冲突" in resp.json()["msg"]
+
+    resp = await client.get("/api/v1/runs")
+    assert resp.json()["data"]["items"] == []
+
+
+async def test_loop_pipeline_completes_with_inputs(client: AsyncClient) -> None:
+    """loop 流水线经 API 跑到终态：loop 输出快照可落库（回归：曾因输出
+    自引用序列化失败卡死 running），且运行时输入进入循环累积。"""
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "04_loop_iteration.yaml", "inputs": {"tick": 6}},
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["nodes"]["batch"]["status"] == "completed"
+    # 运行时 tick=6 打底，3 轮迭代各 +1 → 累积到 9；快照已正常落库
+    assert data["nodes"]["batch"]["output"] == {"tick": 9}
+
+
+async def test_dual_review_with_required_title_content(client: AsyncClient) -> None:
+    """08 两级审核：title/content 为必填输入（无默认值），两级审批通过后
+    发布自定义标题（扁平输入走 cfg_publish 的顶层 title 兜底）。"""
+    resp = await client.post(
+        "/api/v1/runs",
+        json={
+            "config_file": "08_dual_review.yaml",
+            "inputs": {"title": "自定义标题", "content": "自定义正文。"},
+        },
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    # 初审
+    data = await _wait_node_reviewing(client, run_id, "编辑初审")
+    assert data["nodes"]["编辑初审"]["payload"]["title"] == "自定义标题"
+    resp = await client.post(f"/api/v1/runs/{run_id}/approve/编辑初审", json={"approve": True})
+    assert resp.status_code == 200
+
+    # 终审
+    data = await _wait_node_reviewing(client, run_id, "主编终审")
+    assert data["nodes"]["主编终审"]["status"] == "reviewing"
+    resp = await client.post(f"/api/v1/runs/{run_id}/approve/主编终审", json={"approve": True})
+    assert resp.status_code == 200
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["nodes"]["发布"]["status"] == "completed"
+    assert "自定义标题" in data["nodes"]["发布"]["output"]
+
+
+async def test_dual_review_missing_required_400(client: AsyncClient) -> None:
+    """08 必填 title/content：缺任一 → 400 列出缺失键，不产生 run 记录。"""
+    resp = await client.post("/api/v1/runs", json={"config_file": "08_dual_review.yaml"})
+    assert resp.status_code == 400
+    # 报错按声明顺序列出缺失键
+    assert "title" in resp.json()["msg"] and "content" in resp.json()["msg"]
+
+    resp = await client.post(
+        "/api/v1/runs", json={"config_file": "08_dual_review.yaml", "inputs": {"title": "只有标题"}}
+    )
+    assert resp.status_code == 400
+    assert "缺少必填输入参数: content" in resp.json()["msg"]
+
+    resp = await client.get("/api/v1/runs")
+    assert resp.json()["data"]["items"] == []
+
+
+async def test_required_inputs_missing_400(client: AsyncClient) -> None:
+    """09 必填参数示例：不传 query → 400 列出缺的键，不产生 run 记录。"""
+    resp = await client.post("/api/v1/runs", json={"config_file": "09_required_input.yaml"})
+    assert resp.status_code == 400
+    assert "缺少必填输入参数: query" in resp.json()["msg"]
+
+    resp = await client.get("/api/v1/runs")
+    assert resp.json()["data"]["items"] == []
+
+
+async def test_required_inputs_run_completes(client: AsyncClient) -> None:
+    """09 带 query 运行：必填值进上下文，topic 用 YAML 默认；覆盖 topic 也生效。"""
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "09_required_input.yaml", "inputs": {"query": "洛伦佐"}},
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["nodes"]["检索"]["output"] == {"query": "洛伦佐", "topic": "默认主题"}
+
+    resp = await client.post(
+        "/api/v1/runs",
+        json={
+            "config_file": "09_required_input.yaml",
+            "inputs": {"query": "q2", "topic": "自定义主题"},
+        },
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+    data = await _wait_terminal(client, run_id)
+    assert data["nodes"]["检索"]["output"] == {"query": "q2", "topic": "自定义主题"}

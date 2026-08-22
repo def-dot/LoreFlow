@@ -128,6 +128,24 @@ async def test_resume_skips_completed_nodes() -> None:
     assert results["done_node"].status == NodeStatus.COMPLETED
 
 
+async def test_resume_ignores_nodes_missing_from_current_dag() -> None:
+    """快照来自旧版配置（节点已被删/改名）时不崩溃：未知节点跳过，其余照常续跑。"""
+    dag = DAG("evolved")
+
+    @dag.node("fresh")
+    async def fresh(ctx: dict[str, Any]) -> str:
+        return "ran"
+
+    results = await dag.run(
+        resume={
+            "输入内容": {"status": "completed", "output": {"title": "旧配置的节点"}},
+            "fresh": {"status": "completed", "output": "stale"},  # 已完成不重跑
+        }
+    )
+    assert results["fresh"].status == NodeStatus.COMPLETED
+    assert results["fresh"].output == "stale"
+
+
 async def test_default_inputs_applied() -> None:
     dag = DAG("inputs", default_inputs={"seed": 41})
 

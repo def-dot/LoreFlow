@@ -1,6 +1,35 @@
-/* 全局暗色基调（沿用旧 index.html 的调色板），组件色由 element-plus dark vars 接管 */
+/* ---------------------------------------------------------------
+ * LoreFlow 视觉基座 —— 深靛蓝工程图纸上的控制台
+ * 双色语义：青 = 机器流转（running / 主交互），琥珀 = 人工介入（审核）
+ * 面板、发丝线、文字、组件色全部从这组 token 派生
+ * --------------------------------------------------------------- */
 :root {
   color-scheme: dark;
+
+  /* 画布与面板 */
+  --bg: #0a0e1b;
+  --panel: #10152a;
+  --panel-2: #161c36;
+
+  /* 发丝线 */
+  --line: #222a4a;
+  --line-strong: #2e3860;
+
+  /* 文字（ink-3 对画布对比度 ≈4.8:1，过 AA；辅助文字用） */
+  --ink: #e9edf9;
+  --ink-2: #a8b0ce;
+  --ink-3: #6f7a9c;
+
+  /* 语义色 */
+  --accent: #4dc4b2; /* 机器流转 */
+  --amber: #f0c24b; /* 人工介入 */
+  --ok: #57c88a;
+  --danger: #ef7370;
+  --slate: #8790b0;
+
+  /* 字体：数据/标识用等宽，中文正文走系统黑体 */
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, 'SF Mono', 'Courier New', monospace;
+  --font-sans: system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 html,
@@ -10,19 +39,170 @@ body {
 }
 
 body {
-  font: 14px/1.5 system-ui, sans-serif;
-  background: #14161a;
-  color: #d8dce3;
+  font: 14px/1.55 var(--font-sans);
+  color: var(--ink-2);
+  /* 工程图纸：靛蓝画布 + 30px 极淡青网格 + 右上一点流动辉光 */
+  background:
+    radial-gradient(1100px 480px at 72% -12%, rgba(77, 196, 178, 0.05), transparent 62%),
+    linear-gradient(rgba(77, 196, 178, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(77, 196, 178, 0.015) 1px, transparent 1px),
+    var(--bg);
+  background-size: auto, 30px 30px, 30px 30px, auto;
 }
 
+::selection {
+  background: rgba(77, 196, 178, 0.25);
+  color: var(--ink);
+}
+
+/* 键盘可达性：自定义交互行也可见焦点 */
+:focus-visible {
+  outline: 2px solid rgba(77, 196, 178, 0.5);
+  outline-offset: 2px;
+}
+
+/* 节标题：小号 + 前置青色刻度条（图纸图例标记感）；
+ * 人工审核类标题可局部改 ::before 为 --amber */
 h2 {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #8b93a1;
-  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  margin: 0 0 10px;
+}
+
+h2::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent);
+  flex: none;
 }
 
 .muted {
-  color: #8b93a1;
+  color: var(--ink-3);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* ---- Element Plus 暗色变量覆盖：组件族融入靛蓝图纸 ---- */
+html.dark {
+  --el-color-primary: #4dc4b2;
+  --el-color-primary-dark-2: #74d6c5;
+  --el-color-primary-light-3: #42a99a;
+  --el-color-primary-light-5: #2f7f74;
+  --el-color-primary-light-7: #205650;
+  --el-color-primary-light-8: #17423a;
+  --el-color-primary-light-9: #102a25;
+
+  --el-color-success: #57c88a;
+  --el-color-success-dark-2: #79d6a2;
+  --el-color-success-light-3: #4aad75;
+  --el-color-success-light-5: #35855a;
+  --el-color-success-light-7: #245a3e;
+  --el-color-success-light-8: #1a4230;
+  --el-color-success-light-9: #122b1f;
+
+  --el-color-warning: #f0c24b;
+  --el-color-warning-dark-2: #f3cf70;
+  --el-color-warning-light-3: #cba53f;
+  --el-color-warning-light-5: #96792e;
+  --el-color-warning-light-7: #644f1f;
+  --el-color-warning-light-8: #4a3a17;
+  --el-color-warning-light-9: #2f2510;
+
+  --el-color-danger: #ef7370;
+  --el-color-danger-dark-2: #f28f8c;
+  --el-color-danger-light-3: #cb6260;
+  --el-color-danger-light-5: #944846;
+  --el-color-danger-light-7: #632f2e;
+  --el-color-danger-light-8: #492322;
+  --el-color-danger-light-9: #2d1615;
+
+  --el-color-error: #ef7370;
+  --el-color-error-dark-2: #f28f8c;
+  --el-color-error-light-3: #cb6260;
+  --el-color-error-light-5: #944846;
+  --el-color-error-light-7: #632f2e;
+  --el-color-error-light-8: #492322;
+  --el-color-error-light-9: #2d1615;
+
+  --el-color-info: #8790b0;
+  --el-color-info-dark-2: #9fa8c4;
+  --el-color-info-light-3: #737c9a;
+  --el-color-info-light-5: #545c76;
+  --el-color-info-light-7: #383e52;
+  --el-color-info-light-8: #2a2f40;
+  --el-color-info-light-9: #1c2030;
+
+  --el-bg-color: var(--panel);
+  --el-bg-color-overlay: var(--panel-2);
+  --el-bg-color-page: var(--bg);
+
+  --el-text-color-primary: var(--ink);
+  --el-text-color-regular: #c6cde5;
+  --el-text-color-secondary: var(--ink-2);
+  --el-text-color-placeholder: var(--ink-3);
+  --el-text-color-disabled: #4a5270;
+
+  --el-border-color: var(--line-strong);
+  --el-border-color-light: var(--line);
+  --el-border-color-lighter: var(--line);
+  --el-border-color-extra-light: #1a2038;
+
+  --el-fill-color: var(--panel-2);
+  --el-fill-color-light: #1a2138;
+  --el-fill-color-lighter: #151b30;
+  --el-fill-color-extra-light: #121729;
+  --el-fill-color-dark: #1c2340;
+  --el-fill-color-darker: #20284a;
+  --el-fill-color-blank: var(--panel);
+  --el-disabled-bg-color: var(--panel-2);
+  --el-disabled-text-color: #4a5270;
+  --el-disabled-border-color: var(--line);
+
+  --el-font-family: var(--font-sans);
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+}
+
+/* 青底主按钮配深色文字（默认白字在青色上发灰、对比不足） */
+html.dark .el-button--primary {
+  --el-button-text-color: #062a24;
+  --el-button-hover-text-color: #062a24;
+  --el-button-active-text-color: #062a24;
+}
+
+/* 表格融进面板：透明行底 + 发丝分隔线 */
+html.dark .el-table {
+  --el-table-border-color: #1d2440;
+  --el-table-header-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-bg-color: transparent;
+  --el-table-expanded-cell-bg-color: transparent;
+  --el-table-header-text-color: var(--ink-3);
+  --el-table-text-color: var(--ink-2);
+  --el-table-row-hover-bg-color: rgba(77, 196, 178, 0.05);
+}
+
+/* 预览 drawer 用更深的底，和页面面板拉开层次 */
+html.dark .el-drawer {
+  --el-drawer-bg-color: #0c1122;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

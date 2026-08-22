@@ -38,7 +38,9 @@ async def cfg_merge(ctx: dict[str, Any]) -> dict[str, Any]:
 @node(label="发布", description="发布人工审核通过的内容")
 async def cfg_publish(ctx: dict[str, Any]) -> str:
     """取最近一次人工审核的 payload（人工节点输出固定含 decision/payload），
-    从中找出带 title 的内容输出（如 merge / fetch 的 {title, body}）。
+    从中找出带 title 的内容输出（如 merge / fetch 的 {title, body}）；
+    扁平输入（如 08 的 title/content 字符串键）没有嵌套 dict，兜底取
+    payload 顶层的 "title" 键。
     """
     reviews = [v for v in ctx.values() if isinstance(v, dict) and "decision" in v and "payload" in v]
     payload = reviews[-1]["payload"] if reviews else ctx
@@ -46,7 +48,8 @@ async def cfg_publish(ctx: dict[str, Any]) -> str:
         (v for v in reversed(list(payload.values())) if isinstance(v, dict) and "title" in v),
         {},
     )
-    return f"Published: {titled.get('title', '(untitled)')}"
+    title = titled.get("title") or payload.get("title")
+    return f"Published: {title or '(untitled)'}"
 
 
 @node(kind="condition", label="是否需要报告", description="条件谓词：merge 有输出才执行下游")
@@ -98,3 +101,11 @@ def demo_needs_review(ctx: dict[str, Any]) -> bool:
     """
     merge = ctx.get("merge")
     return bool(merge) and len(str(merge.get("body", ""))) > 30
+
+
+@node(label="按查询检索", description="读取必填输入 query 与可选输入 topic，演示运行时参数校验")
+async def demo_search(ctx: dict[str, Any]) -> dict[str, Any]:
+    """演示必填/可选输入：query 由运行时提供（09 示例声明为必填），
+    topic 有 YAML 默认值、可被运行时覆盖。"""
+    await asyncio.sleep(0.05)
+    return {"query": ctx["query"], "topic": ctx.get("topic", "")}

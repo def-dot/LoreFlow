@@ -20,3 +20,4 @@ class RunRecord(SQLModel, table=True):
     status: str = "pending"  # pending/running/reviewing/completed/failed/cancelled
     error: str | None = None
     nodes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    inputs: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))  # 运行时输入快照（resume 回放用）

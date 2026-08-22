@@ -75,6 +75,10 @@ class DAGExecutor:
         # ----- resume: 已完成节点直接置为完成，输出进上下文 -----
         resume = resume or {}
         for name, saved in resume.items():
+            if name not in nodes:
+                # 快照来自旧版配置：当前 DAG 已无此节点（配置改版），跳过
+                logger.warning("[resume] 快照节点 %r 不在当前 DAG 中，跳过", name)
+                continue
             if saved.get("status") == "completed":
                 ctx[name] = saved.get("output")
                 events[name].set()

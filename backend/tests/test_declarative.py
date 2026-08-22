@@ -5,6 +5,7 @@ from typing import Any, Literal
 import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
+from app.engine.declarative import parse_params
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY, NodeType
 
@@ -183,3 +184,134 @@ def test_load_dag_bad_file(tmp_path) -> None:
     bad.write_text("nodes: [unclosed", encoding="utf-8")
     with pytest.raises(ValueError, match="YAML 无效"):
         load_dag(bad)
+
+
+# ---------------------------------------------------------------------------
+# required_inputs — 必填输入声明与校验
+# ---------------------------------------------------------------------------
+
+
+async def test_required_inputs_enforced_at_run(registered: Any) -> None:
+    """required_inputs 声明的键在 run() 前校验：缺参 ValueError，不跑任何节点。"""
+    ran = {"n": 0}
+
+    async def only(ctx: dict[str, Any]) -> str:
+        ran["n"] += 1
+        return ctx["query"]
+
+    registered("t_only", only, "function")
+    dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "required_inputs": ["query"]})
+
+    with pytest.raises(ValueError, match="缺少必填输入参数: query"):
+        await dag.run()
+    assert ran["n"] == 0  # 缺参时节点零执行
+
+    results = await dag.run(inputs={"query": "hello"})
+    assert results["only"].output == "hello"
+
+
+def test_required_inputs_overlap_defaults_rejected() -> None:
+    """必填键同时声明默认值 → 配置错误（必填就不该有默认）。"""
+    with pytest.raises(ValueError, match="重叠"):
+        load_dag(
+            {
+                "nodes": {"only": {"type": "cfg_fetch"}},
+                "required_inputs": ["query"],
+                "inputs": {"query": "有默认值"},
+            }
+        )
+
+
+def test_required_inputs_bad_type_rejected() -> None:
+    with pytest.raises(ValueError, match="非空字符串列表"):
+        load_dag({"nodes": {"only": {"type": "cfg_fetch"}}, "required_inputs": "query"})
+
+
+def test_input_keys_clash_node_names_rejected() -> None:
+    """默认/必填输入键与节点名冲突 → load_dag 拒绝（ctx 命名空间共享）。"""
+    with pytest.raises(ValueError, match="冲突"):
+        load_dag(
+            {
+                "nodes": {"only": {"type": "cfg_fetch"}},
+                "inputs": {"only": 1},
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# params 富声明 — label/description/default/required，与简式归一化
+# ---------------------------------------------------------------------------
+
+
+def test_parse_params_rich_form() -> None:
+    """params 富声明 → 统一参数行 + 派生 default_inputs/required_inputs。"""
+    rows, defaults, required = parse_params(
+        {
+            "params": {
+                "query": {"required": True, "label": "查询词", "description": "要检索的内容"},
+                "topic": {"default": "默认主题", "label": "主题"},
+                "limit": {"default": 5},  # 可选、无 label → label 退化为键名
+            }
+        }
+    )
+    assert rows == [
+        {"name": "query", "label": "查询词", "description": "要检索的内容", "default": None, "has_default": False, "required": True},
+        {"name": "topic", "label": "主题", "description": None, "default": "默认主题", "has_default": True, "required": False},
+        {"name": "limit", "label": "limit", "description": None, "default": 5, "has_default": True, "required": False},
+    ]
+    assert defaults == {"topic": "默认主题", "limit": 5}
+    assert required == ["query"]
+
+
+def test_parse_params_legacy_form_rows() -> None:
+    """inputs/required_inputs 简式 → 同样产出参数行（label=键名、无说明）。"""
+    rows, defaults, required = parse_params(
+        {"required_inputs": ["query"], "inputs": {"topic": "默认主题"}}
+    )
+    assert rows == [
+        {"name": "query", "label": "query", "description": None, "default": None, "has_default": False, "required": True},
+        {"name": "topic", "label": "topic", "description": None, "default": "默认主题", "has_default": True, "required": False},
+    ]
+    assert defaults == {"topic": "默认主题"} and required == ["query"]
+
+
+async def test_params_rich_form_runs(registered: Any) -> None:
+    """params 声明的必填/默认与简式语义一致：run 前校验、默认值进 ctx。"""
+
+    async def search(ctx: dict[str, Any]) -> dict[str, Any]:
+        return {"query": ctx["query"], "topic": ctx.get("topic")}
+
+    registered("t_search", search, "function")
+    dag = load_dag(
+        {
+            "nodes": {"search": {"type": "t_search"}},
+            "params": {
+                "query": {"required": True, "label": "查询词"},
+                "topic": {"default": "默认主题"},
+            },
+        }
+    )
+    assert dag.default_inputs == {"topic": "默认主题"}
+    assert dag.required_inputs == ["query"]
+
+    with pytest.raises(ValueError, match="缺少必填输入参数: query"):
+        await dag.run()
+    # run(inputs=...) 整体替换默认值；合并语义在 orchestrator（runtime 覆盖默认）
+    results = await dag.run(inputs={**dag.default_inputs, "query": "洛伦佐"})
+    assert results["search"].output == {"query": "洛伦佐", "topic": "默认主题"}
+
+
+def test_params_required_with_default_rejected() -> None:
+    with pytest.raises(ValueError, match="必填参数不应有默认值"):
+        parse_params({"params": {"q": {"required": True, "default": "x"}}})
+
+
+def test_params_unknown_field_rejected() -> None:
+    with pytest.raises(ValueError, match="不支持的字段"):
+        parse_params({"params": {"q": {"type": "string"}}})
+
+
+def test_params_mixed_with_legacy_rejected() -> None:
+    """params 与 inputs/required_inputs 混用 → 二义，拒绝。"""
+    with pytest.raises(ValueError, match="不能与 inputs/required_inputs 混用"):
+        parse_params({"params": {"q": {"required": True}}, "inputs": {"topic": "t"}})
