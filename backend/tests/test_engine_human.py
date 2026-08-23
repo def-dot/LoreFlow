@@ -4,7 +4,16 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, NodeResult, NodeStatus, RetryPolicy, SuspendExecution
+from app.engine import (
+    DAG,
+    DAGExecutionError,
+    NodeResult,
+    NodeStatus,
+    RetryPolicy,
+    SuspendExecution,
+    SKIP_CONDITION,
+    SKIP_UPSTREAM_FAILED,
+)
 from app.engine.node import ApproverFunc
 
 
@@ -76,6 +85,36 @@ async def test_human_reject_cascades_skip() -> None:
     assert results["publish"].status == NodeStatus.SKIPPED
 
 
+async def test_reject_cascade_transmits_transitively() -> None:
+    """多级审核第一级拒绝：失败级联要传到隔代下游，发布节点不得执行。
+
+    回归：级联检查曾只拦直接 FAILED 依赖——第二级被跳过后（SKIPPED），
+    依赖它的发布节点检查通过照跑，被拒内容发布了出去。
+    """
+    published: list[str] = []
+
+    dag = DAG("multi_reject")
+
+    dag.human_node("first_review", approver=fake_approver({"approve": False, "reason": "初审不过"}))
+
+    dag.human_node("second_review", depends_on=["first_review"], approver=fake_approver({"approve": True}))
+
+    @dag.node("publish", depends_on=["second_review"])
+    async def publish(ctx: dict[str, Any]) -> str:
+        published.append("ran")
+        return "should not run"
+
+    with pytest.raises(DAGExecutionError) as excinfo:
+        await dag.run()
+    results = excinfo.value.results
+    assert results["first_review"].status == NodeStatus.FAILED
+    assert results["second_review"].status == NodeStatus.SKIPPED
+    assert results["second_review"].skip_reason == SKIP_UPSTREAM_FAILED
+    assert results["publish"].status == NodeStatus.SKIPPED  # 隔代也拦，级联传递
+    assert results["publish"].skip_reason == SKIP_UPSTREAM_FAILED
+    assert published == []
+
+
 async def test_human_reject_bypasses_retry() -> None:
     """拒绝是终局决策：返回 FailedOutput 不进重试循环，attempts 保持 1。"""
     events: list[NodeResult] = []
@@ -130,7 +169,8 @@ async def test_human_node_condition_false_skips_review() -> None:
     results = await dag.run()
     assert called is False
     assert results["review"].status == NodeStatus.SKIPPED
-    assert results["publish"].output == 1
+    assert results["review"].skip_reason == SKIP_CONDITION
+    assert results["publish"].output == 1  # 条件跳过是分支语义，下游照跑
 
 
 async def test_human_node_requires_approver() -> None:

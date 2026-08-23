@@ -5,7 +5,7 @@ from typing import Any, Literal
 import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
-from app.engine.declarative import parse_params
+from app.engine.declarative import parse_params, parse_review
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY, NodeType
 
@@ -251,16 +251,23 @@ def test_parse_params_rich_form() -> None:
                 "query": {"required": True, "label": "查询词", "description": "要检索的内容"},
                 "topic": {"default": "默认主题", "label": "主题"},
                 "limit": {"default": 5},  # 可选、无 label → label 退化为键名
+                "body": {"required": True, "multiline": True},  # 多行文本（前端 textarea）
             }
         }
     )
     assert rows == [
-        {"name": "query", "label": "查询词", "description": "要检索的内容", "default": None, "has_default": False, "required": True},
-        {"name": "topic", "label": "主题", "description": None, "default": "默认主题", "has_default": True, "required": False},
-        {"name": "limit", "label": "limit", "description": None, "default": 5, "has_default": True, "required": False},
+        {"name": "query", "label": "查询词", "description": "要检索的内容", "default": None, "has_default": False, "required": True, "multiline": False},
+        {"name": "topic", "label": "主题", "description": None, "default": "默认主题", "has_default": True, "required": False, "multiline": False},
+        {"name": "limit", "label": "limit", "description": None, "default": 5, "has_default": True, "required": False, "multiline": False},
+        {"name": "body", "label": "body", "description": None, "default": None, "has_default": False, "required": True, "multiline": True},
     ]
     assert defaults == {"topic": "默认主题", "limit": 5}
-    assert required == ["query"]
+    assert required == ["query", "body"]
+
+
+def test_params_multiline_bad_type_rejected() -> None:
+    with pytest.raises(ValueError, match="multiline 必须是布尔值"):
+        parse_params({"params": {"b": {"multiline": "yes"}}})
 
 
 def test_parse_params_legacy_form_rows() -> None:
@@ -269,8 +276,8 @@ def test_parse_params_legacy_form_rows() -> None:
         {"required_inputs": ["query"], "inputs": {"topic": "默认主题"}}
     )
     assert rows == [
-        {"name": "query", "label": "query", "description": None, "default": None, "has_default": False, "required": True},
-        {"name": "topic", "label": "topic", "description": None, "default": "默认主题", "has_default": True, "required": False},
+        {"name": "query", "label": "query", "description": None, "default": None, "has_default": False, "required": True, "multiline": False},
+        {"name": "topic", "label": "topic", "description": None, "default": "默认主题", "has_default": True, "required": False, "multiline": False},
     ]
     assert defaults == {"topic": "默认主题"} and required == ["query"]
 
@@ -315,3 +322,100 @@ def test_params_mixed_with_legacy_rejected() -> None:
     """params 与 inputs/required_inputs 混用 → 二义，拒绝。"""
     with pytest.raises(ValueError, match="不能与 inputs/required_inputs 混用"):
         parse_params({"params": {"q": {"required": True}}, "inputs": {"topic": "t"}})
+
+
+# ---------------------------------------------------------------------------
+# review 审核视图 — human 节点声明审核者看什么
+# ---------------------------------------------------------------------------
+
+
+def test_parse_review_forms() -> None:
+    """列表/裸字符串映射/富映射归一化为 {key: label}；缺省 → None（全量）。"""
+    assert parse_review(None) is None
+    assert parse_review(["title"]) == {"title": "title"}
+    assert parse_review({"title": "标题"}) == {"title": "标题"}
+    assert parse_review({"title": {"label": "标题"}, "content": {}}) == {"title": "标题", "content": "content"}
+
+
+def test_parse_review_rejects() -> None:
+    with pytest.raises(ValueError, match="非空字符串键列表"):
+        parse_review(["", 1])
+    with pytest.raises(ValueError, match="不能为空映射"):
+        parse_review({})
+    with pytest.raises(ValueError, match="不支持的字段"):
+        parse_review({"t": {"format": "text"}})
+    with pytest.raises(ValueError, match="必须是键列表或映射"):
+        parse_review("title")
+
+
+async def test_human_review_view_payload(registered: Any) -> None:
+    """声明 review：payload 只含声明键 + 首位 _review 标签；运行时缺失的键置 None。"""
+    seen: dict[str, Any] = {}
+
+    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        seen.update(payload)
+        return {"approve": True}
+
+    async def work(ctx: dict[str, Any]) -> str:
+        return "done"
+
+    registered("t_work", work, "function")
+    dag = load_dag(
+        {
+            # opt：可选参数、无默认值 → 本次运行不提供，审核视图里应为 None 而非消失
+            "params": {"opt": {}},
+            "nodes": {
+                "work": {"type": "t_work"},
+                "gate": {
+                    "kind": "human",
+                    "depends_on": ["work"],
+                    "prompt": "重点核对工作成果",
+                    "review": {"work": {"label": "工作成果"}, "opt": {"label": "可选参数"}},
+                },
+            },
+        },
+        approver=approver,
+    )
+    results = await dag.run()
+    assert seen == {
+        "_prompt": "重点核对工作成果",
+        "_review": {"work": "工作成果", "opt": "可选参数"},
+        "work": "done",
+        "opt": None,
+    }
+    # 通过后节点输出的 payload 与审核者看到的一致（决策记录）
+    assert results["gate"].output["payload"]["work"] == "done"
+
+
+def test_review_unknown_key_rejected() -> None:
+    """review 键不在参数键/节点名里（拼写错误）→ 载入时拒绝，而非审核时静默 None。"""
+    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"approve": True}
+
+    with pytest.raises(ValueError, match="review 引用了未声明的键 ttile"):
+        load_dag(
+            {
+                "nodes": {
+                    "work": {"type": "cfg_fetch"},
+                    "gate": {"kind": "human", "depends_on": ["work"], "review": ["ttile"]},
+                },
+            },
+            approver=approver,
+        )
+
+
+def test_review_param_key_allowed() -> None:
+    """review 键可以是参数键（含无默认值的可选参数）——校验用参数行全集。"""
+    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"approve": True}
+
+    dag = load_dag(
+        {
+            "params": {"q": {"required": True}, "opt": {}},
+            "nodes": {
+                "gate": {"kind": "human", "depends_on": [], "review": ["q", "opt"]},
+            },
+        },
+        approver=approver,
+    )
+    assert dag.human_nodes[0].name == "gate"

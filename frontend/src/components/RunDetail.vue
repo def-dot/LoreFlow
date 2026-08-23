@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { RunDetail } from '@/api/runs'
+import type { ParamSpec } from '@/api/pipelines'
 import { statusLabel, statusTagType } from '@/utils/status'
 import MermaidDiagram from './MermaidDiagram.vue'
 import NodeStatusTable from './NodeStatusTable.vue'
 import ReviewCards from './ReviewCards.vue'
+import FieldValues, { type FieldValue } from './FieldValues.vue'
 
-const props = defineProps<{ detail: RunDetail; deciding: boolean }>()
+const props = defineProps<{ detail: RunDetail; deciding: boolean; params?: ParamSpec[] }>()
 
 const emit = defineEmits<{
   decide: [node: string, approve: boolean, reason: string | null]
@@ -26,10 +28,24 @@ const reviewing = computed(() =>
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 
-// 创建时的运行时输入快照：数量以 chip 展示，完整 JSON 悬浮查看
+// 创建时的运行时输入快照：数量以 chip 展示，点击弹层逐字段查看
 // （后端旧版本无 inputs 字段，?? {} 兜底）
 const inputCount = computed(() => Object.keys(props.detail.inputs ?? {}).length)
-const inputsJson = computed(() => JSON.stringify(props.detail.inputs ?? {}, null, 2))
+
+// 弹层字段：按该 run 流水线的参数声明排序/标注（label 优先），
+// 未声明的键（JSON 模式塞的任意键）追加在后、label=键名
+const inputFields = computed<FieldValue[]>(() => {
+  const inputs = props.detail.inputs ?? {}
+  const declared = props.params ?? []
+  const fields = declared
+    .filter((spec) => spec.name in inputs)
+    .map((spec) => ({ key: spec.name, label: spec.label, value: inputs[spec.name] }))
+  const declaredNames = new Set(declared.map((spec) => spec.name))
+  for (const [key, value] of Object.entries(inputs)) {
+    if (!declaredNames.has(key)) fields.push({ key, label: key, value })
+  }
+  return fields
+})
 </script>
 
 <template>
@@ -40,13 +56,12 @@ const inputsJson = computed(() => JSON.stringify(props.detail.inputs ?? {}, null
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
         {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
-      <el-tooltip v-if="inputCount" placement="bottom">
-        <template #content>
-          <!-- tooltip 挂 body，scoped 样式够不到 → 内联 -->
-          <pre style="margin: 0; max-width: 420px; max-height: 300px; overflow: auto; white-space: pre-wrap">{{ inputsJson }}</pre>
+      <el-popover v-if="inputCount" placement="bottom-start" :width="360" trigger="click">
+        <template #reference>
+          <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
         </template>
-        <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
-      </el-tooltip>
+        <FieldValues :fields="inputFields" />
+      </el-popover>
       <el-button size="small" plain @click="emit('viewConfig', detail.config_file, detail.id)">查看配置</el-button>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
@@ -89,7 +104,7 @@ const inputsJson = computed(() => JSON.stringify(props.detail.inputs ?? {}, null
   font-size: 12px;
   color: var(--ink-3);
 }
-/* 运行时输入快照 chip：与 run-meta 同级弱化展示，悬浮看完整 JSON */
+/* 运行时输入快照 chip：与 run-meta 同级弱化展示，点击弹层逐字段查看 */
 .run-inputs {
   font-family: var(--font-mono);
   font-size: 12px;

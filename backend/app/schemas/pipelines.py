@@ -14,6 +14,7 @@ class PipelineParamOut(BaseModel):
     default: Any = None          # 默认值（has_default=False 时无意义）
     has_default: bool = False    # 是否声明了默认值（区分 default: null）
     required: bool = False       # 创建运行时必须提供
+    multiline: bool = False      # 多行文本（前端渲染 textarea，如文章正文）
 
 
 class PipelineListItem(BaseModel):
@@ -40,6 +41,7 @@ class PipelineNodeOut(BaseModel):
     retry: str | None = None         # 中文摘要，如 "重试 3 次，退避 0.05s×2（≤0.5s）"
     condition: str | None = None     # 条件谓词注册表键
     condition_label: str | None = None
+    review: dict[str, str] | None = None  # (kind=human) 审核视图 {key: label}；None=全量上下文
 
 
 class PipelineDetail(PipelineListItem):

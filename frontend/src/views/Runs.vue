@@ -46,20 +46,28 @@ const selectedPipeline = computed(() =>
   pipelinesStore.pipelines.find((p) => p.filename === configFile.value),
 )
 const paramSpecs = computed(() => selectedPipeline.value?.params ?? [])
+// run 详情「⚙ 参数」弹层的声明标签：按该 run 的 config_file 取
+// （与创建下拉的选中无关 —— 看旧 run 时下拉可能停在别的流水线上）
+const detailParams = computed(() =>
+  pipelinesStore.pipelines.find((p) => p.filename === store.detail?.config_file)?.params ?? [],
+)
 const requiredInputs = computed(() => selectedPipeline.value?.required_inputs ?? [])
 const defaultInputs = computed(() => selectedPipeline.value?.inputs ?? {})
 const hasDefaults = computed(() => Object.keys(defaultInputs.value).length > 0)
 const defaultsJson = computed(() => JSON.stringify(defaultInputs.value, null, 2))
 
-// 切换流水线时清空表单值：不同流水线的参数集不同，旧值没有意义
+// 切换流水线时清空参数状态（表单值 + JSON 文本）：不同流水线的参数集不同，
+// 旧值没有意义 —— 参数按钮未声明时是隐藏的，残留 JSON 会静默随新建运行提交
 watch(configFile, () => {
   paramValues.value = {}
+  inputsText.value = ''
 })
 
-// 字段文本 → 提交值：空串 = 未提供；数字/布尔/JSON 字面量按 JSON 解析，其余原样字符串
-function parseFieldValue(raw: string): unknown {
+// 字段文本 → 提交值：空串 = 未提供；数字/布尔/JSON 字面量按 JSON 解析，其余原样字符串。
+// multiline 字段声明为文本语义，跳过 JSON 启发式（正文以 { 开头不该变成对象）
+function parseFieldValue(raw: string, multiline: boolean): unknown {
   const text = raw.trim()
-  if (/^-?\d+(\.\d+)?$/.test(text) || text === 'true' || text === 'false' || /^[{\[]/.test(text)) {
+  if (!multiline && (/^-?\d+(\.\d+)?$/.test(text) || text === 'true' || text === 'false' || /^[{\[]/.test(text))) {
     try {
       return JSON.parse(text)
     } catch {
@@ -74,7 +82,7 @@ const formInputs = computed(() => {
   const value: Record<string, unknown> = {}
   for (const spec of paramSpecs.value) {
     const raw = (paramValues.value[spec.name] ?? '').trim()
-    if (raw !== '') value[spec.name] = parseFieldValue(raw)
+    if (raw !== '') value[spec.name] = parseFieldValue(raw, spec.multiline)
   }
   return value
 })
@@ -94,6 +102,28 @@ const missingRequired = computed(() => {
   return requiredInputs.value.filter((k) => !(k in provided))
 })
 
+// 表单模式 = 声明了参数且未切 JSON：弹层主体按声明渲染字段
+const formMode = computed(() => !jsonMode.value && paramSpecs.value.length > 0)
+
+// 参数键 → 展示名（JSON 模式标签用）：label 优先，与键不同才附 (key) 供照抄；
+// 简式声明 label=键名，展示不变
+function keyLabel(name: string): string {
+  const spec = paramSpecs.value.find((p) => p.name === name)
+  return spec && spec.label !== name ? `${spec.label}(${name})` : name
+}
+
+// 缺参提示文本按模式取形：表单模式只给 label（用户不接触键），
+// JSON 模式附 (key)（键就是要敲进 JSON 的内容）
+const missingRequiredText = computed(() =>
+  missingRequired.value
+    .map((name) => {
+      const spec = paramSpecs.value.find((p) => p.name === name)
+      if (!spec || spec.label === name) return name
+      return formMode.value ? spec.label : `${spec.label}(${name})`
+    })
+    .join('、'),
+)
+
 // JSON 模式 placeholder：示例键取自所选流水线实际声明的参数，避免误导
 const jsonPlaceholder = computed(() => {
   const keys = [...requiredInputs.value, ...Object.keys(defaultInputs.value)]
@@ -101,13 +131,12 @@ const jsonPlaceholder = computed(() => {
   return 'JSON 对象（该流水线未声明参数，一般无需填写）'
 })
 
-// 参数字段的 placeholder：默认值预览 / 必填 / 可选
+// 参数字段的 placeholder：只放「默认值预览」——留空的后果是唯一别处没有的信息；
+// 必填/可选已在 label 行（*/可选）、说明在字段下方常驻，不再重复进 placeholder
 function paramPlaceholder(spec: ParamSpec): string {
-  if (spec.has_default) {
-    const text = JSON.stringify(spec.default) ?? ''
-    return `默认: ${text.length > 32 ? `${text.slice(0, 32)}…` : text}`
-  }
-  return spec.required ? '必填' : '可选，不填则不传'
+  if (!spec.has_default) return ''
+  const text = JSON.stringify(spec.default) ?? ''
+  return `默认: ${text.length > 32 ? `${text.slice(0, 32)}…` : text}`
 }
 
 function fillDefaults() {
@@ -235,7 +264,7 @@ async function startNewRun() {
     return
   }
   if (missingRequired.value.length) {
-    ElMessage.warning(`缺少必填参数: ${missingRequired.value.join('、')}`)
+    ElMessage.warning(`缺少必填参数: ${missingRequiredText.value}`)
     return
   }
   creating.value = true
@@ -306,7 +335,9 @@ onUnmounted(() => {
       <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">
         👁 预览
       </el-button>
-      <el-popover placement="bottom-start" :width="380" trigger="click">
+      <!-- 参数入口按声明出现：流水线声明了参数（任意形式）才有「参数」可言，
+           未声明的流水线不显示空选项（弹层内容只会是「无需填写」） -->
+      <el-popover v-if="paramSpecs.length" placement="bottom-start" :width="380" trigger="click">
         <template #reference>
           <el-button plain :disabled="!pipelinesStore.pipelines.length">
             ⚙ 参数<template v-if="submitInputs.count"> · {{ submitInputs.count }}</template>
@@ -327,7 +358,7 @@ onUnmounted(() => {
           </div>
 
           <!-- 表单模式：按流水线声明逐参数渲染，label/说明/默认值/必填直接可见 -->
-          <template v-if="!jsonMode && paramSpecs.length">
+          <template v-if="formMode">
             <div v-for="spec in paramSpecs" :key="spec.name" class="param-field">
               <div class="param-label">
                 {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
@@ -335,6 +366,8 @@ onUnmounted(() => {
               </div>
               <el-input
                 v-model="paramValues[spec.name]"
+                :type="spec.multiline ? 'textarea' : 'text'"
+                :autosize="spec.multiline ? { minRows: 3, maxRows: 8 } : undefined"
                 size="small"
                 spellcheck="false"
                 :placeholder="paramPlaceholder(spec)"
@@ -342,7 +375,7 @@ onUnmounted(() => {
               <div v-if="spec.description" class="param-desc">{{ spec.description }}</div>
             </div>
             <div v-if="missingRequired.length" class="inputs-error">
-              缺少必填参数: {{ missingRequired.join('、') }}，「新建运行」将被拦截
+              缺少必填参数: {{ missingRequiredText }}，「新建运行」将被拦截
             </div>
             <div v-else-if="submitInputs.count" class="inputs-hint">
               已填 {{ submitInputs.count }} 个参数，随「新建运行」提交；留空字段用默认值或不传。
@@ -350,7 +383,7 @@ onUnmounted(() => {
             <div v-else class="inputs-hint">留空字段用 YAML 默认值或不传；未填必填项将被拦截。</div>
           </template>
 
-          <!-- JSON 模式 / 未声明参数的流水线：原始 JSON 文本 -->
+          <!-- JSON 模式：原始 JSON 文本（声明流水线的高级逃生口） -->
           <template v-else>
             <div v-if="requiredInputs.length" class="inputs-required">
               <span>必填：</span>
@@ -361,7 +394,7 @@ onUnmounted(() => {
                 :type="missingRequired.includes(k) ? 'danger' : 'success'"
                 disable-transitions
               >
-                {{ k }}{{ missingRequired.includes(k) ? ' *' : ' ✓' }}
+                {{ keyLabel(k) }}{{ missingRequired.includes(k) ? ' *' : ' ✓' }}
               </el-tag>
             </div>
             <el-input
@@ -373,7 +406,7 @@ onUnmounted(() => {
             />
             <div v-if="parsedInputs.error" class="inputs-error">{{ parsedInputs.error }}</div>
             <div v-else-if="missingRequired.length" class="inputs-error">
-              缺少必填参数: {{ missingRequired.join('、') }}，「新建运行」将被拦截
+              缺少必填参数: {{ missingRequiredText }}，「新建运行」将被拦截
             </div>
             <div v-else-if="parsedInputs.count" class="inputs-hint">
               已解析 {{ parsedInputs.count }} 个参数，随「新建运行」提交；同名键优先于 YAML 默认 inputs。
@@ -409,6 +442,7 @@ onUnmounted(() => {
         v-if="store.detail"
         :detail="store.detail"
         :deciding="store.deciding"
+        :params="detailParams"
         @decide="decide"
         @view-config="viewRunConfig"
       />

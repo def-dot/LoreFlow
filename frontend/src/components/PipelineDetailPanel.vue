@@ -16,6 +16,12 @@ function defaultPreview(value: unknown): string {
   const text = JSON.stringify(value) ?? ''
   return text.length > 40 ? `${text.slice(0, 40)}…` : text
 }
+// 审核视图文本：label(key)；未声明时节点行 review=null 不渲染
+function reviewView(review: Record<string, string>): string {
+  return Object.entries(review)
+    .map(([key, label]) => (label === key ? key : `${label}(${key})`))
+    .join('、')
+}
 </script>
 
 <template>
@@ -69,7 +75,10 @@ function defaultPreview(value: unknown): string {
             <template #default="{ row }">{{ row.condition_label ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="说明" min-width="130">
-            <template #default="{ row }">{{ row.type_description ?? '—' }}</template>
+            <template #default="{ row }">
+              <div>{{ row.type_description ?? '—' }}</div>
+              <div v-if="row.review" class="muted review-view">审核视图: {{ reviewView(row.review) }}</div>
+            </template>
           </el-table-column>
         </el-table>
       </section>
@@ -96,6 +105,11 @@ function defaultPreview(value: unknown): string {
 }
 .desc {
   margin: 0 0 14px;
+}
+/* human 节点说明下方的审核视图行 */
+.review-view {
+  font-size: 12px;
+  margin-top: 2px;
 }
 /* 运行时参数块：紧随导语，说明这条流水线吃什么参数 */
 .params-block {

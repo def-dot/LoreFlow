@@ -32,12 +32,12 @@ def _resolve_function(name: str) -> Callable[..., Any]:
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
     "node": {"type", "depends_on", "retry", "timeout", "condition", "metadata"},
-    "human": {"depends_on", "retry", "prompt", "condition"},
+    "human": {"depends_on", "retry", "prompt", "condition", "review"},
     "loop": {"depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
 }
 
 #: Fields accepted per key in a ``params`` mapping; anything else raises.
-_PARAM_FIELDS = {"label", "description", "default", "required"}
+_PARAM_FIELDS = {"label", "description", "default", "required", "multiline"}
 
 
 def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
@@ -65,8 +65,8 @@ def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str
         overlapped = sorted(set(required) & set(defaults))
         if overlapped:
             raise ValueError(f"required_inputs 与 inputs 默认值重叠（必填键不应有默认值）: {', '.join(overlapped)}")
-        rows = [{"name": k, "label": k, "description": None, "default": None, "has_default": False, "required": True} for k in required]
-        rows += [{"name": k, "label": k, "description": None, "default": v, "has_default": True, "required": False} for k, v in defaults.items()]
+        rows = [{"name": k, "label": k, "description": None, "default": None, "has_default": False, "required": True, "multiline": False} for k in required]
+        rows += [{"name": k, "label": k, "description": None, "default": v, "has_default": True, "required": False, "multiline": False} for k, v in defaults.items()]
         return rows, defaults, list(required)
 
     if not isinstance(params, dict) or not params:
@@ -87,6 +87,9 @@ def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str
         has_default = "default" in spec
         if is_required and has_default:
             raise ValueError(f"参数 {name!r}: 必填参数不应有默认值")
+        multiline = spec.get("multiline", False)
+        if not isinstance(multiline, bool):
+            raise ValueError(f"参数 {name!r}: multiline 必须是布尔值")
         if is_required:
             required.append(name)
         elif has_default:
@@ -98,8 +101,40 @@ def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str
             "default": spec.get("default"),
             "has_default": has_default,
             "required": is_required,
+            "multiline": multiline,
         })
     return rows, defaults, required
+
+
+def parse_review(spec: Any) -> dict[str, str] | None:
+    """归一化 human 节点的 review 视图声明 → 有序 ``{key: label}``。
+
+    三种形式：缺省/None → None（全量上下文，向后兼容）；键列表
+    ``[title]`` → label 退化为键名；映射 ``{title: {label: 标题}}`` 或
+    ``{title: 标题}`` → 富声明（每键只接受 label 字段）。
+    """
+    if spec is None:
+        return None
+    if isinstance(spec, list):
+        if not spec or not all(isinstance(k, str) and k for k in spec):
+            raise ValueError(f"review 必须是非空字符串键列表，实际是 {spec!r}")
+        return {k: k for k in spec}
+    if isinstance(spec, dict):
+        if not spec:
+            raise ValueError("review 声明不能为空映射（不声明即全量上下文）")
+        view: dict[str, str] = {}
+        for key, val in spec.items():
+            if isinstance(val, str):
+                view[key] = val or key
+            elif isinstance(val, dict):
+                unknown = set(val) - {"label"}
+                if unknown:
+                    raise ValueError(f"review 字段 {key!r}: 不支持的字段 {sorted(unknown)}")
+                view[key] = str(val.get("label") or key)
+            else:
+                raise ValueError(f"review 字段 {key!r}: 定义必须是字符串 label 或 {{label}}，实际是 {type(val).__name__}")
+        return view
+    raise ValueError(f"review 必须是键列表或映射，实际是 {type(spec).__name__}")
 
 
 def read_yaml(path: str | Path) -> tuple[str, Any]:
@@ -137,7 +172,9 @@ def load_dag(
     else:
         raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 
-    _, defaults, required = parse_params(config)
+    param_rows, defaults, required = parse_params(config)
+    # human 节点的 review 声明（载入后统一校验键的存在性）
+    review_specs: dict[str, dict[str, str]] = {}
 
     dag = DAG(
         config.get("name", "dag"),
@@ -164,6 +201,9 @@ def load_dag(
 
         if kind == "human":
             condition = spec.get("condition")
+            review = parse_review(spec.get("review"))
+            if review is not None:
+                review_specs[name] = review
             dag.human_node(
                 name,
                 depends_on=deps,
@@ -171,6 +211,7 @@ def load_dag(
                 condition=_resolve_function(condition) if condition else None,
                 retry=retry,
                 approver=approver,
+                review=review,
             )
 
         elif kind == "loop":
@@ -224,4 +265,12 @@ def load_dag(
     clash = sorted((set(required) | set(defaults)) & set(dag.node_names))
     if clash:
         raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
+
+    # review 视图键必须在运行时可能出现的名字里（参数键或节点名）：
+    # 拼写错误在载入时就拦截，而不是审核时静默显示 None
+    available = set(dag.node_names) | {row["name"] for row in param_rows}
+    for node_name, view in review_specs.items():
+        unknown = [k for k in view if k not in available]
+        if unknown:
+            raise ValueError(f"审核节点 {node_name!r}: review 引用了未声明的键 {', '.join(unknown)}")
     return dag

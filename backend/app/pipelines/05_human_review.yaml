@@ -33,6 +33,9 @@ nodes:
     kind: human
     depends_on: [merge]
     prompt: "请审核合并结果：同意输入 y，拒绝输入 n。"
+    # 审核视图：审核者只看 merge 的最终结果，不看 fetch/clean/enrich 中间态
+    review:
+      merge: {label: 合并结果}
 
   publish:
     type: cfg_publish

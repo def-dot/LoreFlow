@@ -16,9 +16,25 @@ import time
 from typing import Any
 
 from .node import HumanRejected, Node
-from .types import DAGExecutionError, NodeEventFunc, NodeResult, NodeStatus, RetryPolicy, SuspendExecution
+from .types import (
+    DAGExecutionError,
+    NodeEventFunc,
+    NodeResult,
+    NodeStatus,
+    RetryPolicy,
+    SuspendExecution,
+    SKIP_CONDITION,
+    SKIP_UPSTREAM_FAILED,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _blocks_downstream(dep_result: NodeResult) -> bool:
+    """上游终态是否阻断下游：FAILED，或因失败级联被跳过（阻断要传递）。"""
+    if dep_result.status == NodeStatus.FAILED:
+        return True
+    return dep_result.status == NodeStatus.SKIPPED and dep_result.skip_reason == SKIP_UPSTREAM_FAILED
 
 
 class DAGExecutor:
@@ -140,15 +156,22 @@ class DAGExecutor:
                 await events[dep].wait()
 
             # ---- 2. Check for cascading failure ----
-            # 上游终态从其任务返回值读（恢复完成的节点没有任务，视为未失败）
-            failed_deps = [
-                dep for dep in node.depends_on if dep in tasks and tasks[dep].result().status == NodeStatus.FAILED
+            # 上游终态从其任务返回值读（恢复完成的节点没有任务，视为未失败）。
+            # 级联必须传递：上游因失败被跳过（SKIP_UPSTREAM_FAILED）同样阻断
+            # 本节点——只拦 FAILED 的话失败只停一层，隔代下游照跑（多级审核
+            # 拒绝后发布节点仍执行的 bug）。条件跳过（SKIP_CONDITION）是分支
+            # 语义，不阻断下游。
+            blocked_deps = [
+                dep
+                for dep in node.depends_on
+                if dep in tasks and _blocks_downstream(tasks[dep].result())
             ]
-            if failed_deps:
-                logger.warning("[%s] Skipped - upstream failed: %s", node.name, failed_deps)
+            if blocked_deps:
+                logger.warning("[%s] Skipped - upstream failed: %s", node.name, blocked_deps)
                 result = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.SKIPPED,
+                    skip_reason=SKIP_UPSTREAM_FAILED,
                 )
                 return result
 
@@ -170,6 +193,7 @@ class DAGExecutor:
                     result = NodeResult(
                         node_name=node.name,
                         status=NodeStatus.SKIPPED,
+                        skip_reason=SKIP_CONDITION,
                     )
                     return result
 

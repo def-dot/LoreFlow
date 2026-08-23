@@ -31,6 +31,9 @@ nodes:
     depends_on: [merge]
     condition: demo_needs_review
     prompt: "请审核合并结果。"
+    # 审核视图：只看 merge 的最终结果（满足条件真正送审时）
+    review:
+      merge: {label: 合并结果}
 
   report:
     type: cfg_report

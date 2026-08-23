@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
-from app.engine.declarative import parse_params, read_yaml
+from app.engine.declarative import parse_params, parse_review, read_yaml
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY
 
@@ -83,6 +83,7 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "retry": _retry_summary(parse_retry(spec.get("retry"))),
         "condition": spec.get("condition"),
         "condition_label": None,
+        "review": None,
     }
     if kind == "node":
         row["type"] = spec.get("type")
@@ -93,6 +94,7 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     elif kind == "human":
         row["type_label"] = "人工审核"
         row["type_description"] = spec.get("prompt")
+        row["review"] = parse_review(spec.get("review"))
     elif kind == "loop":
         row["type_label"] = "循环"
         body = spec.get("body") or {}

@@ -13,12 +13,26 @@ const rows = computed<Row[]>(() =>
   Object.entries(props.detail.nodes).map(([name, node]) => ({ name, ...node })),
 )
 
-// 与旧 UI 一致：completed 显示输出，否则显示 error
+// 跳过原因：两种跳过对用户含义不同，级联跳过说明上游出了问题
+const SKIP_REASONS: Record<string, string> = {
+  upstream_failed: '上游失败，级联跳过',
+  condition_not_met: '条件不满足，分支未执行',
+}
+
+// 与旧 UI 一致：completed 显示输出，否则显示 error / 跳过原因
 function cellText(row: Row): string {
   if (row.status === 'completed') {
     return row.output === null || row.output === undefined ? '' : JSON.stringify(row.output, null, 1)
   }
+  if (row.status === 'skipped') {
+    return row.skip_reason ? (SKIP_REASONS[row.skip_reason] ?? row.skip_reason) : '已跳过'
+  }
   return row.error ?? ''
+}
+
+// 输出/错误共格互斥：错误格子染红自证身份，不用回看状态标签
+function isCellError(row: Row): boolean {
+  return row.status !== 'completed' && !!row.error
 }
 </script>
 
@@ -34,7 +48,7 @@ function cellText(row: Row): string {
     <el-table-column prop="duration_ms" label="耗时(ms)" width="90" />
     <el-table-column label="输出 / 错误" min-width="200">
       <template #default="{ row }">
-        <pre class="cell-pre">{{ cellText(row) }}</pre>
+        <pre class="cell-pre" :class="{ err: isCellError(row) }">{{ cellText(row) }}</pre>
       </template>
     </el-table-column>
   </el-table>
@@ -55,5 +69,14 @@ function cellText(row: Row): string {
   font-size: 11.5px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+/* 错误格：只染文字色（#ff8f8a，深底可读、与参数面板一致），
+ * 底色与其余格保持一致 */
+.cell-pre.err {
+  color: #ff8f8a;
+}
+/* pending 等无内容行：不渲染空盒子 */
+.cell-pre:empty {
+  display: none;
 }
 </style>

@@ -2,8 +2,8 @@
 #   新建运行「⚙ 参数」表单里填 标题/正文 两个必填字段（可切 JSON 模式）
 #   缺 title / content → 400 拒绝创建（前端弹层会标 * 拦截）
 # 两级审批（编辑初审 → 主编终审）通过后发布。
-name: 两级审核
-description: 内容发布两级审批：编辑初审、主编终审，两审都通过才发布。title（标题）与 content（正文）为必填输入。
+name: 多级审核
+description: 内容发布多级审批：编辑初审、主编终审，两审都通过才发布。
 
 params:
   title:
@@ -14,16 +14,26 @@ params:
     required: true
     label: 正文
     description: 待审文章正文
+    multiline: true
 
 nodes:
   编辑初审:
     kind: human
-    prompt: "请检查标题与正文，同意 y / 拒绝 n。"
+    # prompt = 给审核者的把关指引（审核卡片置顶显示）；按钮/终端操作方式不写进来
+    prompt: "初审把关：标题达意、正文完整可读再通过。"
+    # 审核视图：只看待发布的 title/content，不看其他上下文
+    review:
+      title: {label: 标题}
+      content: {label: 正文}
 
   主编终审:
     kind: human
     depends_on: [编辑初审]
-    prompt: "一审已通过，同意 y / 拒绝 n。"
+    prompt: "终审把关：确认可对外发布再通过。"
+    # 终审同样只看内容本身；一审的决策记录不进视图（节点表里仍可查）
+    review:
+      title: {label: 标题}
+      content: {label: 正文}
 
   发布:
     type: cfg_publish

@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pprint
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -239,6 +239,7 @@ class DAG:
         condition: ConditionFunc | None = None,
         retry: RetryPolicy | None = None,
         approver: ApproverFunc | None = None,
+        review: Mapping[str, str] | Sequence[str] | None = None,
     ) -> Node:
         """Register a human-in-the-loop review node.
 
@@ -262,6 +263,13 @@ class DAG:
                       Required. Use :func:`terminal_approver` for
                       interactive terminals, or your own to drive reviews
                       from elsewhere (e.g. a web UI).
+            review: Optional review view — mapping of context key →
+                    display label (or a bare list of keys, label = key).
+                    Declared: the payload shown to the reviewer contains
+                    only these keys (plus a leading ``_review`` entry
+                    carrying the labels; runtime-absent keys become
+                    ``None``). ``None`` (default): the payload is the
+                    whole context minus the node itself.
 
         Returns:
             The registered review :class:`Node`.
@@ -272,9 +280,33 @@ class DAG:
         if approver is None:
             raise ValueError(f"人工审核节点 {name!r} 必须提供 approver —— 例如 terminal_approver")
 
+        # review 声明归一化为有序 {key: label}：列表 → label=键名
+        if review is None:
+            review_view: dict[str, str] | None = None
+        elif isinstance(review, Mapping):
+            review_view = {str(k): str(v or k) for k, v in review.items()}
+        elif isinstance(review, (list, tuple)):
+            review_view = {str(k): str(k) for k in review}
+        else:
+            raise ValueError(f"review 必须是 {{key: label}} 映射或键列表，实际是 {type(review).__name__}")
+
         async def review_func(ctx: dict[str, Any]) -> dict[str, Any]:
-            # Snapshot of everything available for review at this point.
-            payload = {k: v for k, v in ctx.items() if k != name}
+            # "_" 前缀键是引擎保留的展示元数据（消费方按前缀跳过）：
+            # _prompt = 作者给审核者的把关指引，_review = 声明视图的字段标签
+            if review_view is not None:
+                # 声明视图：审核者只看声明的键。运行时缺失的键（可选参数未提供、
+                # 条件跳过的节点）显式置 None —— 卡片显示「未提供」而非静默消失。
+                payload: dict[str, Any] = {}
+                if prompt:
+                    payload["_prompt"] = prompt
+                payload["_review"] = dict(review_view)
+                for key in review_view:
+                    payload[key] = ctx.get(key)
+            else:
+                # Snapshot of everything available for review at this point.
+                payload = {k: v for k, v in ctx.items() if k != name}
+                if prompt:
+                    payload = {"_prompt": prompt, **payload}
 
             print(f"\n  [REVIEW] node {name!r} is waiting for human approval")
             if prompt:

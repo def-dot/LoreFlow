@@ -32,7 +32,15 @@ Quick start::
 from .dag import DAG, terminal_approver
 from .declarative import load_dag
 from .node import HumanRejected, Node
-from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy, SuspendExecution
+from .types import (
+    DAGExecutionError,
+    NodeResult,
+    NodeStatus,
+    RetryPolicy,
+    SuspendExecution,
+    SKIP_CONDITION,
+    SKIP_UPSTREAM_FAILED,
+)
 
 __all__ = [
     "DAG",
@@ -42,6 +50,8 @@ __all__ = [
     "NodeResult",
     "NodeStatus",
     "RetryPolicy",
+    "SKIP_CONDITION",
+    "SKIP_UPSTREAM_FAILED",
     "SuspendExecution",
     "load_dag",
     "terminal_approver",

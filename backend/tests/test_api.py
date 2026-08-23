@@ -574,13 +574,21 @@ async def test_dual_review_with_required_title_content(client: AsyncClient) -> N
 
     # 初审
     data = await _wait_node_reviewing(client, run_id, "编辑初审")
-    assert data["nodes"]["编辑初审"]["payload"]["title"] == "自定义标题"
+    payload = data["nodes"]["编辑初审"]["payload"]
+    # 声明式审核视图：payload 只含声明键 + 两个保留键
+    #（_prompt=把关指引、_review=字段标签，均置前）
+    assert set(payload) == {"_prompt", "_review", "title", "content"}
+    assert payload["_review"] == {"title": "标题", "content": "正文"}
+    assert payload["_prompt"]
+    assert payload["title"] == "自定义标题"
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/编辑初审", json={"approve": True})
     assert resp.status_code == 200
 
     # 终审
     data = await _wait_node_reviewing(client, run_id, "主编终审")
     assert data["nodes"]["主编终审"]["status"] == "reviewing"
+    # 终审视图同样只有 title/content —— 一审的决策记录不进视图
+    assert set(data["nodes"]["主编终审"]["payload"]) == {"_prompt", "_review", "title", "content"}
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/主编终审", json={"approve": True})
     assert resp.status_code == 200
 

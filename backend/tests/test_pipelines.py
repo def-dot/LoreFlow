@@ -34,11 +34,12 @@ async def test_pipelines_list(client: AsyncClient) -> None:
     assert params_08["title"]["label"] == "标题"
     assert params_08["title"]["required"] is True and params_08["title"]["has_default"] is False
     assert params_08["content"]["description"]
+    assert params_08["content"]["multiline"] is True and params_08["title"]["multiline"] is False
     params_09 = {p["name"]: p for p in by_file["09_required_input.yaml"]["params"]}
     assert params_09["query"]["required"] is True
     assert params_09["topic"] == {
         "name": "topic", "label": "主题", "description": "检索主题，不填用默认值",
-        "default": "默认主题", "has_default": True, "required": False,
+        "default": "默认主题", "has_default": True, "required": False, "multiline": False,
     }
 
 
@@ -70,6 +71,8 @@ async def test_pipeline_detail_human(client: AsyncClient) -> None:
     assert review["type_description"] == "请审核合并结果。"
     assert review["condition"] == "demo_needs_review"
     assert review["condition_label"] == "演示按需审核"
+    # 声明式审核视图：{key: label}（未声明 → None = 全量上下文）
+    assert review["review"] == {"merge": "合并结果"}
 
     report = nodes["report"]
     assert report["depends_on"] == ["merge"]  # 不依赖 review：审核被跳过时照常执行

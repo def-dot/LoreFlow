@@ -10,6 +10,7 @@ export interface PipelineNodeInfo {
   retry: string | null
   condition: string | null
   condition_label: string | null
+  review: Record<string, string> | null  // (human) 审核视图 {key: label}；null=全量上下文
 }
 
 /** 一个运行时输入参数的声明行（后端把 params 富声明/inputs 简式归一化后输出） */
@@ -20,6 +21,7 @@ export interface ParamSpec {
   default: unknown
   has_default: boolean    // 区分「声明了 default: null」与「未声明默认值」
   required: boolean
+  multiline: boolean      // 多行文本（渲染 textarea，如文章正文）
 }
 
 export interface PipelineListItem {
