@@ -113,9 +113,9 @@ async def create_run(
         on_event=make_event_sink(record),
     )
     
-    input_errors = dag.validate_inputs(inputs)
-    if input_errors:
-        raise ValueError("\n".join(input_errors))
+    errors = dag.validate(inputs)
+    if errors:
+        raise ValueError("\n".join(errors))
     
     record.name = dag.name
     record.mermaid = dag.to_mermaid()

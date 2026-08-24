@@ -6,12 +6,11 @@ import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
 from app.engine.declarative import (
-    _validate_review,
     validate_config,
     validate_nodes,
-    validate_params,
 )
 from app.engine.resolve import parse_retry
+from app.engine.validate import validate_params, validate_review
 from app.registry import REGISTRY, NodeType
 
 
@@ -215,9 +214,10 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     assert results["only"].output == "hello"
 
 
-async def test_required_with_default_must_be_explicit(registered: Any) -> None:
-    """必填键可同时声明 default：default 只是表单建议值，不顶班——
-    未显式提供仍报缺，显式提供才生效。"""
+async def test_required_with_default_fills_when_omitted(registered: Any) -> None:
+    """必填键同时声明 default：引擎层 default 是真默认值——run() 不传参
+    时顶班跑通；显式空输入（inputs={}）不回退 default、仍算缺失。显式性
+    只在 API 边界强制（create_run 校验原始 inputs），见 test_api。"""
     ran = {"n": 0}
 
     async def only(ctx: dict[str, Any]) -> str:
@@ -230,19 +230,24 @@ async def test_required_with_default_must_be_explicit(registered: Any) -> None:
          "params": {"query": {"required": True, "default": "建议值"}}}
     )
     assert dag.required_inputs == ["query"]
-    assert dag.default_inputs == {}  # 必填键的 default 不进回填视图
+    assert dag.default_inputs == {"query": "建议值"}  # 必填键的 default 也进回填视图
+
+    results = await dag.run()  # 不传参 → default 顶班
+    assert results["only"].output == "建议值"
+    assert ran["n"] == 1
 
     with pytest.raises(ValueError, match="必填参数缺失或为空: query"):
-        await dag.run()  # default 不顶班
-    assert ran["n"] == 0
+        await dag.run(inputs={})  # 显式空 = 未提供，不回退 default
+    assert ran["n"] == 1
 
     results = await dag.run(inputs={"query": "显式值"})
     assert results["only"].output == "显式值"
+    assert ran["n"] == 2
 
 
 def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
-    errors = validate_params({"params": {"query": {"required": "yes"}}})
+    errors = validate_params({"query": {"required": "yes"}})
     assert errors == ["参数 'query': required 必须是布尔值"]
 
 
@@ -326,7 +331,7 @@ def test_params_rich_form() -> None:
 
 
 def test_params_multiline_bad_type_rejected() -> None:
-    errors = validate_params({"params": {"b": {"multiline": "yes"}}})
+    errors = validate_params({"b": {"multiline": "yes"}})
     assert errors == ["参数 'b': multiline 必须是布尔值"]
 
 
@@ -357,18 +362,16 @@ async def test_params_rich_form_runs(registered: Any) -> None:
 
 
 def test_params_unknown_field_rejected() -> None:
-    errors = validate_params({"params": {"q": {"type": "string"}}})
+    errors = validate_params({"q": {"type": "string"}})
     assert errors == ["参数 'q': 不支持的字段 ['type']"]
 
 
 def test_params_collects_all_errors() -> None:
     """多个参数错误一次性全部返回，而非遇错即抛。"""
     errors = validate_params({
-        "params": {
-            "q": {"bogus": 1},
-            "r": {"required": "yes"},
-            "s": "not-a-mapping",
-        }
+        "q": {"bogus": 1},
+        "r": {"required": "yes"},
+        "s": "not-a-mapping",
     })
     assert len(errors) == 3
     assert any("不支持的字段" in e for e in errors)
@@ -378,20 +381,14 @@ def test_params_collects_all_errors() -> None:
 
 def test_params_node_name_clash_rejected() -> None:
     """参数键与节点名冲突应被拒绝"""
-    config = {
-        "params": {"query": {"required": True}},
-        "nodes": {"query": {"type": "cfg_fetch"}},
-    }
-    assert validate_params(config) == ["输入参数键与节点名冲突: query"]
+    assert validate_params({"query": {"required": True}}, {"query"}) == [
+        "输入参数键与节点名冲突: query"
+    ]
 
 
 def test_params_no_clash_accepted() -> None:
     """参数键与节点名无冲突时通过"""
-    config = {
-        "params": {"query": {"required": True}},
-        "nodes": {"fetch": {"type": "cfg_fetch"}},
-    }
-    assert validate_params(config) == []
+    assert validate_params({"query": {"required": True}}, {"fetch"}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -400,32 +397,32 @@ def test_params_no_clash_accepted() -> None:
 
 
 def test_validate_review_accepts() -> None:
-    """_validate_review 只接受富映射格式：{key: {label: 文本}}，允许空字符串"""
+    """validate_review 只接受富映射格式：{key: {label: 文本}}，允许空字符串"""
     keys = {"title"}
-    assert _validate_review({"title": {"label": "标题"}}, keys) == []
-    assert _validate_review({"title": {"label": ""}}, keys) == []  # 空字符串允许
+    assert validate_review({"title": {"label": "标题"}}, keys) == []
+    assert validate_review({"title": {"label": ""}}, keys) == []  # 空字符串允许
 
 
 def test_validate_review_rejects() -> None:
     """非法格式返回错误列表"""
-    assert _validate_review(None, set()) == ["review 必须是映射，实际是 NoneType"]
-    assert _validate_review(["title"], set()) == ["review 必须是映射，实际是 list"]
-    assert _validate_review({}, set()) == ["review 声明不能为空映射"]
+    assert validate_review(None, set()) == ["review 必须是映射，实际是 NoneType"]
+    assert validate_review(["title"], set()) == ["review 必须是映射，实际是 list"]
+    assert validate_review({}, set()) == ["review 声明不能为空映射"]
     # 裸字符串值（非富映射）
-    assert _validate_review({"title": "标题"}, {"title"}) == [
+    assert validate_review({"title": "标题"}, {"title"}) == [
         "review 字段 'title': 必须是 {label: 文本} 格式，实际是 str"
     ]
     # 不支持的字段 + 缺 label（收集全部错误）
-    assert _validate_review({"t": {"format": "text"}}, {"t"}) == [
+    assert validate_review({"t": {"format": "text"}}, {"t"}) == [
         "review 字段 't': 不支持的字段 ['format']",
         "review 字段 't': label 必须是字符串",
     ]
     # label 非字符串
-    assert _validate_review({"t": {"label": None}}, {"t"}) == [
+    assert validate_review({"t": {"label": None}}, {"t"}) == [
         "review 字段 't': label 必须是字符串"
     ]
     # 键引用未声明
-    assert _validate_review({"ghost": {"label": "x"}}, {"title"}) == [
+    assert validate_review({"ghost": {"label": "x"}}, {"title"}) == [
         "review 引用了未声明的键 ghost"
     ]
 
@@ -597,6 +594,31 @@ def test_validate_config_rejects_param_node_clash() -> None:
         "nodes": {"query": {"type": "cfg_fetch"}},
     }
     assert validate_config(config) == ["输入参数键与节点名冲突: query"]
+
+
+def test_param_node_clash_checked_at_engine() -> None:
+    """程序化 DAG 不走 validate_params——冲突由 DAG.validate 兜底拦截。"""
+    dag = DAG("clash", params={"query": {"required": True}})
+
+    @dag.node("query")
+    async def query(ctx: dict[str, Any]) -> str:
+        return "output"
+
+    # 传合法输入隔离出冲突项（裸调会额外报必填缺失，语义见
+    # test_required_with_default_fills_when_omitted）
+    assert dag.validate({"query": "x"}) == ["输入参数键与节点名冲突: query"]
+
+
+def test_param_spec_shape_checked_at_engine() -> None:
+    """程序化 DAG 的 params 形状由 DAG.validate 兜底——畸形 spec 不再让
+    required_inputs 的派生视图 AttributeError，而是清晰的校验消息。"""
+    dag = DAG("bad_spec", params={"q": "不是字典"})
+
+    @dag.node("only")
+    async def only(ctx: dict[str, Any]) -> str:
+        return "x"
+
+    assert dag.validate() == ["参数 'q': 定义必须是映射(dict)，实际是 str"]
 
 
 def test_validate_config_collects_all_errors() -> None:

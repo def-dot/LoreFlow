@@ -714,8 +714,9 @@ async def test_required_inputs_empty_rejected_400(client: AsyncClient) -> None:
 
 
 async def test_required_with_default_must_be_explicit_at_api(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    """必填+default：default 只是表单建议值不顶班——不传 → 400；
-    显式提供才创建成功；显式空串/null 同样 400。"""
+    """必填+default：API 边界必填须显式——不传/空串/null → 400；
+    显式提供才创建成功。（引擎层 run() 不传参时 default 顶班，
+    见 test_declarative 的 test_required_with_default_fills_when_omitted。）"""
     pipe = tmp_path / "required_default.yaml"
     pipe.write_text(
         "name: required_default\n"

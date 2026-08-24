@@ -3,6 +3,8 @@
 import json
 from typing import Any
 
+import pytest
+
 from app.engine import DAG, Node, NodeStatus
 
 
@@ -83,11 +85,55 @@ async def test_loop_body_failure_continues() -> None:
 
 
 async def test_loop_node_requires_body() -> None:
-    import pytest
-
     dag = DAG("loop_empty")
     with pytest.raises(ValueError):
         dag.loop_node("loop", body_nodes=[], condition=lambda ctx, i: False)
+
+
+def test_loop_node_requires_callable_condition() -> None:
+    dag = DAG("loop_bad_cond")
+
+    async def tick(ctx: dict[str, Any]) -> int:
+        return 1
+
+    with pytest.raises(ValueError, match="condition 必须是可调用对象"):
+        dag.loop_node("loop", body_nodes=[Node(name="tick", func=tick)], condition="yes")
+
+
+def test_loop_body_missing_dep_fails_at_registration() -> None:
+    """body 缺失依赖在 loop_node 注册期报，不等首轮 sub.run。"""
+    dag = DAG("loop_bad_body")
+
+    async def step(ctx: dict[str, Any]) -> int:
+        return 1
+
+    with pytest.raises(ValueError, match="依赖的 'missing' 不在 DAG 中"):
+        dag.loop_node(
+            "loop",
+            body_nodes=[Node(name="step", func=step, depends_on=["missing"])],
+            condition=lambda ctx, i: False,
+        )
+
+
+def test_loop_body_cycle_fails_at_registration() -> None:
+    """body 内成环同样注册期拦截（与声明层递归校验时机对齐）。"""
+    dag = DAG("loop_cycle_body")
+
+    async def a(ctx: dict[str, Any]) -> int:
+        return 1
+
+    async def b(ctx: dict[str, Any]) -> int:
+        return 2
+
+    with pytest.raises(ValueError, match="循环依赖"):
+        dag.loop_node(
+            "loop",
+            body_nodes=[
+                Node(name="a", func=a, depends_on=["b"]),
+                Node(name="b", func=b, depends_on=["a"]),
+            ],
+            condition=lambda ctx, i: False,
+        )
 
 
 async def test_loop_output_snapshot_no_self_reference() -> None:

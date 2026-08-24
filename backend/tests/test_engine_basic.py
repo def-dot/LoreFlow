@@ -162,3 +162,56 @@ async def test_retry_policy_delay_bounds() -> None:
     assert policy.get_delay(0) == 1.0
     assert policy.get_delay(2) == 4.0
     assert policy.get_delay(10) == 5.0  # 封顶 backoff_max
+
+
+def test_add_node_requires_callable_func() -> None:
+    """func 不可调用在注册期拦截（add_node 是所有注册路径的漏斗），不等执行才 TypeError。"""
+    dag = DAG("not_callable")
+
+    async def ok(ctx: dict[str, Any]) -> int:
+        return 1
+
+    with pytest.raises(ValueError, match="func 必须是可调用对象"):
+        dag.add_node(Node(name="bad", func="not_a_function"))
+    dag.add_node(Node(name="good", func=ok))  # 拦下坏节点后正常注册不受影响
+
+
+def test_add_node_requires_callable_condition() -> None:
+    dag = DAG("bad_condition")
+
+    async def ok(ctx: dict[str, Any]) -> int:
+        return 1
+
+    with pytest.raises(ValueError, match="condition 必须是可调用对象"):
+        dag.add_node(Node(name="bad", func=ok, condition=42))
+
+
+async def test_depends_on_wrong_type_fails_validate() -> None:
+    """depends_on 类型错（裸字符串/不可迭代）在 run 前图校验拦截：
+    不再逐字符迭代出「依赖的 'f' 不在 DAG 中」噪音，也不再 TypeError。"""
+    async def ok(ctx: dict[str, Any]) -> int:
+        return 1
+
+    bare = DAG("dep_str")
+    bare.add_node(Node(name="a", func=ok))
+    bare.add_node(Node(name="b", func=ok, depends_on="a"))  # 裸字符串
+    with pytest.raises(ValueError, match="depends_on 必须是字符串列表"):
+        await bare.run()
+
+    uniterable = DAG("dep_int")
+    uniterable.add_node(Node(name="a", func=ok, depends_on=5))
+    with pytest.raises(ValueError, match="depends_on 必须是字符串列表"):
+        await uniterable.run()
+
+
+def test_depends_on_wrong_type_keeps_node_visible() -> None:
+    """类型错的节点仍存在：下游引用它不产生「不在 DAG 中」噪音。"""
+
+    async def ok(ctx: dict[str, Any]) -> int:
+        return 1
+
+    dag = DAG("dep_noisy")
+    dag.add_node(Node(name="a", func=ok, depends_on=5))
+    dag.add_node(Node(name="b", func=ok, depends_on=["a"]))
+
+    assert dag.validate() == ["节点 'a': depends_on 必须是字符串列表"]

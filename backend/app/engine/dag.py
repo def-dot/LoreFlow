@@ -31,6 +31,7 @@ from typing import Any
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
+from .validate import validate_graph, validate_params, validate_review
 
 logger = logging.getLogger(__name__)
 
@@ -52,45 +53,6 @@ async def terminal_approver(node_name: str, payload: dict[str, Any]) -> dict[str
         if answer in ("y", "yes"):
             return {"approve": True}
         print("  Please answer y or n")
-
-
-def find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
-    """DFS 环检测：``edges = {节点名: 依赖名列表}``，返回环路径或 ``None``。
-
-    DAG.validate 与 declarative 的配置层结构校验共用：依赖图中指向
-    不存在节点的边直接跳过（缺失依赖由调用方单独报错，缺失不可能成环）。
-    """
-    WHITE, GRAY, BLACK = 0, 1, 2
-    colour: dict[str, int] = {n: WHITE for n in edges}
-    path_stack: list[str] = []
-
-    def dfs(node_name: str) -> list[str] | None:
-        colour[node_name] = GRAY
-        path_stack.append(node_name)  # 入栈
-
-        for dep in edges[node_name]:
-            if dep not in colour:
-                continue
-            if colour[dep] == GRAY:
-                # 发现环：从 dep 第一次出现的位置直接切片提取完整环路径
-                cycle_start_idx = path_stack.index(dep)
-                return path_stack[cycle_start_idx:]
-
-            if colour[dep] == WHITE:
-                cycle = dfs(dep)
-                if cycle:
-                    return cycle
-
-        colour[node_name] = BLACK
-        path_stack.pop()  # 出栈（回溯）
-        return None
-
-    for name in edges:
-        if colour[name] == WHITE:
-            cycle = dfs(name)
-            if cycle:
-                return cycle
-    return None
 
 
 class DAG:
@@ -125,7 +87,11 @@ class DAG:
 
     @property
     def default_inputs(self) -> dict[str, Any]:
-        """声明了 ``default`` 的可选参数 → 默认值（run 未传 inputs 时使用）。
+        """声明了 ``default`` 的参数 → 默认值（必填键也不例外）。
+
+        :meth:`run` 未传 inputs 时以本视图顶班；显式性由
+        :meth:`validate_inputs` 只看传入 inputs 保证（不回退 default），
+        API 边界在 create_run 校验原始 inputs 时强制。
         """
         return {
             name: spec["default"]
@@ -141,7 +107,7 @@ class DAG:
     def validate_inputs(
         self, inputs: dict[str, Any] | None
     ) -> list[str]:
-        """输入校验 —— :meth:`run` 与编排层 ``create_run`` 共用的单一事实源。
+        """输入校验 —— :meth:`validate` 的输入组成部分，测试等也可直调。
         """
         errors: list[str] = []
         if self.params:
@@ -166,10 +132,19 @@ class DAG:
         """Register a pre-built :class:`Node` instance.
 
         Raises:
-            ValueError: If a node with the same name already exists.
+            ValueError: If a node with the same name already exists, or
+                func/condition is not callable.
         """
         if node.name in self._nodes:
             raise ValueError(f"节点名重复: {node.name!r}")
+        if not callable(node.func):
+            raise ValueError(
+                f"节点 {node.name!r}: func 必须是可调用对象，实际是 {type(node.func).__name__}"
+            )
+        if node.condition is not None and not callable(node.condition):
+            raise ValueError(
+                f"节点 {node.name!r}: condition 必须是可调用对象，实际是 {type(node.condition).__name__}"
+            )
         self._nodes[node.name] = node
         return node
 
@@ -242,11 +217,21 @@ class DAG:
         """
         if not body_nodes:
             raise ValueError(f"循环节点 {name!r} 至少需要一个 body 节点")
+        if not callable(condition):
+            raise ValueError(f"循环节点 {name!r}: condition 必须是可调用对象")
 
         # Build the sub-DAG
         sub = DAG(f"{name}_body")
         for n in body_nodes:
             sub.add_node(n)
+
+        # body 图结构注册期同查（缺失依赖/环）—— 与声明层递归
+        # validate_nodes 的时机对齐，不等首轮 sub.run 才报
+        body_errors = sub.validate()
+        if body_errors:
+            raise ValueError(
+                f"循环节点 {name!r} 的 body 校验失败:\n  " + "\n  ".join(body_errors)
+            )
 
         async def loop_func(ctx: dict[str, Any]) -> dict[str, Any]:
             iteration = 0
@@ -352,10 +337,12 @@ class DAG:
         """
         if approver is None:
             raise ValueError(f"人工审核节点 {name!r} 必须提供 approver —— 例如 terminal_approver")
+        if not callable(approver):
+            raise ValueError(f"人工审核节点 {name!r}: approver 必须是可调用对象")
 
         # review 声明：支持原始格式 {key: {label: text}} 或简化格式 {key: label} 或键列表
         if review is None:
-            review_view: dict[str, dict[str, str]] | dict[str, str] | None = None
+            review_view: dict[str, dict[str, str]] | None = None
         elif isinstance(review, Mapping):
             # 检查是否是原始格式 {key: {label: text}}
             if review and all(isinstance(v, Mapping) for v in review.values()):
@@ -378,14 +365,8 @@ class DAG:
                 if prompt:
                     payload["_prompt"] = prompt
 
-                # 提取标签映射（支持原始格式和简化格式）
-                label_map: dict[str, str] = {}
-                if review_view and all(isinstance(v, Mapping) for v in review_view.values()):
-                    # 原始格式 {key: {label: text}}
-                    label_map = {k: v["label"] for k, v in review_view.items()}
-                else:
-                    # 简化格式 {key: label}
-                    label_map = dict(review_view)  # type: ignore
+                # 标签映射 {key: label} —— 注册时已归一化成 {key: {label: text}}
+                label_map = {k: v["label"] for k, v in review_view.items()}
 
                 payload["_review"] = label_map
                 for key in review_view:
@@ -434,8 +415,9 @@ class DAG:
             depends_on=depends_on or [],
             condition=condition,
             retry=retry,
-            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）
-            metadata={"human_review": True, "label": "人工审核"},
+            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）；
+            # review_view 留档在 metadata，供 DAG.validate 做声明校验
+            metadata={"human_review": True, "label": "人工审核", "review_view": review_view},
         )
         self.add_node(node)
         return node
@@ -444,35 +426,37 @@ class DAG:
     # Validation
     # ------------------------------------------------------------------
 
-    def validate(self) -> list[str]:
-        """Validate the DAG. Returns a list of error messages (empty = valid)."""
+    def validate(self, inputs: dict[str, Any] | None = None) -> list[str]:
+        """结构 + 输入校验 —— :meth:`run` 与编排层 ``create_run`` 共用的单一入口。
+
+        review 声明与声明层同查（共享 validate_review：键 ∈ 节点名 ∪
+        params、字段格式）：程序化注册的声明视图留在节点 metadata
+        （human_node 归一化时写入），拼错的键/畸形字段在这里拦下而不是
+        运行时静默显示「未提供」或取 label 才 KeyError。
+        """
         errors: list[str] = []
 
         if not self._nodes:
             errors.append("DAG 没有节点")
             return errors
 
-        all_names = set(self._nodes)
-
-        # Check that every dependency references an existing node
-        for node in self._nodes.values():
-            for dep in node.depends_on:
-                if dep not in all_names:
-                    errors.append(f"节点 {node.name!r} 依赖的 {dep!r} 不在 DAG 中")
-
-        # Cycle detection (only if no missing-dependency errors)
+        errors.extend(validate_params(self.params, self._nodes))
+        # params 声明合法才做基于声明的派生校验：required_inputs 会
+        # spec.get，畸形 spec 直接 AttributeError
         if not errors:
-            cycle = self._find_cycle()
-            if cycle:
-                errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
+            errors.extend(self.validate_inputs(inputs))
+        edges = {name: node.depends_on for name, node in self._nodes.items()}
+        errors.extend(validate_graph(edges))
 
+        available = set(self._nodes) | set(self.params)
+        for node in self._nodes.values():
+            review_view = node.metadata.get("review_view")
+            if review_view is not None:
+                errors.extend(
+                    f"审核节点 {node.name!r}: {msg}"
+                    for msg in validate_review(review_view, available)
+                )
         return errors
-
-    def _find_cycle(self) -> list[str] | None:
-        """委托共享的 :func:`find_cycle`（edges 视图来自已注册节点）。"""
-        return find_cycle(
-            {name: node.depends_on for name, node in self._nodes.items()}
-        )
 
     # ------------------------------------------------------------------
     # Topological order (informational)
@@ -531,14 +515,10 @@ class DAG:
                         missing/empty (see :meth:`validate_inputs`).
             DAGExecutionError: If any nodes failed.
         """
-        errors = self.validate()
-        if errors:
-            raise ValueError(f"DAG {self.name!r} 校验失败:\n  " + "\n  ".join(errors))
-
         if inputs is None:
             inputs = self.default_inputs
 
-        errors = self.validate_inputs(inputs)
+        errors = self.validate(inputs)
         if errors:
             raise ValueError(f"DAG {self.name!r} 校验失败:\n  " + "\n  ".join(errors))
 
