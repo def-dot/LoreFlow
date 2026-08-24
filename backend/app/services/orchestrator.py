@@ -80,13 +80,7 @@ async def run_pipeline(
     dag: DAG,
     resume: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """执行一次 run：dag.run 返回 → completed；挂起 → 两层 reviewing 已由
-    approver 同一次 save 落库，干净退出（等 /approve 续跑）；异常 → failed。
-    finished_at 只在终态写入。
-
-    输入回放：YAML 顶层 ``inputs`` 打底，创建 run 时的运行时输入
-    （record.inputs，同名键优先）覆盖后传入 ``dag.run`` —— 创建与
-    审批/重启 resume 都走这里，运行时输入因此不丢。
+    """执行一次 run：dag.run 返回 → completed；
     """
     inputs = {**(dag.default_inputs or {}), **(record.inputs or {})}
     try:
@@ -111,8 +105,7 @@ async def create_run(
     config_file: str | None = None,
     inputs: dict[str, Any] | None = None,
 ) -> int:
-    """校验配置并落库一个新 run，返回 run_id。config_file 缺省用人工审核演示。
-    inputs 为运行时输入，快照进 record 供 resume 回放（见 run_pipeline）。
+    """校验配置并落库一个新 run，返回 run_id。
     """
     config_file = config_file or "05_human_review.yaml"
     path = settings.PIPELINES_DIR / config_file
@@ -160,8 +153,7 @@ async def resume_record(record: RunRecord) -> None:
 
 
 async def _acquire_recovery_lock() -> AsyncConnection | None:
-    """抢启动恢复选主权（session 级 advisory lock）：成功返回持有的连接，
-    失败返回 None。"""
+    """抢启动恢复选主权（session 级 advisory lock）"""
     raw = await database.engine.raw_connection()
     got = await raw.driver_connection.fetchval("SELECT pg_try_advisory_lock(hashtext($1))", "resume_lock")
     if not got:
@@ -176,7 +168,7 @@ async def _release_recovery_lock(raw: AsyncConnection) -> None:
 
 
 async def resume_stuck_runs() -> None:
-    """启动时恢复上次进程退出时仍在 running 或等待审核（reviewing）的 run（见 lifespan）
+    """启动时恢复上次进程退出时仍在 running 或等待审核（reviewing）的 run
     """
     raw = await _acquire_recovery_lock()
     if raw is None:

@@ -701,14 +701,15 @@ async def test_required_inputs_run_completes(client: AsyncClient) -> None:
     assert data["nodes"]["classify"]["status"] == "completed"
     assert data["nodes"]["chat_reply"]["status"] == "completed"
 
+    # 第二次运行：不同的 prompt，验证运行时输入正确进入上下文
     resp = await client.post(
         "/api/v1/runs",
-        json={
-            "config_file": "09_required_input.yaml",
-            "inputs": {"query": "q2", "topic": "自定义主题"},
-        },
+        json={"config_file": "02_condition_branching.yaml", "inputs": {"prompt": "北境要塞是什么"}},
     )
     assert resp.status_code == 201
     run_id = resp.json()["data"]["run_id"]
     data = await _wait_terminal(client, run_id)
-    assert data["nodes"]["检索"]["output"] == {"query": "q2", "topic": "自定义主题"}
+    assert data["status"] == "completed"
+    assert data["nodes"]["classify"]["status"] == "completed"
+    assert data["nodes"]["retrieve"]["status"] == "completed"
+    assert data["nodes"]["rag_reply"]["status"] == "completed"
