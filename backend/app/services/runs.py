@@ -7,9 +7,11 @@ services/orchestrator.py。持久化函数调用时才查找
 
 from __future__ import annotations
 
+from sqlalchemy import delete as sa_delete
 from sqlmodel import func, select
 
 from app.core import database
+from app.models.review import ReviewDecision
 from app.models.run import RunRecord, RunStatus
 
 
@@ -80,3 +82,20 @@ async def get_run(run_id: int) -> RunRecord | None:
     """One run record, or ``None``."""
     async with database.AsyncSessionLocal() as session:
         return await session.get(RunRecord, run_id)
+
+
+async def delete_run(run_id: int) -> bool:
+    """删除一条**终态** run 及其审批决策（审计痕迹随 run 一并清理）。
+
+    仅终态可删：运行中/待审核的记录可能正被事件回写 ``save`` 落库——
+    行删掉后 merge 会带着旧 id 把它复活成新行，且会中断审批/恢复流。
+    不存在或非终态返回 False（由路由层区分 404/400）。
+    """
+    async with database.AsyncSessionLocal() as session:
+        record = await session.get(RunRecord, run_id)
+        if record is None or record.status not in TERMINAL_STATUSES:
+            return False
+        await session.execute(sa_delete(ReviewDecision).where(ReviewDecision.run_id == run_id))
+        await session.delete(record)
+        await session.commit()
+        return True

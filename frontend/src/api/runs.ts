@@ -58,6 +58,11 @@ export function getRun(runId: number): Promise<RunDetail> {
   return api.get(`/runs/${runId}`)
 }
 
+/** 删除终态 run（后端拒绝非终态：运行中/待审核不可删） */
+export function deleteRun(runId: number): Promise<{ deleted: number }> {
+  return api.delete(`/runs/${runId}`)
+}
+
 export function startRun(
   configFile: string,
   inputs?: Record<string, unknown>,

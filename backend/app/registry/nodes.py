@@ -106,17 +106,6 @@ def demo_needs_review(ctx: dict[str, Any]) -> bool:
     return bool(merge) and len(str(merge.get("body", ""))) > 30
 
 
-@node(label="按查询检索", description="读取必填输入 query 与可选输入 topic，演示运行时参数校验")
-async def demo_search(ctx: dict[str, Any]) -> dict[str, Any]:
-    """演示必填/可选输入：query 由运行时提供（09 示例声明为必填），
-    topic 有 YAML 默认值、可被运行时覆盖。"""
-    await asyncio.sleep(0.05)
-    return {"query": ctx["query"], "topic": ctx.get("topic", "")}
-
-
-# ---- RAG 文档入库 — 01_basic_chain.yaml 的实际链路 ----
-
-
 @node(label="加载文档", description="读入一篇设定文档，输出 {doc_id, title, text}")
 async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
     await asyncio.sleep(0.05)

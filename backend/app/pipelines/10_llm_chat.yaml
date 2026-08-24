@@ -9,10 +9,10 @@ params:
     description: 发给 LLM 的内容；含 http(s) 链接时自动抓取网页正文作参考
 
 nodes:
-  pages:
+  网页抓取:
     type: web_fetch
 
-  chat:
+  LLM回答:
     type: llm_chat
-    depends_on: [pages]
+    depends_on: [网页抓取]
     timeout: 300

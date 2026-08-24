@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { approve, getRun, listRuns, startRun } from '@/api/runs'
+import { approve, deleteRun, getRun, listRuns, startRun } from '@/api/runs'
 import type { RunDetail, RunListItem } from '@/api/runs'
 
 /**
@@ -72,6 +72,18 @@ export const useRunsStore = defineStore('runs', {
     async fetchDetail() {
       if (this.selectedId === null) return
       this.detail = await getRun(this.selectedId)
+    },
+
+    /** 删除一条终态 run：本地同步移除（total 为筛选后口径，同步减一）；
+     * 删的是当前选中项时清空选中与详情，右侧回到空态。 */
+    async removeRun(id: number) {
+      await deleteRun(id)
+      this.runs = this.runs.filter((r) => r.id !== id)
+      this.total = Math.max(0, this.total - 1)
+      if (this.selectedId === id) {
+        this.selectedId = null
+        this.detail = null
+      }
     },
 
     async startNewRun(configFile: string, inputs?: Record<string, unknown>) {

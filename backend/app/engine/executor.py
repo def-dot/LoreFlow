@@ -152,11 +152,6 @@ class DAGExecutor:
                 await events[dep].wait()
 
             # ---- 2. Check for cascading failure ----
-            # 上游终态从其任务返回值读（恢复完成的节点没有任务，视为未失败）。
-            # 级联必须传递：上游因失败被阻断（UPSTREAM_FAILED）同样阻断本节点
-            # ——只拦 FAILED 的话失败只停一层，隔代下游照跑（多级审核拒绝后
-            # 发布节点仍执行的 bug）。条件跳过（SKIPPED）是分支语义，不阻断
-            # 下游。
             blocked_deps = [
                 dep
                 for dep in node.depends_on

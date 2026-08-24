@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
@@ -289,6 +289,23 @@ async function decide(node: string, ok: boolean, reason: string | null) {
   }
 }
 
+/** 删除终态 run：二次确认（删除不可恢复，含审批决策）。失败提示由
+ * 请求拦截器统一弹出，这里只在成功时回礼。 */
+async function removeRun(id: number) {
+  const run = store.runs.find((r) => r.id === id)
+  try {
+    await ElMessageBox.confirm(
+      `删除运行 #${id}${run ? `（${run.name}）` : ''}？记录与审批决策将一并删除，不可恢复。`,
+      '删除运行记录',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return // 用户取消
+  }
+  await store.removeRun(id)
+  ElMessage.success(`已删除运行 #${id}`)
+}
+
 onMounted(async () => {
   try {
     await store.fetchRuns()
@@ -436,6 +453,7 @@ onUnmounted(() => {
         @set-status="store.setFilters({ status: $event })"
         @set-config="store.setFilters({ configFile: $event })"
         @select="select"
+        @delete="removeRun"
         @more="store.loadMoreRuns()"
       />
       <RunDetail

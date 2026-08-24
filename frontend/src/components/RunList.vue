@@ -17,10 +17,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [id: number]
+  delete: [id: number]
   more: []
   'set-status': [v: string]
   'set-config': [v: string]
 }>()
+
+// 终态才可删（后端同样拒绝非终态）：运行中/待审核的行不出现删除按钮
+const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
 
 // 状态筛选项：值用后端枚举，标签走统一中文映射
 const STATUS_OPTIONS = ['running', 'reviewing', 'completed', 'failed', 'cancelled'].map((v) => ({
@@ -92,6 +96,16 @@ function fmtFull(iso: string | null): string {
         <span class="name" :title="r.name">{{ r.name }}</span>
         <span class="idx">#{{ r.id }}</span>
         <span class="time" :title="fmtFull(r.created_at)">{{ fmtShort(r.created_at) }}</span>
+        <button
+          v-if="TERMINAL.has(r.status)"
+          class="del"
+          title="删除该记录"
+          aria-label="删除该记录"
+          @click.stop="emit('delete', r.id)"
+          @keydown.enter.stop
+        >
+          ✕
+        </button>
       </div>
       <div v-if="!runs.length" class="muted empty">
         {{ hasFilter ? '没有符合筛选的运行记录。' : '暂无运行记录 — 点击「新建运行」发起一个。' }}
@@ -259,6 +273,35 @@ function fmtFull(iso: string | null): string {
   font-size: 11px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+}
+/* 行内删除：默认隐形（列表以浏览为主），hover/focus 才出现；
+ * 只占一枚符号宽，避免挤压 name/time 的常规布局 */
+.del {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-right: -4px; /* 吃掉按钮自身视觉宽度，不 hover 时布局零变化 */
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.run-item:hover .del,
+.del:focus-visible {
+  opacity: 1;
+}
+.del:hover {
+  color: #ff8f8a;
+  background: rgba(239, 115, 112, 0.12);
+}
+.del:focus-visible {
+  outline: 1px solid rgba(239, 115, 112, 0.5);
 }
 /* 单列布局下 sticky 全高侧栏会盖住页面：回到普通流，
  * 列表限高避免几百条把详情推到屏幕外 */

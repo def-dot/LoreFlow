@@ -58,6 +58,21 @@ async def get_run(run_id: int) -> RunDetail:
     return RunDetail(**record.model_dump())
 
 
+@router.delete("/{run_id}")
+async def delete_run(run_id: int) -> dict[str, int]:
+    """删除终态 run（completed/failed/cancelled），审批决策一并清理。
+
+    运行中/待审核的记录拒绝删除（删掉会被事件回写复活成新行，
+    且中断审批/恢复流），等运行结束或先处理审核。
+    """
+    if await run_service.delete_run(run_id):
+        return {"deleted": run_id}
+    record = await run_service.get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"运行 {run_id} 不存在")
+    raise HTTPException(status_code=400, detail=f"仅终态记录可删除（当前：{record.status.value}）")
+
+
 @router.post("/{run_id}/approve/{node_name}", response_model=ApproveResponse)
 async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> ApproveResponse:
     record = await run_service.get_run(run_id)

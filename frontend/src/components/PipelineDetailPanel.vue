@@ -64,7 +64,7 @@ function reviewView(review: Record<string, string>): string {
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="功能" min-width="130">
+          <el-table-column label="类型" min-width="130">
             <template #default="{ row }">
               <div>{{ row.type_label ?? '—' }}</div>
               <div v-if="row.type" class="muted">{{ row.type }}</div>

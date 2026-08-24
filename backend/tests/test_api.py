@@ -4,7 +4,10 @@ import asyncio
 from typing import Any
 
 from httpx import AsyncClient
+from sqlmodel import select
 
+from app.core import database
+from app.models.review import ReviewDecision
 from app.models.run import RunRecord
 from app.services import orchestrator
 from app.services import runs as run_service
@@ -306,6 +309,53 @@ async def test_create_run_with_config_file(client: AsyncClient) -> None:
     assert data["config_file"] == "01_basic_chain.yaml"
     assert all(n["status"] != "reviewing" for n in data["nodes"].values())  # 无人工审核节点
     assert data["nodes"]["upsert"]["status"] == "completed"
+
+
+async def _wait_status(client: AsyncClient, run_id: int, status: str, timeout: float = 15) -> dict[str, Any]:
+    """轮询 run 直到出现指定状态（如挂起到 reviewing）。"""
+    async def poll() -> dict[str, Any]:
+        while True:
+            data = (await client.get(f"/api/v1/runs/{run_id}")).json()["data"]
+            if data["status"] == status:
+                return data
+            await asyncio.sleep(0.05)
+
+    return await asyncio.wait_for(poll(), timeout=timeout)
+
+
+async def _count_decisions(run_id: int) -> int:
+    """该 run 的审批决策行数（无外键，删除靠服务层级联）。"""
+    async with database.AsyncSessionLocal() as session:
+        rows = (await session.exec(select(ReviewDecision).where(ReviewDecision.run_id == run_id))).all()
+        return len(rows)
+
+
+async def test_delete_run(client: AsyncClient) -> None:
+    """DELETE /runs/{id}：终态可删（审批决策级联清理）；待审核拒绝；不存在 404。"""
+    resp = await client.post("/api/v1/runs", json={"config_file": "05_human_review.yaml"})
+    rid = resp.json()["data"]["run_id"]
+    await _wait_status(client, rid, "reviewing")
+
+    # 待审核（非终态）拒绝删除
+    resp = await client.delete(f"/api/v1/runs/{rid}")
+    assert resp.status_code == 400
+    assert "仅终态记录可删除" in resp.json()["msg"]
+    assert (await client.get(f"/api/v1/runs/{rid}")).status_code == 200  # 记录还在
+
+    # 审批通过 → 终态后可删，决策（审计痕迹）随之清理
+    resp = await client.post(f"/api/v1/runs/{rid}/approve/review", json={"approve": True})
+    assert resp.status_code == 200
+    assert (await _wait_terminal(client, rid))["status"] == "completed"
+    assert await _count_decisions(rid) == 1
+
+    resp = await client.delete(f"/api/v1/runs/{rid}")
+    assert resp.status_code == 200
+    assert resp.json()["data"] == {"deleted": rid}
+    assert (await client.get(f"/api/v1/runs/{rid}")).status_code == 404
+    assert await _count_decisions(rid) == 0
+
+    # 不存在 404
+    assert (await client.delete("/api/v1/runs/99999")).status_code == 404
 
 
 async def test_create_run_unknown_config_400(client: AsyncClient) -> None:
