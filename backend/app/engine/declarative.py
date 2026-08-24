@@ -28,7 +28,7 @@ _KIND_FIELDS = {
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline"}
 
 
-def _validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any] | None = None) -> None:
+def validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any] | None = None) -> None:
     """校验顶层 ``params`` 声明；
     每键 spec 只接受 ``{label, description, default, required, multiline}``。
     输入键与节点名不能相同。
@@ -62,19 +62,26 @@ def _validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any]
             raise ValueError(f"参数 {name!r}: multiline 必须是布尔值")
 
 
-def _validate_review(spec: dict[str, Any]) -> None:
-    """校验 human 节点的 review 视图声明
-    形式：``{key: {label: 显示文本}}``
-    """
-    if not isinstance(spec, dict):
-        raise ValueError(f"review 必须是映射，实际是 {type(spec).__name__}")
+def _validate_review(
+    review_spec: dict[str, Any], available_keys: set[str]
+) -> None:
+    """校验 human 节点的 review 声明并检查键引用。
 
-    if not spec:
+    校验项：
+    - 格式：{key: {label: 文本}}，label 必须为字符串
+    - 键引用：review 键必须在 available_keys 中（参数键或节点名）
+    """
+    if not isinstance(review_spec, dict):
+        raise ValueError(f"review 必须是映射，实际是 {type(review_spec).__name__}")
+
+    if not review_spec:
         raise ValueError("review 声明不能为空映射")
 
-    for key, val in spec.items():
+    for key, val in review_spec.items():
         if not isinstance(val, dict):
-            raise ValueError(f"review 字段 {key!r}: 必须是 {{label: 文本}} 格式，实际是 {type(val).__name__}")
+            raise ValueError(
+                f"review 字段 {key!r}: 必须是 {{label: 文本}} 格式，实际是 {type(val).__name__}"
+            )
 
         unknown = set(val) - {"label"}
         if unknown:
@@ -84,8 +91,12 @@ def _validate_review(spec: dict[str, Any]) -> None:
         if not isinstance(label, str):
             raise ValueError(f"review 字段 {key!r}: label 必须是字符串")
 
+    unknown_keys = [k for k in review_spec if k not in available_keys]
+    if unknown_keys:
+        raise ValueError(f"review 引用了未声明的键 {', '.join(unknown_keys)}")
 
-def _validate_nodes(nodes: dict[str, Any]) -> None:
+
+def validate_nodes(nodes: dict[str, Any]) -> None:
     """校验顶层 nodes 声明；
 
     每节点校验：
@@ -118,9 +129,8 @@ def _validate_nodes(nodes: dict[str, Any]) -> None:
             if "type" not in spec:
                 raise ValueError(f"节点 {name!r}: 需要 'type'（函数键）")
         elif kind == "human":
-            review_spec = spec.get("review")
-            if review_spec is not None:
-                _validate_review(review_spec)
+            # review 校验移到 validate_config 中，因为需要知道可用键（参数+节点名）
+            pass
         elif kind == "loop":
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
@@ -156,12 +166,24 @@ def validate_config(config: dict[str, Any]) -> None:
     校验项：
     - params 声明（字段合法性、与节点名无冲突）
     - nodes 声明（结构合法性、kind 特定必需字段）
+    - review 声明格式和键引用（必须在参数键或节点名中）
     """
     params = config.get("params")
     nodes = config.get("nodes") or {}
 
-    _validate_params(params, nodes)
-    _validate_nodes(nodes)
+    validate_params(params, nodes)
+    validate_nodes(nodes)
+
+    # 可用键集合 = 参数键 + 节点名
+    available = set(nodes.keys()) | set(params.keys() if params else [])
+
+    # 校验 human 节点的 review 声明（格式 + 键引用）
+    for name, spec in nodes.items():
+        kind = spec.get("kind", "node")
+        if kind == "human":
+            review_spec = spec.get("review")
+            if review_spec is not None:
+                _validate_review(review_spec, available)
 
 
 def load_dag(
@@ -277,11 +299,4 @@ def load_dag(
     if errors:
         raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
 
-    # review 视图键必须在运行时可能出现的名字里（参数键或节点名）：
-    # 拼写错误在载入时就拦截，而不是审核时静默显示 None
-    available = set(dag.node_names) | set(dag.params)
-    for node_name, view in review_specs.items():
-        unknown = [k for k in view if k not in available]
-        if unknown:
-            raise ValueError(f"审核节点 {node_name!r}: review 引用了未声明的键 {', '.join(unknown)}")
     return dag
