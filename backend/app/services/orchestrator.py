@@ -114,14 +114,14 @@ async def create_run(
         on_event=make_event_sink(record),
     )
     
-    errors = dag.validate() + validate_inputs(inputs, dag.params)
+    errors = validate_inputs(inputs, dag.params)
     if errors:
         raise ValueError("\n".join(errors))
     
+    record.inputs = {**dag.default_inputs, **inputs}
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
     
-    record.inputs = {**dag.default_inputs, **inputs}
     await runs.save(record)
     asyncio.create_task(run_pipeline(record, dag))
     return record.id
