@@ -256,7 +256,7 @@ class DAG:
         condition: ConditionFunc | None = None,
         retry: RetryPolicy | None = None,
         approver: ApproverFunc | None = None,
-        review: Mapping[str, str] | Sequence[str] | None = None,
+        review: Mapping[str, Mapping[str, str]] | Sequence[str] | None = None,
     ) -> Node:
         """Register a human-in-the-loop review node.
 
@@ -280,8 +280,8 @@ class DAG:
                       Required. Use :func:`terminal_approver` for
                       interactive terminals, or your own to drive reviews
                       from elsewhere (e.g. a web UI).
-            review: Optional review view — mapping of context key →
-                    display label (or a bare list of keys, label = key).
+            review: Optional review view — raw format mapping of context key →
+                    {label: display text}. Or a bare list of keys, label = key.
                     Declared: the payload shown to the reviewer contains
                     only these keys (plus a leading ``_review`` entry
                     carrying the labels; runtime-absent keys become
@@ -297,15 +297,20 @@ class DAG:
         if approver is None:
             raise ValueError(f"人工审核节点 {name!r} 必须提供 approver —— 例如 terminal_approver")
 
-        # review 声明归一化为有序 {key: label}：列表 → label=键名
+        # review 声明：支持原始格式 {key: {label: text}} 或简化格式 {key: label} 或键列表
         if review is None:
-            review_view: dict[str, str] | None = None
+            review_view: dict[str, dict[str, str]] | dict[str, str] | None = None
         elif isinstance(review, Mapping):
-            review_view = {str(k): str(v or k) for k, v in review.items()}
+            # 检查是否是原始格式 {key: {label: text}}
+            if review and all(isinstance(v, Mapping) for v in review.values()):
+                review_view = dict(review)  # 直接使用原始格式
+            else:
+                # 兼容简化格式 {key: label}
+                review_view = {str(k): {"label": str(v)} for k, v in review.items()}
         elif isinstance(review, (list, tuple)):
-            review_view = {str(k): str(k) for k in review}
+            review_view = {str(k): {"label": str(k)} for k in review}
         else:
-            raise ValueError(f"review 必须是 {{key: label}} 映射或键列表，实际是 {type(review).__name__}")
+            raise ValueError(f"review 必须是 {{key: {label: text}}} 映射、{key: label} 映射或键列表，实际是 {type(review).__name__}")
 
         async def review_func(ctx: dict[str, Any]) -> dict[str, Any]:
             # "_" 前缀键是引擎保留的展示元数据（消费方按前缀跳过）：
@@ -316,7 +321,17 @@ class DAG:
                 payload: dict[str, Any] = {}
                 if prompt:
                     payload["_prompt"] = prompt
-                payload["_review"] = dict(review_view)
+
+                # 提取标签映射（支持原始格式和简化格式）
+                label_map: dict[str, str] = {}
+                if review_view and all(isinstance(v, Mapping) for v in review_view.values()):
+                    # 原始格式 {key: {label: text}}
+                    label_map = {k: v["label"] for k, v in review_view.items()}
+                else:
+                    # 简化格式 {key: label}
+                    label_map = dict(review_view)  # type: ignore
+
+                payload["_review"] = label_map
                 for key in review_view:
                     payload[key] = ctx.get(key)
             else:

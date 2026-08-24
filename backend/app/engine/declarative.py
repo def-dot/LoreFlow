@@ -196,9 +196,6 @@ def load_dag(
 
     validate_config(config)
 
-    # human 节点的 review 声明（载入后统一校验键的存在性）
-    review_specs: dict[str, dict[str, str]] = {}
-
     dag = DAG(
         config.get("name", "dag"),
         params=config.get("params") or {},
@@ -213,12 +210,6 @@ def load_dag(
 
         if kind == "human":
             condition = spec.get("condition")
-            # review 富声明：校验后派生 {key: label} 视图（空 label 退化为键名）
-            review_spec = spec.get("review")
-            review: dict[str, str] | None = None
-            if review_spec is not None:
-                review = {key: val["label"] or key for key, val in review_spec.items()}
-                review_specs[name] = review
             cond_func = None
             if condition:
                 cond_type = REGISTRY.get(condition)
@@ -232,7 +223,7 @@ def load_dag(
                 condition=cond_func,
                 retry=retry,
                 approver=approver,
-                review=review,
+                review=spec.get("review"), 
             )
 
         elif kind == "loop":
