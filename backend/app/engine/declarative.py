@@ -306,7 +306,4 @@ def load_dag(
                     },
                 )
             )
-
-    # 结构检查（依赖/环/非空）已由 validate_config 前置完成；
-    # dag.run 自带 validate 兜底程序化构建的 DAG。
     return dag
