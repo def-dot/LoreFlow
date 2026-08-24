@@ -196,7 +196,7 @@ def test_load_dag_bad_file(tmp_path) -> None:
 
 
 async def test_required_inputs_enforced_at_run(registered: Any) -> None:
-    """params 声明的必填键在 run() 前校验：缺参 ValueError，不跑任何节点。"""
+    """params 声明的必填键：调用方组合 validate_inputs 拦截，run() 信任执行。"""
     ran = {"n": 0}
 
     async def only(ctx: dict[str, Any]) -> str:
@@ -206,9 +206,8 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     registered("t_only", only, "function")
     dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "params": {"query": {"required": True}}})
 
-    with pytest.raises(ValueError, match="必填参数缺失或为空: query"):
-        await dag.run()
-    assert ran["n"] == 0  # 缺参时节点零执行
+    assert dag.validate() == []
+    assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
 
     results = await dag.run(inputs={"query": "hello"})
     assert results["only"].output == "hello"
@@ -236,9 +235,8 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
     assert results["only"].output == "建议值"
     assert ran["n"] == 1
 
-    with pytest.raises(ValueError, match="必填参数缺失或为空: query"):
-        await dag.run(inputs={})  # 显式空 = 未提供，不回退 default
-    assert ran["n"] == 1
+    # 显式空 = 未提供，不回退 default（create_run 校验原始 inputs 时拦截）
+    assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
 
     results = await dag.run(inputs={"query": "显式值"})
     assert results["only"].output == "显式值"
@@ -264,8 +262,7 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
     )
 
     for bad in (None, "", "   "):
-        with pytest.raises(ValueError, match="必填参数缺失或为空: count"):
-            await dag.run(inputs={"count": bad})
+        assert validate_inputs({"count": bad}, dag.params) == ["必填参数缺失或为空: count"]
 
     for good in (0, False):
         results = await dag.run(inputs={"count": good})
@@ -273,8 +270,8 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
 
 
 async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
-    """输入键必须是声明参数的子集：声明了 params → inputs ⊆ 声明键，run()
-    同样拦；未声明 params → 白名单为空，任何输入键都算未声明（loop body
+    """输入键必须是声明参数的子集：声明了 params → inputs ⊆ 声明键；
+    未声明 params → 白名单为空，任何输入键都算未声明（loop body
     不受影响——loop_func 直接驱动执行器，不走 run() 的输入契约）。"""
 
     async def echo(ctx: dict[str, Any]) -> Any:
@@ -282,21 +279,17 @@ async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
 
     registered("t_echo_extra", echo, "function")
 
-    # 声明了 params 契约：extra 未声明 → validate_inputs / run() 都拦
+    # 声明了 params 契约：extra 未声明 → 拒
     declared = load_dag(
         {"nodes": {"echo": {"type": "t_echo_extra"}},
          "params": {"q": {"required": True}}}
     )
     inputs = {"q": "ok", "extra": 1}
     assert validate_inputs(inputs, declared.params) == ["未声明的参数键: extra"]
-    with pytest.raises(ValueError, match="未声明的参数键: extra"):
-        await declared.run(inputs=inputs)
 
     # 未声明 params：白名单为空，q/extra 都是未声明的
     free = load_dag({"nodes": {"echo": {"type": "t_echo_extra"}}})
     assert validate_inputs(inputs, free.params) == ["未声明的参数键: extra, q"]
-    with pytest.raises(ValueError, match="未声明的参数键"):
-        await free.run(inputs=inputs)
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
@@ -353,9 +346,8 @@ async def test_params_rich_form_runs(registered: Any) -> None:
     )
     assert dag.default_inputs == {"topic": "默认主题"}
     assert dag.required_inputs == ["query"]
+    assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
 
-    with pytest.raises(ValueError, match="必填参数缺失或为空: query"):
-        await dag.run()
     # run(inputs=...) 整体替换默认值；合并语义在 orchestrator（runtime 覆盖默认）
     results = await dag.run(inputs={**dag.default_inputs, "query": "洛伦佐"})
     assert results["search"].output == {"query": "洛伦佐", "topic": "默认主题"}

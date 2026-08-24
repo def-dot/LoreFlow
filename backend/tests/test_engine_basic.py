@@ -187,8 +187,8 @@ def test_add_node_requires_callable_condition() -> None:
         dag.add_node(Node(name="bad", func=ok, condition=42))
 
 
-async def test_depends_on_wrong_type_fails_validate() -> None:
-    """depends_on 类型错（裸字符串/不可迭代）在 run 前图校验拦截：
+def test_depends_on_wrong_type_fails_validate() -> None:
+    """depends_on 类型错（裸字符串/不可迭代）被图校验拦截：
     不再逐字符迭代出「依赖的 'f' 不在 DAG 中」噪音，也不再 TypeError。"""
     async def ok(ctx: dict[str, Any]) -> int:
         return 1
@@ -196,13 +196,11 @@ async def test_depends_on_wrong_type_fails_validate() -> None:
     bare = DAG("dep_str")
     bare.add_node(Node(name="a", func=ok))
     bare.add_node(Node(name="b", func=ok, depends_on="a"))  # 裸字符串
-    with pytest.raises(ValueError, match="depends_on 必须是字符串列表"):
-        await bare.run()
+    assert bare.validate() == ["节点 'b': depends_on 必须是字符串列表"]
 
     uniterable = DAG("dep_int")
     uniterable.add_node(Node(name="a", func=ok, depends_on=5))
-    with pytest.raises(ValueError, match="depends_on 必须是字符串列表"):
-        await uniterable.run()
+    assert uniterable.validate() == ["节点 'a': depends_on 必须是字符串列表"]
 
 
 def test_depends_on_wrong_type_keeps_node_visible() -> None:
@@ -218,7 +216,7 @@ def test_depends_on_wrong_type_keeps_node_visible() -> None:
     assert dag.validate() == ["节点 'a': depends_on 必须是字符串列表"]
 
 
-async def test_no_params_rejects_any_inputs() -> None:
+def test_no_params_rejects_any_inputs() -> None:
     """params 未声明 → 输入白名单为空：任何输入键都算未声明（此前静默进上下文）。"""
     dag = DAG("no_params")
 
@@ -227,5 +225,3 @@ async def test_no_params_rejects_any_inputs() -> None:
         return 1
 
     assert validate_inputs({"x": 1}, dag.params) == ["未声明的参数键: x"]
-    with pytest.raises(ValueError, match="未声明的参数键"):
-        await dag.run(inputs={"x": 1})

@@ -24,7 +24,9 @@ dag.human_node(                                 # kind: human → human_node()
 async def publish(ctx: dict) -> dict:
     return {"published": True, "title": ctx["title"]}
 
-errors = dag.validate() + validate_inputs(                     # 结构 + 输入
-    {"title": "Hello", "content": "World"}, dag.params
-)
-results = await dag.run(inputs={"title": "Hello", "content": "World"})
+inputs = {"title": "Hello", "content": "World"}
+errors = dag.validate() + validate_inputs(inputs, dag.params)   # 调用方组合：结构 + 输入
+if errors:
+    raise ValueError("\n".join(errors))                         # run 信任调用方，不再自校验
+
+results = await dag.run(inputs=inputs)

@@ -23,6 +23,6 @@ dag.human_node(                                 # kind: human → human_node()
 async def publish(ctx: dict) -> dict:
     return {"published": True, "title": ctx["title"]}
 
-errors = dag.validate({"title": "Hello", "content": "World"})  
+errors = dag.validate()
 
 results = asyncio.run(dag.run(inputs={"title": "Hello", "content": "World"}))

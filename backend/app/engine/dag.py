@@ -31,7 +31,7 @@ from typing import Any
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
-from .validate import validate_graph, validate_inputs, validate_params, validate_review
+from .validate import validate_graph, validate_params, validate_review
 
 logger = logging.getLogger(__name__)
 
@@ -487,16 +487,15 @@ class DAG:
             A dict mapping every node name to its :class:`NodeResult`.
 
         Raises:
-            ValueError: If the DAG fails validation or required inputs are
-                        missing/empty (see ``validate.validate_inputs``).
             DAGExecutionError: If any nodes failed.
+
+        信任语义：run 不校验。声明式 DAG 的结构由 load_dag 保证
+        （validate_config 有错即 raise）；程序化调用方自行组合
+        ``dag.validate()`` + ``validate.validate_inputs`` 再调 run，
+        编排层 create_run 只守输入增量。
         """
         if inputs is None:
             inputs = self.default_inputs
-
-        errors = self.validate() + validate_inputs(inputs, self.params)
-        if errors:
-            raise ValueError(f"DAG {self.name!r} 校验失败:\n  " + "\n  ".join(errors))
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
         if logger.isEnabledFor(logging.DEBUG):

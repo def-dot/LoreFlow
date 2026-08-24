@@ -243,8 +243,8 @@ def test_human_node_requires_callable_approver() -> None:
         dag.human_node("review", approver="not_callable")
 
 
-async def test_review_unknown_key_fails_validate() -> None:
-    """review 引用未声明的键（拼错）：run 前校验拦截，而非运行时静默显示「未提供」。"""
+def test_review_unknown_key_fails_validate() -> None:
+    """review 引用未声明的键（拼错）：校验拦截，而非运行时静默显示「未提供」。"""
     dag = DAG("review_typo")
 
     @dag.node("data")
@@ -258,12 +258,11 @@ async def test_review_unknown_key_fails_validate() -> None:
         review={"dat": {"label": "数据"}},  # 拼错：data → dat
     )
 
-    with pytest.raises(ValueError, match="review 引用了未声明的键"):
-        await dag.run()
+    assert any("review 引用了未声明的键" in e for e in dag.validate())
 
 
-async def test_review_malformed_format_fails_validate() -> None:
-    """程序化 review 富映射缺 label：run 前校验拦截（共享 validate_review），
+def test_review_malformed_format_fails_validate() -> None:
+    """程序化 review 富映射缺 label：校验拦截（共享 validate_review），
     而非运行时构造标签映射才 KeyError。"""
     dag = DAG("bad_review")
 
@@ -273,12 +272,11 @@ async def test_review_malformed_format_fails_validate() -> None:
         review={"data": {"text": "数据"}},  # 富映射格式但无 label
     )
 
-    with pytest.raises(ValueError, match="label 必须是字符串"):
-        await dag.run()
+    assert any("label 必须是字符串" in e for e in dag.validate())
 
 
-async def test_review_empty_declaration_fails_validate() -> None:
-    """空声明（{} / []）与未声明（None）不同：是无意义的视图，run 前拦截。"""
+def test_review_empty_declaration_fails_validate() -> None:
+    """空声明（{} / []）与未声明（None）不同：是无意义的视图，校验拦截。"""
     dag = DAG("empty_review")
     dag.human_node(
         "review",
@@ -286,8 +284,7 @@ async def test_review_empty_declaration_fails_validate() -> None:
         review={},
     )
 
-    with pytest.raises(ValueError, match="review 声明不能为空映射"):
-        await dag.run()
+    assert any("review 声明不能为空映射" in e for e in dag.validate())
 
 
 async def test_review_keys_may_reference_params_and_nodes() -> None:

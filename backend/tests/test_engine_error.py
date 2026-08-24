@@ -35,25 +35,22 @@ async def test_failure_records_error_and_skips_downstream() -> None:
     assert results["independent"].status == NodeStatus.COMPLETED
 
 
-async def test_missing_dependency_rejected() -> None:
+def test_missing_dependency_rejected() -> None:
     dag = DAG("missing_dep")
     dag.add_node(Node(name="a", func=noop, depends_on=["ghost"]))
-    with pytest.raises(ValueError, match="ghost"):
-        await dag.run()
+    assert any("ghost" in e for e in dag.validate())
 
 
-async def test_cycle_rejected() -> None:
+def test_cycle_rejected() -> None:
     dag = DAG("cycle")
     dag.add_node(Node(name="a", func=noop, depends_on=["b"]))
     dag.add_node(Node(name="b", func=noop, depends_on=["a"]))
-    with pytest.raises(ValueError, match="循环依赖"):
-        await dag.run()
+    assert any("循环依赖" in e for e in dag.validate())
 
 
-async def test_empty_dag_rejected() -> None:
+def test_empty_dag_rejected() -> None:
     dag = DAG("empty")
-    with pytest.raises(ValueError, match="没有节点"):
-        await dag.run()
+    assert dag.validate() == ["DAG 没有节点"]
 
 
 async def test_duplicate_node_name_rejected() -> None:
