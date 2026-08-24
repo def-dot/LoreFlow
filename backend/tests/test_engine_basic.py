@@ -147,7 +147,7 @@ async def test_resume_ignores_nodes_missing_from_current_dag() -> None:
 
 
 async def test_default_inputs_applied() -> None:
-    dag = DAG("inputs", default_inputs={"seed": 41})
+    dag = DAG("inputs", params={"seed": {"default": 41}})
 
     @dag.node("calc")
     async def calc(ctx: dict[str, Any]) -> int:

@@ -15,11 +15,27 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
-from app.engine.declarative import parse_params, parse_review, read_yaml
+from app.engine.declarative import validate_review, read_yaml, validate_params
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY
 
 logger = get_logger(__name__)
+
+
+def _param_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """已校验的 ``params`` 声明 → 前端参数行（必填/默认值由行内字段判断）。"""
+    return [
+        {
+            "name": name,
+            "label": spec.get("label") or name,
+            "description": spec.get("description"),
+            "default": spec.get("default"),
+            "has_default": "default" in spec,
+            "required": bool(spec.get("required")),
+            "multiline": bool(spec.get("multiline", False)),
+        }
+        for name, spec in (config.get("params") or {}).items()
+    ]
 
 
 async def _noop_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -33,8 +49,8 @@ def list_pipelines() -> list[dict[str, Any]]:
     for path in sorted(settings.PIPELINES_DIR.glob("*.yaml")):
         try:
             _, config = read_yaml(path)
-            # 与 load_dag 同源归一化（params 富声明/inputs 简式统一成参数行）
-            params, defaults, required = parse_params(config)
+            # 与 load_dag 同源校验（坏声明跳过并告警）
+            validate_params(config)
         except ValueError as exc:
             logger.warning("Skip demo pipeline %s: %s", path.name, exc)
             continue
@@ -43,9 +59,7 @@ def list_pipelines() -> list[dict[str, Any]]:
             "name": str(config.get("name") or path.stem),
             "description": str(config.get("description") or ""),
             "node_count": len(config.get("nodes") or {}),
-            "inputs": defaults,
-            "required_inputs": required,
-            "params": params,
+            "params": _param_rows(config),
         })
     return entries
 
@@ -94,7 +108,11 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     elif kind == "human":
         row["type_label"] = "人工审核"
         row["type_description"] = spec.get("prompt")
-        row["review"] = parse_review(spec.get("review"))
+        review_spec = spec.get("review")
+        if review_spec is not None:
+            validate_review(review_spec)
+            # 与引擎同规则派生 {key: label}（空 label 退化为键名）
+            row["review"] = {key: val["label"] or key for key, val in review_spec.items()}
     elif kind == "loop":
         row["type_label"] = "循环"
         body = spec.get("body") or {}
@@ -106,11 +124,12 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_pipeline_detail(filename: str) -> dict[str, Any]:
-    """单个流水线的完整展示数据：图、节点行、YAML 原文。"""
+    """单个流水线的完整展示数据：图、节点行、YAML 原文；未知文件名 404。"""
     path = settings.PIPELINES_DIR / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"流水线 {filename!r} 不存在")
     raw, config = read_yaml(path)
     dag = load_dag(config, approver=_noop_approver)
-    params, defaults, required = parse_params(config)
     nodes_cfg = config.get("nodes") or {}
     rows = [_node_row(name, nodes_cfg.get(name) or {}) for name in dag.topological_order()]
     return {
@@ -121,7 +140,5 @@ def get_pipeline_detail(filename: str) -> dict[str, Any]:
         "mermaid": dag.to_mermaid(),
         "source": raw,
         "nodes": rows,
-        "inputs": defaults,
-        "required_inputs": required,
-        "params": params,
+        "params": _param_rows(config),
     }

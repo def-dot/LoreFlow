@@ -70,7 +70,7 @@ async def run_pipeline(
 ) -> None:
     """执行一次 run：dag.run 返回 → completed；
     """
-    inputs = {**(dag.default_inputs or {}), **(record.inputs or {})}
+    inputs = {**dag.default_inputs, **(record.inputs or {})}
     try:
         await dag.run(inputs=inputs, resume=resume)
         record.status = RunStatus.COMPLETED
@@ -112,8 +112,8 @@ async def create_run(
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
-    # 运行时输入只能使用 YAML params 里声明的键（params 在 load_dag 已校验不与节点名冲突）
-    valid_keys = set(dag.required_inputs) | set(dag.default_inputs.keys())
+    # 运行时输入只能使用 YAML params 里声明的键（load_dag 已校验不与节点名冲突）
+    valid_keys = set(dag.params)
     invalid_keys = set(inputs) - valid_keys
     if invalid_keys:
         raise ValueError(f"未声明的参数键（YAML params 中未定义）: {', '.join(sorted(invalid_keys))}")

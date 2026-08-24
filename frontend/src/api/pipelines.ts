@@ -13,10 +13,10 @@ export interface PipelineNodeInfo {
   review: Record<string, string> | null  // (human) 审核视图 {key: label}；null=全量上下文
 }
 
-/** 一个运行时输入参数的声明行（后端把 params 富声明/inputs 简式归一化后输出） */
+/** 一个运行时输入参数的声明行（后端从 YAML params 声明归一化输出） */
 export interface ParamSpec {
   name: string            // ctx 里的键
-  label: string           // 展示名（简式声明退化为键名）
+  label: string           // 展示名（未声明 label 时退化为键名）
   description: string | null
   default: unknown
   has_default: boolean    // 区分「声明了 default: null」与「未声明默认值」
@@ -29,9 +29,7 @@ export interface PipelineListItem {
   name: string
   description: string
   node_count: number
-  inputs: Record<string, unknown>  // YAML 声明的默认输入
-  required_inputs: string[]  // 必须由运行时提供的输入键
-  params: ParamSpec[]  // 归一化参数行（驱动参数表单）
+  params: ParamSpec[]  // 参数声明行（必填/默认值由行内字段判断，驱动参数表单）
 }
 
 export interface PipelineDetail extends PipelineListItem {

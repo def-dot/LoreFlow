@@ -86,6 +86,9 @@ def _load(path: Path) -> None:
     error: str | None = None
 
     try:
+        # 失效字节码缓存：内容变了但（秒级）mtime 与大小恰好未变时，
+        # exec_module 会复用 __pycache__ 里的旧 pyc，热重载注册回过期节点
+        Path(importlib.util.cache_from_source(str(path))).unlink(missing_ok=True)
         spec = importlib.util.spec_from_file_location(module_name, path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module

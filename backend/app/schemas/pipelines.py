@@ -6,14 +6,14 @@ from pydantic import BaseModel
 
 
 class PipelineParamOut(BaseModel):
-    """一个运行时输入参数的声明行（params 富声明 / inputs 简式归一化后）。"""
+    """一个运行时输入参数的声明行（YAML ``params`` 声明归一化后）。"""
 
     name: str                    # ctx 里的键
-    label: str                   # 展示名（简式退化为键名）
+    label: str                   # 展示名（未声明 label 时退化为键名）
     description: str | None = None  # 参数说明，YAML 未写则为空
     default: Any = None          # 默认值（has_default=False 时无意义）
     has_default: bool = False    # 是否声明了默认值（区分 default: null）
-    required: bool = False       # 创建运行时必须提供
+    required: bool = False       # 创建运行时必须提供（前端据此判断必填）
     multiline: bool = False      # 多行文本（前端渲染 textarea，如文章正文）
 
 
@@ -24,9 +24,7 @@ class PipelineListItem(BaseModel):
     name: str
     description: str = ""
     node_count: int  # 顶层节点数（loop 的 body 子节点不计）
-    inputs: dict[str, Any] = {}  # YAML 声明的默认输入
-    required_inputs: list[str] = []  # 必须由运行时提供的输入键
-    params: list[PipelineParamOut] = []  # 归一化参数行（驱动前端参数表单）
+    params: list[PipelineParamOut] = []  # 参数声明行（驱动前端参数表单）
 
 
 class PipelineNodeOut(BaseModel):
@@ -48,7 +46,6 @@ class PipelineDetail(PipelineListItem):
     mermaid: str
     source: str  # 原始 YAML 文本（只读展示）
     nodes: list[PipelineNodeOut]
-    # inputs/required_inputs 继承自列表条目（详情与列表同源，均为 load 结果）
 
 
 class PipelineListResponse(BaseModel):

@@ -5,7 +5,7 @@ from typing import Any, Literal
 import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
-from app.engine.declarative import parse_params, parse_review
+from app.engine.declarative import validate_review, validate_params
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY, NodeType
 
@@ -210,16 +210,34 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     assert results["only"].output == "hello"
 
 
-def test_required_inputs_overlap_defaults_rejected() -> None:
-    """必填键同时声明默认值 → 配置错误（必填就不该有默认）。"""
-    with pytest.raises(ValueError, match="必填参数不应有默认值"):
-        parse_params({"params": {"query": {"required": True, "default": "有默认值"}}})
+async def test_required_with_default_still_needs_explicit_input(registered: Any) -> None:
+    """必填键可同时声明 default：default 只是表单建议值不回填，仍必须显式提供。"""
+    ran = {"n": 0}
+
+    async def only(ctx: dict[str, Any]) -> str:
+        ran["n"] += 1
+        return ctx["query"]
+
+    registered("t_required_default", only, "function")
+    dag = load_dag(
+        {"nodes": {"only": {"type": "t_required_default"}},
+         "params": {"query": {"required": True, "default": "建议值"}}}
+    )
+    assert dag.required_inputs == ["query"]
+    assert dag.default_inputs == {}  # 必填键的 default 不进回填视图
+
+    with pytest.raises(ValueError, match="缺少必填输入参数: query"):
+        await dag.run()
+    assert ran["n"] == 0  # 缺显式输入时节点零执行（default 不顶班）
+
+    results = await dag.run(inputs={"query": "显式值"})
+    assert results["only"].output == "显式值"
 
 
 def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
     with pytest.raises(ValueError, match="required 必须是布尔值"):
-        parse_params({"params": {"query": {"required": "yes"}}})
+        validate_params({"params": {"query": {"required": "yes"}}})
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
@@ -238,31 +256,24 @@ def test_input_keys_clash_node_names_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_params_rich_form() -> None:
-    """params 富声明 → 统一参数行 + 派生 default_inputs/required_inputs。"""
-    rows, defaults, required = parse_params(
-        {
-            "params": {
-                "query": {"required": True, "label": "查询词", "description": "要检索的内容"},
-                "topic": {"default": "默认主题", "label": "主题"},
-                "limit": {"default": 5},  # 可选、无 label → label 退化为键名
-                "body": {"required": True, "multiline": True},  # 多行文本（前端 textarea）
-            }
-        }
-    )
-    assert rows == [
-        {"name": "query", "label": "查询词", "description": "要检索的内容", "default": None, "has_default": False, "required": True, "multiline": False},
-        {"name": "topic", "label": "主题", "description": None, "default": "默认主题", "has_default": True, "required": False, "multiline": False},
-        {"name": "limit", "label": "limit", "description": None, "default": 5, "has_default": True, "required": False, "multiline": False},
-        {"name": "body", "label": "body", "description": None, "default": None, "has_default": False, "required": True, "multiline": True},
-    ]
-    assert defaults == {"topic": "默认主题", "limit": 5}
-    assert required == ["query", "body"]
+def test_params_rich_form() -> None:
+    """params 富声明原样进 DAG；默认值/必填键是从声明派生的只读视图
+    （前端参数行由展示层从同一声明派生，见 services/pipelines._param_rows）。"""
+    params = {
+        "query": {"required": True, "label": "查询词", "description": "要检索的内容"},
+        "topic": {"default": "默认主题", "label": "主题"},
+        "limit": {"default": 5},  # 可选、无 label → 展示层 label 退化为键名
+        "body": {"required": True, "multiline": True},  # 多行文本（前端 textarea）
+    }
+    dag = load_dag({"nodes": {"only": {"type": "cfg_fetch"}}, "params": params})
+    assert dag.params == params  # 声明原样保留
+    assert dag.default_inputs == {"topic": "默认主题", "limit": 5}
+    assert dag.required_inputs == ["query", "body"]
 
 
 def test_params_multiline_bad_type_rejected() -> None:
     with pytest.raises(ValueError, match="multiline 必须是布尔值"):
-        parse_params({"params": {"b": {"multiline": "yes"}}})
+        validate_params({"params": {"b": {"multiline": "yes"}}})
 
 
 async def test_params_rich_form_runs(registered: Any) -> None:
@@ -291,14 +302,9 @@ async def test_params_rich_form_runs(registered: Any) -> None:
     assert results["search"].output == {"query": "洛伦佐", "topic": "默认主题"}
 
 
-def test_params_required_with_default_rejected() -> None:
-    with pytest.raises(ValueError, match="必填参数不应有默认值"):
-        parse_params({"params": {"q": {"required": True, "default": "x"}}})
-
-
 def test_params_unknown_field_rejected() -> None:
     with pytest.raises(ValueError, match="不支持的字段"):
-        parse_params({"params": {"q": {"type": "string"}}})
+        validate_params({"params": {"q": {"type": "string"}}})
 
 
 # ---------------------------------------------------------------------------
@@ -306,23 +312,27 @@ def test_params_unknown_field_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_review_forms() -> None:
-    """列表/裸字符串映射/富映射归一化为 {key: label}；缺省 → None（全量）。"""
-    assert parse_review(None) is None
-    assert parse_review(["title"]) == {"title": "title"}
-    assert parse_review({"title": "标题"}) == {"title": "标题"}
-    assert parse_review({"title": {"label": "标题"}, "content": {}}) == {"title": "标题", "content": "content"}
+def test_validate_review_accepts() -> None:
+    """validate_review 只接受富映射格式：{key: {label: 文本}}，允许空字符串"""
+    validate_review({"title": {"label": "标题"}})
+    validate_review({"title": {"label": "标题"}, "content": {"label": "内容"}})
+    validate_review({"title": {"label": ""}})  # 空字符串允许
 
 
-def test_parse_review_rejects() -> None:
-    with pytest.raises(ValueError, match="非空字符串键列表"):
-        parse_review(["", 1])
+def test_validate_review_rejects() -> None:
+    """非法格式抛出 ValueError"""
+    with pytest.raises(ValueError, match="必须是映射"):
+        validate_review(None)
+    with pytest.raises(ValueError, match="必须是映射"):
+        validate_review(["title"])
     with pytest.raises(ValueError, match="不能为空映射"):
-        parse_review({})
+        validate_review({})
+    with pytest.raises(ValueError, match="必须是 \\{label: 文本\\} 格式"):
+        validate_review({"title": "标题"})
     with pytest.raises(ValueError, match="不支持的字段"):
-        parse_review({"t": {"format": "text"}})
-    with pytest.raises(ValueError, match="必须是键列表或映射"):
-        parse_review("title")
+        validate_review({"t": {"format": "text"}})
+    with pytest.raises(ValueError, match="label 必须是字符串"):
+        validate_review({"t": {"label": None}})
 
 
 async def test_human_review_view_payload(registered: Any) -> None:
@@ -375,7 +385,10 @@ def test_review_unknown_key_rejected() -> None:
                 "params": {},
                 "nodes": {
                     "work": {"type": "cfg_fetch"},
-                    "gate": {"kind": "human", "depends_on": ["work"], "review": ["ttile"]},
+                    "gate": {
+                        "kind": "human", "depends_on": ["work"],
+                        "review": {"ttile": {"label": "标题"}},
+                    },
                 },
             },
             approver=approver,
@@ -383,7 +396,7 @@ def test_review_unknown_key_rejected() -> None:
 
 
 def test_review_param_key_allowed() -> None:
-    """review 键可以是参数键（含无默认值的可选参数）——校验用参数行全集。"""
+    """review 键可以是参数键（含无默认值的可选参数）——校验用参数声明全集。"""
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"approve": True}
 
@@ -391,7 +404,10 @@ def test_review_param_key_allowed() -> None:
         {
             "params": {"q": {"required": True}, "opt": {}},
             "nodes": {
-                "gate": {"kind": "human", "depends_on": [], "review": ["q", "opt"]},
+                "gate": {
+                    "kind": "human", "depends_on": [],
+                    "review": {"q": {"label": "查询"}, "opt": {"label": "可选参数"}},
+                },
             },
         },
         approver=approver,

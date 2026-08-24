@@ -28,24 +28,20 @@ _KIND_FIELDS = {
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline"}
 
 
-def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
-    """归一化输入参数声明 → ``(参数行, default_inputs, required_inputs)``。
+def validate_params(config: dict[str, Any]) -> None:
+    """校验顶层 ``params`` 声明；只做校验，不解析/派生数据。
 
-    两种声明形式产出统一的参数行 ``{name, label, description, default,
-    has_default, required}``（供 API/前端表单渲染）。
-
-    顶层 ``params``：每键 spec ``{label, description, default, required, multiline}``，
-    引擎用的默认值/必填键由 spec 派生。
+    每键 spec 只接受 ``{label, description, default, required, multiline}``。
+    required 与 default 可共存：必填键的 default 只是表单建议值，不参与
+    回填（见 ``DAG.default_inputs``）。声明原样进 ``DAG.params``，必填/
+    默认值视图与前端参数行各自按需派生。
     """
     params = config.get("params")
-    if params is not None and not isinstance(params, dict):
-        raise ValueError(f"params 必须是映射(dict)，实际是 {type(params).__name__}")
     if params is None:
-        return [], {}, []
+        return
+    if not isinstance(params, dict):
+        raise ValueError(f"params 必须是映射(dict)，实际是 {type(params).__name__}")
 
-    rows: list[dict[str, Any]] = []
-    defaults: dict[str, Any] = {}
-    required: list[str] = []
     for name, spec in params.items():
         if not isinstance(spec, dict):
             raise ValueError(f"参数 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
@@ -58,58 +54,34 @@ def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str
         required_value = spec.get("required")
         if required_value is not None and not isinstance(required_value, bool):
             raise ValueError(f"参数 {name!r}: required 必须是布尔值")
-        is_required = bool(required_value)
-        has_default = "default" in spec
-        if is_required and has_default:
-            raise ValueError(f"参数 {name!r}: 必填参数不应有默认值")
         multiline = spec.get("multiline", False)
         if not isinstance(multiline, bool):
             raise ValueError(f"参数 {name!r}: multiline 必须是布尔值")
-        if is_required:
-            required.append(name)
-        elif has_default:
-            defaults[name] = spec["default"]
-        rows.append({
-            "name": name,
-            "label": spec.get("label") or name,
-            "description": spec.get("description"),
-            "default": spec.get("default"),
-            "has_default": has_default,
-            "required": is_required,
-            "multiline": multiline,
-        })
-    return rows, defaults, required
 
 
-def parse_review(spec: Any) -> dict[str, str] | None:
-    """归一化 human 节点的 review 视图声明 → 有序 ``{key: label}``。
+def validate_review(spec: dict[str, Any]) -> None:
+    """校验 human 节点的 review 视图声明，必须为富映射格式。
 
-    三种形式：缺省/None → None（全量上下文，向后兼容）；键列表
-    ``[title]`` → label 退化为键名；映射 ``{title: {label: 标题}}`` 或
-    ``{title: 标题}`` → 富声明（每键只接受 label 字段）。
+    仅支持形式：``{key: {label: 显示文本}}``，其中 label 必须为字符串（允许空字符串）。
+    校验通过无返回，校验失败抛出 ValueError。
     """
-    if spec is None:
-        return None
-    if isinstance(spec, list):
-        if not spec or not all(isinstance(k, str) and k for k in spec):
-            raise ValueError(f"review 必须是非空字符串键列表，实际是 {spec!r}")
-        return {k: k for k in spec}
-    if isinstance(spec, dict):
-        if not spec:
-            raise ValueError("review 声明不能为空映射（不声明即全量上下文）")
-        view: dict[str, str] = {}
-        for key, val in spec.items():
-            if isinstance(val, str):
-                view[key] = val or key
-            elif isinstance(val, dict):
-                unknown = set(val) - {"label"}
-                if unknown:
-                    raise ValueError(f"review 字段 {key!r}: 不支持的字段 {sorted(unknown)}")
-                view[key] = str(val.get("label") or key)
-            else:
-                raise ValueError(f"review 字段 {key!r}: 定义必须是字符串 label 或 {{label}}，实际是 {type(val).__name__}")
-        return view
-    raise ValueError(f"review 必须是键列表或映射，实际是 {type(spec).__name__}")
+    if not isinstance(spec, dict):
+        raise ValueError(f"review 必须是映射，实际是 {type(spec).__name__}")
+
+    if not spec:
+        raise ValueError("review 声明不能为空映射")
+
+    for key, val in spec.items():
+        if not isinstance(val, dict):
+            raise ValueError(f"review 字段 {key!r}: 必须是 {{label: 文本}} 格式，实际是 {type(val).__name__}")
+
+        unknown = set(val) - {"label"}
+        if unknown:
+            raise ValueError(f"review 字段 {key!r}: 不支持的字段 {sorted(unknown)}")
+
+        label = val.get("label")
+        if not isinstance(label, str):
+            raise ValueError(f"review 字段 {key!r}: label 必须是字符串")
 
 
 def read_yaml(path: str | Path) -> tuple[str, Any]:
@@ -147,14 +119,13 @@ def load_dag(
     else:
         raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 
-    param_rows, defaults, required = parse_params(config)
+    validate_params(config)
     # human 节点的 review 声明（载入后统一校验键的存在性）
     review_specs: dict[str, dict[str, str]] = {}
 
     dag = DAG(
         config.get("name", "dag"),
-        default_inputs=defaults,
-        required_inputs=required,
+        params=config.get("params") or {},
         on_event=on_event,
     )
 
@@ -176,8 +147,12 @@ def load_dag(
 
         if kind == "human":
             condition = spec.get("condition")
-            review = parse_review(spec.get("review"))
-            if review is not None:
+            # review 富声明：校验后派生 {key: label} 视图（空 label 退化为键名）
+            review_spec = spec.get("review")
+            review: dict[str, str] | None = None
+            if review_spec is not None:
+                validate_review(review_spec)
+                review = {key: val["label"] or key for key, val in review_spec.items()}
                 review_specs[name] = review
             cond_func = None
             if condition:
@@ -253,14 +228,14 @@ def load_dag(
     if errors:
         raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
 
-    # 输入键与节点名共享 ctx 命名空间：必填/默认键重名会被节点输出覆盖，直接拒绝
-    clash = sorted((set(required) | set(defaults)) & set(dag.node_names))
+    # 输入键与节点名共享 ctx 命名空间：声明的参数键重名会被节点输出覆盖，直接拒绝
+    clash = sorted(set(dag.params) & set(dag.node_names))
     if clash:
         raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
 
     # review 视图键必须在运行时可能出现的名字里（参数键或节点名）：
     # 拼写错误在载入时就拦截，而不是审核时静默显示 None
-    available = set(dag.node_names) | {row["name"] for row in param_rows}
+    available = set(dag.node_names) | set(dag.params)
     for node_name, view in review_specs.items():
         unknown = [k for k in view if k not in available]
         if unknown:

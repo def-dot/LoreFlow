@@ -472,8 +472,9 @@ async def test_create_run_with_inputs(client: AsyncClient, monkeypatch, tmp_path
     pipe = tmp_path / "inputs_demo.yaml"
     pipe.write_text(
         "name: inputs_demo\n"
-        "inputs:\n"
-        "  tick: 1\n"
+        "params:\n"
+        "  tick:\n"
+        "    default: 1\n"
         "nodes:\n"
         "  counter:\n"
         "    type: demo_tick\n",
@@ -495,7 +496,7 @@ async def test_create_run_with_inputs(client: AsyncClient, monkeypatch, tmp_path
 
 
 async def test_inputs_yaml_default_kept_when_not_overridden(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    """运行时未覆盖的键沿用 YAML 默认值：只传无关键，tick 仍取 YAML 的 1。"""
+    """运行时未覆盖的键沿用 YAML 默认值：不带 inputs 创建，tick 仍取 YAML 的 1。"""
     pipe = tmp_path / "inputs_demo.yaml"
     pipe.write_text(
         "name: inputs_demo\n"
@@ -511,7 +512,7 @@ async def test_inputs_yaml_default_kept_when_not_overridden(client: AsyncClient,
 
     resp = await client.post(
         "/api/v1/runs",
-        json={"config_file": "inputs_demo.yaml", "inputs": {"unrelated": "x"}},
+        json={"config_file": "inputs_demo.yaml"},
     )
     assert resp.status_code == 201
     run_id = resp.json()["data"]["run_id"]

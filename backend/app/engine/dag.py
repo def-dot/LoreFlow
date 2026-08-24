@@ -62,11 +62,10 @@ class DAG:
 
     Parameters:
         name: A human-readable label for this workflow (used in logs & diagrams).
-        default_inputs: Initial context applied when :meth:`run` is called
-                        without explicit ``inputs``.
-        required_inputs: Keys that must be present in the inputs at
-                        :meth:`run` time (no default to fall back on).
-                        Missing keys raise ``ValueError`` before any node runs.
+        params: 运行时输入参数声明 ``{name: {default, required, ...}}``
+                （load_dag 传入 YAML ``params`` 原文）。默认值/必填键不
+                单独拆开传，由 :attr:`default_inputs` / :attr:`required_inputs`
+                按需派生。
         on_event: Optional async callback invoked on every node state change
                   (running/retrying/completed/failed/upstream_failed/skipped/
                   cancelled) and awaited. Useful for live progress monitoring
@@ -76,15 +75,32 @@ class DAG:
     def __init__(
         self,
         name: str = "dag",
-        default_inputs: dict[str, Any] | None = None,
-        required_inputs: list[str] | None = None,
+        params: dict[str, dict[str, Any]] | None = None,
         on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
     ):
         self.name = name
-        self.default_inputs = default_inputs if default_inputs else {}
-        self.required_inputs = list(required_inputs) if required_inputs else []
+        # 声明原样保存（形状由 validate_params 保证），派生视图见下方属性
+        self.params = params if params else {}
         self.on_event = on_event
         self._nodes: dict[str, Node] = {}
+
+    @property
+    def default_inputs(self) -> dict[str, Any]:
+        """声明了 ``default`` 的可选参数 → 默认值（run 未传 inputs 时使用）。
+
+        必填键即使声明了 default 也不回填——default 只是表单建议值，
+        「必填必须显式提供」的语义不变。
+        """
+        return {
+            name: spec["default"]
+            for name, spec in self.params.items()
+            if "default" in spec and not spec.get("required")
+        }
+
+    @property
+    def required_inputs(self) -> list[str]:
+        """``required: true`` 的参数键（run 前缺失即 ``ValueError``）。"""
+        return [name for name, spec in self.params.items() if spec.get("required")]
 
     # ------------------------------------------------------------------
     # Registration

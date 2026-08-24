@@ -41,7 +41,7 @@ const parsedInputs = computed<{ value?: Record<string, unknown>; error: string |
   }
 })
 
-// 所选流水线的输入声明（列表接口已带 params/inputs/required_inputs，无需再取详情）
+// 所选流水线的参数声明（列表接口已带 params，无需再取详情）
 const selectedPipeline = computed(() =>
   pipelinesStore.pipelines.find((p) => p.filename === configFile.value),
 )
@@ -51,8 +51,11 @@ const paramSpecs = computed(() => selectedPipeline.value?.params ?? [])
 const detailParams = computed(() =>
   pipelinesStore.pipelines.find((p) => p.filename === store.detail?.config_file)?.params ?? [],
 )
-const requiredInputs = computed(() => selectedPipeline.value?.required_inputs ?? [])
-const defaultInputs = computed(() => selectedPipeline.value?.inputs ?? {})
+// 必填键/默认值从参数行派生（声明行是单一事实源，后端不再单独输出）
+const requiredInputs = computed(() => paramSpecs.value.filter((p) => p.required).map((p) => p.name))
+const defaultInputs = computed(() =>
+  Object.fromEntries(paramSpecs.value.filter((p) => p.has_default).map((p) => [p.name, p.default])),
+)
 const hasDefaults = computed(() => Object.keys(defaultInputs.value).length > 0)
 const defaultsJson = computed(() => JSON.stringify(defaultInputs.value, null, 2))
 
