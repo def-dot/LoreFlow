@@ -16,17 +16,27 @@ from typing import Any
 
 import httpx
 
-from app.core.config import settings
 from app.registry.core import node
+from app.utils.http import http_client
 
 _URL_RE = re.compile(r"""https?://[^\s<>"')\]]+""")
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+
+_CLEANUP_RES = [
+    re.compile(r"<!--.*?-->", re.DOTALL),
+    re.compile(r"<(script|style|svg|noscript|canvas)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL),
+]
 _TAG_RE = re.compile(r"<[^>]+>")
+
+# 行为默认值
+_MAX_PAGES = 3
+_MAX_CHARS = 8000
 
 
 def _html_to_text(html: str) -> str:
-    """无依赖的 HTML → 纯文本：去 script/style、去标签、还原实体、压空白。"""
-    text = _SCRIPT_STYLE_RE.sub(" ", html)
+    """无依赖的 HTML → 纯文本：去注释、去 Script/Style/SVG、去标签、还原实体、压空白。"""
+    text = html
+    for p in _CLEANUP_RES:
+        text = p.sub(" ", text)
     text = unescape(_TAG_RE.sub(" ", text))
     return " ".join(text.split())
 
@@ -36,12 +46,16 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> dict[str, str]:
     try:
         resp = await client.get(url)
         resp.raise_for_status()
-    except httpx.HTTPError as exc:
+
+        ctype = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if ctype and not (ctype.startswith("text/") or ctype.endswith(("xml", "json"))):
+            return {"url": url, "text": f"（非文本内容 {ctype}，已跳过）"}
+
+        html = resp.content.decode(resp.encoding or "utf-8", errors="replace")
+    except Exception as exc:
         return {"url": url, "text": f"（抓取失败：{type(exc).__name__} {exc}）"}
-    ctype = resp.headers.get("content-type", "")
-    if ctype and not ctype.startswith("text/"):
-        return {"url": url, "text": f"（非文本内容 {ctype}，已跳过）"}
-    return {"url": url, "text": _html_to_text(resp.text)[: settings.WEB_FETCH_MAX_CHARS]}
+
+    return {"url": url, "text": _html_to_text(html)[:_MAX_CHARS]}
 
 
 @node(
@@ -52,12 +66,17 @@ async def web_fetch(ctx: dict[str, Any]) -> list[dict[str, str]]:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str):
         return []
-    urls = _URL_RE.findall(prompt)[: settings.WEB_FETCH_MAX_PAGES]
+
+    urls = list(
+        dict.fromkeys(
+            u.rstrip(".,;:!?…。，；：！？、）」』》〉>\"'")
+            for u in _URL_RE.findall(prompt)
+        )
+    )
+    urls = [u for u in urls if u][:_MAX_PAGES]
+
     if not urls:
         return []
-    async with httpx.AsyncClient(
-        timeout=settings.WEB_FETCH_TIMEOUT_SECONDS,
-        follow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; LoreFlow/0.1; +local)"},
-    ) as client:
+
+    async with http_client() as client:
         return list(await asyncio.gather(*(_fetch_page(client, u) for u in urls)))

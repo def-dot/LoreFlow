@@ -14,38 +14,21 @@ import httpx
 
 from app.core.config import settings
 from app.registry.core import node
+from app.utils.http import http_client
 
 
-async def _ollama_chat(
-    model: str, 
-    messages: list[dict[str, str]]
-) -> str:
+async def _ollama_chat(model: str, messages: list[dict[str, str]]) -> str:
     """POST /api/chat（非流式）→ 助手回复文本。"""
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
-
-    # 本地回环不走系统代理（本机代理拦截 localhost 会得到莫名 502）；
-    # 连接 10s 快速失败，读超时（等模型生成）放宽到 OLLAMA_TIMEOUT_SECONDS
-    timeout = httpx.Timeout(10.0, read=settings.OLLAMA_TIMEOUT_SECONDS)
-    try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as http_client:
-            resp = await http_client.post(
-                url, 
-                json={"model": model, "messages": messages, "stream": False}
-            )
-            resp.raise_for_status()
-            
-            data = resp.json()
-            content = data.get("message", {}).get("content")
-            if content is None:
-                raise ValueError(f"Ollama 响应格式异常：{resp.text[:200]!r}")
-                
-            return str(content)
-    except httpx.HTTPStatusError as exc:
-        raise ValueError(
-            f"Ollama 返回 {exc.response.status_code}（模型 {model!r}）：{exc.response.text[:200]}"
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise ValueError(f"无法连接 Ollama（{url}）：{exc}") from exc
+    async with http_client() as client:
+        resp = await client.post(
+            url, json={"model": model, "messages": messages, "stream": False}
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        
+    content = data["message"]["content"]
+    return str(content)
 
 
 @node(

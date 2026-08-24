@@ -6,7 +6,6 @@
 #     ollama serve              # 启动服务（默认 11434 端口）
 #     ollama pull qwen2.5:latest  # 拉取缺省模型（或在 .env 改 OLLAMA_MODEL）
 # 配置经 .env 覆盖：OLLAMA_BASE_URL / OLLAMA_MODEL / OLLAMA_TIMEOUT_SECONDS
-#                  WEB_FETCH_MAX_PAGES / WEB_FETCH_MAX_CHARS / WEB_FETCH_TIMEOUT_SECONDS
 name: LLM 对话
 description: 实际示例：用户输入提示词；其中包含的链接会先抓取网页正文，再一起交给 Ollama 生成回答。
 

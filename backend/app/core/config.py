@@ -22,11 +22,6 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "qwen2.5:latest"
     OLLAMA_TIMEOUT_SECONDS: float = 120.0
 
-    # Web fetch — web_fetch 节点抓取提示词内链接的网页正文
-    WEB_FETCH_MAX_PAGES: int = 3  # 单次最多抓几个链接（防止提示词塞一堆 URL 拖垮运行）
-    WEB_FETCH_MAX_CHARS: int = 8000  # 每页正文截断长度（上下文有限，喂给 LLM 前先裁剪）
-    WEB_FETCH_TIMEOUT_SECONDS: float = 15.0
-
     # Database
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432
