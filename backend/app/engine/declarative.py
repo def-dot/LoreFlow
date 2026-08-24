@@ -101,38 +101,52 @@ def _validate_review(
 
 def validate_nodes(config: dict[str, Any]) -> list[str]:
     """校验顶层 nodes 声明，返回全部错误（空列表 = 合法）。
+
+    含依赖存在性与环检测；loop 的 body 是独立命名空间，递归走同一入口
+    （不传 params，与构建期嵌套 load_dag 的语义一致）。
     """
-    errors: list[str] = []
     nodes = config.get("nodes")
     if not nodes:
         return ["流水线至少需要一个节点"]
     if not isinstance(nodes, dict):
         return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
 
+    errors: list[str] = []
     params = config.get("params")
     # 可用键集合 = 参数键 + 节点名（params 类型错误已在 validate_params 报告）
     available = set(nodes) | (set(params) if isinstance(params, dict) else set())
 
+    edges: dict[str, list[str]] = {}
+    deps_missing = False
     for name, spec in nodes.items():
         if not isinstance(spec, dict):
             errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
+            edges[name] = []
             continue
 
         kind = spec.get("kind", "node")
         allowed = _KIND_FIELDS.get(kind)
         if allowed is None:
             errors.append(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
+            edges[name] = []
             continue
 
         unknown = set(spec) - {"kind"} - allowed
         if unknown:
             errors.append(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
 
+        # 依赖存在性：depends_on 引用的键和 condition/type 一样是逐节点引用检查
         deps = spec.get("depends_on")
-        if deps is not None and (
-            not isinstance(deps, list) or not all(isinstance(d, str) for d in deps)
-        ):
+        if deps is None:
+            deps = []
+        elif not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
             errors.append(f"节点 {name!r}: depends_on 必须是字符串列表")
+            deps = []
+        edges[name] = deps
+        for dep in deps:
+            if dep not in nodes:
+                errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
+                deps_missing = True
 
         # 校验 condition 字段（如果存在）
         condition_key = spec.get("condition")
@@ -158,42 +172,17 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 errors.append(f"循环节点 {name!r}: 需要非空的 'body' 映射")
             if not condition_key:
                 errors.append(f"循环节点 {name!r}: 需要 'condition' 函数键")
-    return errors
-
-
-def _validate_structure(config: dict[str, Any]) -> list[str]:
-    """图结构校验（依赖存在性 / 环），返回全部错误（空列表 = 合法）。
-    """
-    nodes = config.get("nodes")
-    if not isinstance(nodes, dict) or not nodes:
-        return []
-
-    errors: list[str] = []
-    edges: dict[str, list[str]] = {}
-    for name, spec in nodes.items():
-        deps = spec.get("depends_on") if isinstance(spec, dict) else None
-        if not isinstance(deps, list):
-            continue  # 类型错误已由 validate_nodes 报告
-        edges[name] = deps
-        for dep in deps:
-            if dep not in nodes:
-                errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
+            elif isinstance(body, dict) and body:
+                errors.extend(
+                    f"循环节点 {name!r}: {msg}"
+                    for msg in validate_nodes({"nodes": body})
+                )
 
     # 环检测只在依赖齐全时做（与 DAG.validate 同约定：缺失依赖时环结论不可信）
-    if not errors:
+    if not deps_missing:
         cycle = find_cycle(edges)
         if cycle:
             errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
-
-    # loop 的 body 是独立命名空间（body 只能依赖 body 内节点），递归同一套检查
-    for name, spec in nodes.items():
-        if isinstance(spec, dict) and spec.get("kind") == "loop":
-            body = spec.get("body")
-            if isinstance(body, dict) and body:
-                errors.extend(
-                    f"循环节点 {name!r}: {msg}"
-                    for msg in _validate_structure({"nodes": body})
-                )
     return errors
 
 
@@ -226,11 +215,11 @@ def validate_config(config: dict[str, Any]) -> list[str]:
 
     校验项：
     - params 声明（字段合法性、与节点名无冲突）
-    - nodes 声明（必须声明且非空、字段合法性、kind 特定必需字段、注册校验）
+    - nodes 声明（必须声明且非空、字段合法性、引用校验、依赖存在性、环；
+      loop body 递归同查）
     - review 声明格式和键引用（必须在参数键或节点名中）
-    - 图结构（依赖存在性、环；loop body 递归同查）
     """
-    return validate_params(config) + validate_nodes(config) + _validate_structure(config)
+    return validate_params(config) + validate_nodes(config)
 
 
 def load_dag(

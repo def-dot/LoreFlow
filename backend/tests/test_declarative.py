@@ -414,12 +414,12 @@ def test_validate_nodes_accepts_loop(registered: Any) -> None:
 
 def test_validate_nodes_rejects() -> None:
     """validate_nodes 返回非法配置的全部错误"""
-    # nodes 是必填键：缺失（None）与空映射都不行
-    assert validate_nodes({}) == ["缺少 'nodes' 声明"]
+    # nodes 是必填键：未声明（None）与空映射都不行（同一句报错）
+    assert validate_nodes({}) == ["流水线至少需要一个节点"]
     assert validate_nodes({"nodes": {}}) == ["流水线至少需要一个节点"]
 
-    # nodes 不是 dict
-    assert validate_nodes({"nodes": []}) == [
+    # nodes 不是 dict（非空非映射才走到类型分支；空列表归入"至少一个节点"）
+    assert validate_nodes({"nodes": ["a"]}) == [
         "nodes 必须是映射(dict)，实际是 list"
     ]
 
@@ -447,6 +447,18 @@ def test_validate_nodes_rejects() -> None:
     assert validate_nodes({"nodes": {"a": {"type": "no_such_fn"}}}) == [
         "节点 'a': 类型函数 'no_such_fn' 未注册"
     ]
+
+    # depends_on 类型错误 / 依赖缺失 / 循环依赖（已并入 validate_nodes）
+    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": "fetch"}}}) == [
+        "节点 'a': depends_on 必须是字符串列表"
+    ]
+    assert validate_nodes(
+        {"nodes": {"a": {"type": "cfg_fetch", "depends_on": ["ghost"]}}}
+    ) == ["节点 'a' 依赖的 'ghost' 不在 DAG 中"]
+    assert validate_nodes({"nodes": {
+        "a": {"type": "cfg_fetch", "depends_on": ["b"]},
+        "b": {"type": "cfg_fetch", "depends_on": ["a"]},
+    }}) == ["检测到循环依赖: a → b"]
 
     # loop 类型缺少 body / condition、condition 未注册（condition 注册检查先于 body 检查）
     assert validate_nodes({"nodes": {"a": {"kind": "loop", "condition": "x"}}}) == [
@@ -498,9 +510,9 @@ def test_validate_config_accepts() -> None:
 def test_validate_config_rejects_bad_structure(registered: Any) -> None:
     """图结构错误：空流水线 / 依赖缺失 / 循环依赖（loop body 递归同查）"""
     # nodes 是必填键：未声明（含只声明 params）与空映射都报错
-    assert validate_config({}) == ["缺少 'nodes' 声明"]
+    assert validate_config({}) == ["流水线至少需要一个节点"]
     assert validate_config({"params": {"q": {"required": True}}}) == [
-        "缺少 'nodes' 声明"
+        "流水线至少需要一个节点"
     ]
     assert validate_config({"nodes": {}}) == ["流水线至少需要一个节点"]
 
