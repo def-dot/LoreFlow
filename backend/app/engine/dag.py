@@ -31,7 +31,7 @@ from typing import Any
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
-from .validate import validate_graph, validate_params, validate_review
+from .validate import validate_graph, validate_inputs, validate_params, validate_review
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class DAG:
         """声明了 ``default`` 的参数 → 默认值（必填键也不例外）。
 
         :meth:`run` 未传 inputs 时以本视图顶班；显式性由
-        :meth:`validate_inputs` 只看传入 inputs 保证（不回退 default），
+        共享的 ``validate.validate_inputs`` 只看传入 inputs 保证（不回退 default），
         API 边界在 create_run 校验原始 inputs 时强制。
         """
         return {
@@ -103,26 +103,6 @@ class DAG:
     def required_inputs(self) -> list[str]:
         """``required: true`` 的参数键（run 前缺失即 ``ValueError``）。"""
         return [name for name, spec in self.params.items() if spec.get("required")]
-
-    def validate_inputs(
-        self, inputs: dict[str, Any] | None
-    ) -> list[str]:
-        """输入校验 —— :meth:`validate` 的输入组成部分，测试等也可直调。
-        """
-        errors: list[str] = []
-        if self.params:
-            invalid = sorted(set(inputs or {}) - set(self.params))
-            if invalid:
-                errors.append(f"未声明的参数键: {', '.join(invalid)}")
-
-        missing: list[str] = []
-        for name in self.required_inputs:
-            value = (inputs or {}).get(name)
-            if value is None or (isinstance(value, str) and not value.strip()):
-                missing.append(name)
-        if missing:
-            errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
-        return errors
 
     # ------------------------------------------------------------------
     # Registration
@@ -240,9 +220,13 @@ class DAG:
                 logger.info("[%s] loop iteration %d / %d", name, iteration, max_iterations)
 
                 # Run the body sub-DAG。body 失败抛 DAGExecutionError——取其
-                # results 继续，是否终止循环由 condition 决定
+                # results 继续，是否终止循环由 condition 决定。直接驱动执行器：
+                # body 已在注册期校验过，且外层上下文对无 params 的 body 不是
+                # 「输入」，不走 run() 的输入白名单
                 try:
-                    iter_results = await sub.run(ctx)
+                    iter_results = await DAGExecutor(on_event=sub.on_event).execute(
+                        sub.nodes, ctx
+                    )
                 except DAGExecutionError as exc:
                     iter_results = exc.results
 
@@ -426,13 +410,9 @@ class DAG:
     # Validation
     # ------------------------------------------------------------------
 
-    def validate(self, inputs: dict[str, Any] | None = None) -> list[str]:
-        """结构 + 输入校验 —— :meth:`run` 与编排层 ``create_run`` 共用的单一入口。
-
-        review 声明与声明层同查（共享 validate_review：键 ∈ 节点名 ∪
-        params、字段格式）：程序化注册的声明视图留在节点 metadata
-        （human_node 归一化时写入），拼错的键/畸形字段在这里拦下而不是
-        运行时静默显示「未提供」或取 label 才 KeyError。
+    def validate(self) -> list[str]:
+        """结构校验 —— 工作流本身的合法性（与运行时输入无关）；输入校验
+        由调用方组合共享的 ``validate_inputs``（run / 编排层 create_run）。
         """
         errors: list[str] = []
 
@@ -440,13 +420,7 @@ class DAG:
             errors.append("DAG 没有节点")
             return errors
 
-        errors.extend(validate_params(self.params, self._nodes))
-        # params 声明合法才做基于声明的派生校验：required_inputs 会
-        # spec.get，畸形 spec 直接 AttributeError
-        if not errors:
-            errors.extend(self.validate_inputs(inputs))
-        edges = {name: node.depends_on for name, node in self._nodes.items()}
-        errors.extend(validate_graph(edges))
+        errors.extend(validate_params(self.params, self._nodes.keys()))
 
         available = set(self._nodes) | set(self.params)
         for node in self._nodes.values():
@@ -456,6 +430,9 @@ class DAG:
                     f"审核节点 {node.name!r}: {msg}"
                     for msg in validate_review(review_view, available)
                 )
+
+        edges = {name: node.depends_on for name, node in self._nodes.items()}
+        errors.extend(validate_graph(edges))
         return errors
 
     # ------------------------------------------------------------------
@@ -512,13 +489,13 @@ class DAG:
 
         Raises:
             ValueError: If the DAG fails validation or required inputs are
-                        missing/empty (see :meth:`validate_inputs`).
+                        missing/empty (see ``validate.validate_inputs``).
             DAGExecutionError: If any nodes failed.
         """
         if inputs is None:
             inputs = self.default_inputs
 
-        errors = self.validate(inputs)
+        errors = self.validate() + validate_inputs(inputs, self.params)
         if errors:
             raise ValueError(f"DAG {self.name!r} 校验失败:\n  " + "\n  ".join(errors))
 

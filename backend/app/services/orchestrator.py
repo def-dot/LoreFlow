@@ -22,6 +22,7 @@ from app.engine import (
 )
 from app.engine.node import ApproverFunc
 from app.engine.types import NodeEventFunc
+from app.engine.validate import validate_inputs
 from app.models.run import RunRecord, RunStatus
 from app.services import reviews, runs
 
@@ -113,7 +114,7 @@ async def create_run(
         on_event=make_event_sink(record),
     )
     
-    errors = dag.validate(inputs)
+    errors = dag.validate() + validate_inputs(inputs, dag.params)
     if errors:
         raise ValueError("\n".join(errors))
     

@@ -62,7 +62,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         if unknown:
             errors.append(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
 
-        # depends_on 的类型/引用存在性/环统一由 validate_graph 查（None = 未声明）
         edges[name] = spec.get("depends_on")
 
         # 校验 condition 字段（如果存在）
@@ -76,7 +75,7 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             if not type_key:
                 errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
             elif type_key not in REGISTRY:
-                errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
+                errors.append(f"节点 {name!r}（node）: 类型函数 {type_key!r} 未注册")
         elif kind == "human":
             review_spec = spec.get("review")
             if review_spec is not None:

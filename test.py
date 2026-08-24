@@ -1,5 +1,6 @@
 import asyncio
 from app.engine import DAG
+from app.engine.validate import validate_inputs
 
 dag = DAG(
     "人工审核",                                  # name:
@@ -23,5 +24,7 @@ dag.human_node(                                 # kind: human → human_node()
 async def publish(ctx: dict) -> dict:
     return {"published": True, "title": ctx["title"]}
 
-errors = dag.validate({"title": "Hello", "content": "World"})   # 同一校验入口
+errors = dag.validate() + validate_inputs(                     # 结构 + 输入
+    {"title": "Hello", "content": "World"}, dag.params
+)
 results = await dag.run(inputs={"title": "Hello", "content": "World"})

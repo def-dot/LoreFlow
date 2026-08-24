@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from app.engine import DAG, DAGExecutionError, Node, NodeStatus, RetryPolicy
+from app.engine.validate import validate_inputs
 
 
 async def test_serial_chain() -> None:
@@ -215,3 +216,16 @@ def test_depends_on_wrong_type_keeps_node_visible() -> None:
     dag.add_node(Node(name="b", func=ok, depends_on=["a"]))
 
     assert dag.validate() == ["节点 'a': depends_on 必须是字符串列表"]
+
+
+async def test_no_params_rejects_any_inputs() -> None:
+    """params 未声明 → 输入白名单为空：任何输入键都算未声明（此前静默进上下文）。"""
+    dag = DAG("no_params")
+
+    @dag.node("a")
+    async def a(ctx: dict[str, Any]) -> int:
+        return 1
+
+    assert validate_inputs({"x": 1}, dag.params) == ["未声明的参数键: x"]
+    with pytest.raises(ValueError, match="未声明的参数键"):
+        await dag.run(inputs={"x": 1})

@@ -47,33 +47,25 @@ def find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
 
 
 def validate_graph(edges: Mapping[str, Any]) -> list[str]:
-    """图结构校验（depends_on 类型 + 依赖存在性 + 环）—— 一项检查一个
-    实现、多层调用：配置层 ``validate_nodes``（YAML 作者在 load 时看
-    全部错）与 ``DAG.validate``（程序化 DAG 的引擎自守）共用。
-
-    值为 ``None`` 视为未声明依赖；类型错的条目报错后以空依赖参与后续
-    检查（节点仍存在，下游引用它不产生「不在 DAG 中」噪音）。环检测
-    委托 :func:`find_cycle`，其输入契约由这里的过滤保证。
+    """图结构校验（depends_on 类型 + 依赖存在性 + 环）
     """
     errors: list[str] = []
-    clean: dict[str, list[str]] = {}
-    for name, deps in edges.items():
-        if deps is None:
-            clean[name] = []
-        elif not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
-            errors.append(f"节点 {name!r}: depends_on 必须是字符串列表")
-            clean[name] = []
-        else:
-            clean[name] = deps
-
     deps_missing = False
-    for name, deps in clean.items():
+    for name, deps in edges.items():
+        if deps is None:  # 未声明依赖
+            continue
+        if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
+            errors.append(f"节点 {name!r}: depends_on 必须是字符串列表")
+            continue
         for dep in deps:
-            if dep not in clean:
+            if dep not in edges:
                 errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
                 deps_missing = True
     if not deps_missing:
-        cycle = find_cycle(clean)
+        cycle = find_cycle(
+            {n: d for n, d in edges.items()
+             if isinstance(d, list) and all(isinstance(x, str) for x in d)}
+        )
         if cycle:
             errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
     return errors
@@ -142,4 +134,28 @@ def validate_params(params: Any, node_names: Iterable[str] = ()) -> list[str]:
         multiline = spec.get("multiline", False)
         if not isinstance(multiline, bool):
             errors.append(f"参数 {name!r}: multiline 必须是布尔值")
+    return errors
+
+
+def validate_inputs(
+    inputs: Any, params: Mapping[str, Mapping[str, Any]]
+) -> list[str]:
+    """输入校验（输入键 ⊆ 声明键 + 必填缺失/为空；params 为空 = 白名单为空）
+    """
+    errors: list[str] = []
+    invalid = sorted(set(inputs or {}) - set(params))
+    if invalid:
+        errors.append(f"未声明的参数键: {', '.join(invalid)}")
+
+    missing: list[str] = []
+    for name, spec in params.items():
+        if not isinstance(spec, dict):  # 畸形声明由 validate_params 报，这里跳过派生
+            continue
+        if not spec.get("required"):
+            continue
+        value = (inputs or {}).get(name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(name)
+    if missing:
+        errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
     return errors

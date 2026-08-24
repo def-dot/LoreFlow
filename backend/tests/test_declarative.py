@@ -10,7 +10,7 @@ from app.engine.declarative import (
     validate_nodes,
 )
 from app.engine.resolve import parse_retry
-from app.engine.validate import validate_params, validate_review
+from app.engine.validate import validate_inputs, validate_params, validate_review
 from app.registry import REGISTRY, NodeType
 
 
@@ -272,10 +272,10 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
         assert results["echo"].output == good  # 0/False 是填了的合法值
 
 
-async def test_validate_inputs_unknown_keys_gated_on_params(registered: Any) -> None:
-    """未声明键检查以「声明了 params 契约」为前提：声明 → inputs ⊆ 声明键，
-    run() 同样拦；未声明（loop body 重放 / 程序化 DAG）→ inputs 是自由
-    上下文种子，不查。"""
+async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
+    """输入键必须是声明参数的子集：声明了 params → inputs ⊆ 声明键，run()
+    同样拦；未声明 params → 白名单为空，任何输入键都算未声明（loop body
+    不受影响——loop_func 直接驱动执行器，不走 run() 的输入契约）。"""
 
     async def echo(ctx: dict[str, Any]) -> Any:
         return ctx["extra"]
@@ -288,15 +288,15 @@ async def test_validate_inputs_unknown_keys_gated_on_params(registered: Any) -> 
          "params": {"q": {"required": True}}}
     )
     inputs = {"q": "ok", "extra": 1}
-    assert declared.validate_inputs(inputs) == ["未声明的参数键: extra"]
+    assert validate_inputs(inputs, declared.params) == ["未声明的参数键: extra"]
     with pytest.raises(ValueError, match="未声明的参数键: extra"):
         await declared.run(inputs=inputs)
 
-    # 未声明 params：任意键进上下文（loop body 依赖此语义）
+    # 未声明 params：白名单为空，q/extra 都是未声明的
     free = load_dag({"nodes": {"echo": {"type": "t_echo_extra"}}})
-    assert free.validate_inputs(inputs) == []
-    results = await free.run(inputs=inputs)
-    assert results["echo"].output == 1
+    assert validate_inputs(inputs, free.params) == ["未声明的参数键: extra, q"]
+    with pytest.raises(ValueError, match="未声明的参数键"):
+        await free.run(inputs=inputs)
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
@@ -491,7 +491,7 @@ def test_validate_nodes_rejects() -> None:
 
     # type 未注册
     assert validate_nodes({"nodes": {"a": {"type": "no_such_fn"}}}) == [
-        "节点 'a': 类型函数 'no_such_fn' 未注册"
+        "节点 'a'（node）: 类型函数 'no_such_fn' 未注册"
     ]
 
     # depends_on 类型错误 / 依赖缺失 / 循环依赖（已并入 validate_nodes）
@@ -604,9 +604,8 @@ def test_param_node_clash_checked_at_engine() -> None:
     async def query(ctx: dict[str, Any]) -> str:
         return "output"
 
-    # 传合法输入隔离出冲突项（裸调会额外报必填缺失，语义见
-    # test_required_with_default_fills_when_omitted）
-    assert dag.validate({"query": "x"}) == ["输入参数键与节点名冲突: query"]
+    # validate 只查结构（不含输入），冲突项天然隔离
+    assert dag.validate() == ["输入参数键与节点名冲突: query"]
 
 
 def test_param_spec_shape_checked_at_engine() -> None:
