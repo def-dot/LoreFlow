@@ -25,10 +25,6 @@ def _resolve_type(name: str) -> NodeType:
     return node_type
 
 
-def _resolve_function(name: str) -> Callable[..., Any]:
-    """按名字解析注册表中的函数本体（条件谓词等只需要 func 时用）。"""
-    return _resolve_type(name).func
-
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
     "node": {"type", "depends_on", "retry", "timeout", "condition", "metadata"},
@@ -208,7 +204,7 @@ def load_dag(
                 name,
                 depends_on=deps,
                 prompt=spec.get("prompt"),
-                condition=_resolve_function(condition) if condition else None,
+                condition=_resolve_type(condition).func if condition else None,
                 retry=retry,
                 approver=approver,
                 review=review,
@@ -227,7 +223,7 @@ def load_dag(
             dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
-                condition=_resolve_function(spec["condition"]),
+                condition=_resolve_type(spec["condition"]).func,
                 depends_on=deps,
                 max_iterations=int(spec.get("max_iterations", 100)),
                 retry=retry,
@@ -248,7 +244,7 @@ def load_dag(
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
-                    condition=_resolve_function(condition) if condition else None,
+                    condition=_resolve_type(condition).func if condition else None,
                     metadata={
                         "type": node_type.name,
                         "label": node_type.label,
