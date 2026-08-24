@@ -5,7 +5,7 @@ from typing import Any, Literal
 import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
-from app.engine.declarative import validate_review, validate_params
+from app.engine.declarative import validate_nodes, validate_review, validate_params
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY, NodeType
 
@@ -307,6 +307,25 @@ def test_params_unknown_field_rejected() -> None:
         validate_params({"params": {"q": {"type": "string"}}})
 
 
+def test_params_node_name_clash_rejected() -> None:
+    """参数键与节点名冲突应被拒绝"""
+    config = {
+        "params": {"query": {"required": True}},
+        "nodes": {"query": {"type": "cfg_fetch"}},
+    }
+    with pytest.raises(ValueError, match="输入参数键与节点名冲突"):
+        validate_params(config, config["nodes"])
+
+
+def test_params_no_clash_accepted() -> None:
+    """参数键与节点名无冲突时通过"""
+    config = {
+        "params": {"query": {"required": True}},
+        "nodes": {"fetch": {"type": "cfg_fetch"}},
+    }
+    validate_params(config, config["nodes"])  # 应该通过
+
+
 # ---------------------------------------------------------------------------
 # review 审核视图 — human 节点声明审核者看什么
 # ---------------------------------------------------------------------------
@@ -333,6 +352,65 @@ def test_validate_review_rejects() -> None:
         validate_review({"t": {"format": "text"}})
     with pytest.raises(ValueError, match="label 必须是字符串"):
         validate_review({"t": {"label": None}})
+
+
+# ---------------------------------------------------------------------------
+# validate_nodes — 节点声明校验
+# ---------------------------------------------------------------------------
+
+
+def test_validate_nodes_accepts() -> None:
+    """validate_nodes 接受合法的节点配置"""
+    # 空 nodes
+    validate_nodes({})
+
+    # node 类型节点
+    validate_nodes({"a": {"type": "cfg_fetch"}})
+    validate_nodes({"a": {"type": "cfg_fetch", "depends_on": []}})
+
+    # human 类型节点
+    validate_nodes({"a": {"kind": "human", "prompt": "审核"}})
+    validate_nodes({"a": {"kind": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}})
+
+    # loop 类型节点
+    validate_nodes({"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "x"}})
+
+
+def test_validate_nodes_rejects() -> None:
+    """validate_nodes 拒绝非法的节点配置"""
+    # nodes 不是 dict
+    with pytest.raises(ValueError, match="必须是映射"):
+        validate_nodes(None)
+    with pytest.raises(ValueError, match="必须是映射"):
+        validate_nodes([])
+
+    # 节点定义不是 dict
+    with pytest.raises(ValueError, match="必须是映射"):
+        validate_nodes({"a": "not_dict"})
+
+    # 未知 kind
+    with pytest.raises(ValueError, match="未知类型"):
+        validate_nodes({"a": {"kind": "quantum"}})
+
+    # 不支持的字段
+    with pytest.raises(ValueError, match="不支持的字段"):
+        validate_nodes({"a": {"type": "cfg_fetch", "bogus": 1}})
+
+    # node 类型缺少 type
+    with pytest.raises(ValueError, match="需要 'type'"):
+        validate_nodes({"a": {}})
+
+    # loop 类型缺少 body
+    with pytest.raises(ValueError, match="需要非空的 'body'"):
+        validate_nodes({"a": {"kind": "loop", "condition": "x"}})
+
+    # loop 类型缺少 condition
+    with pytest.raises(ValueError, match="需要 'condition'"):
+        validate_nodes({"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}})
+
+    # human 节点 review 校验失败
+    with pytest.raises(ValueError, match="label 必须是字符串"):
+        validate_nodes({"a": {"kind": "human", "review": {"t": {"label": None}}}})
 
 
 async def test_human_review_view_payload(registered: Any) -> None:

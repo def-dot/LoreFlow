@@ -28,19 +28,22 @@ _KIND_FIELDS = {
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline"}
 
 
-def validate_params(config: dict[str, Any]) -> None:
-    """校验顶层 ``params`` 声明；只做校验，不解析/派生数据。
-
+def validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any] | None = None) -> None:
+    """校验顶层 ``params`` 声明；
     每键 spec 只接受 ``{label, description, default, required, multiline}``。
-    required 与 default 可共存：必填键的 default 只是表单建议值，不参与
-    回填（见 ``DAG.default_inputs``）。声明原样进 ``DAG.params``，必填/
-    默认值视图与前端参数行各自按需派生。
+    输入键与节点名不能相同。
     """
-    params = config.get("params")
     if params is None:
         return
     if not isinstance(params, dict):
         raise ValueError(f"params 必须是映射(dict)，实际是 {type(params).__name__}")
+
+    if nodes:
+        param_keys = set(params.keys())
+        node_names = set(nodes.keys())
+        clash = sorted(param_keys & node_names)
+        if clash:
+            raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
 
     for name, spec in params.items():
         if not isinstance(spec, dict):
@@ -60,10 +63,8 @@ def validate_params(config: dict[str, Any]) -> None:
 
 
 def validate_review(spec: dict[str, Any]) -> None:
-    """校验 human 节点的 review 视图声明，必须为富映射格式。
-
-    仅支持形式：``{key: {label: 显示文本}}``，其中 label 必须为字符串（允许空字符串）。
-    校验通过无返回，校验失败抛出 ValueError。
+    """校验 human 节点的 review 视图声明
+    形式：``{key: {label: 显示文本}}``
     """
     if not isinstance(spec, dict):
         raise ValueError(f"review 必须是映射，实际是 {type(spec).__name__}")
@@ -82,6 +83,50 @@ def validate_review(spec: dict[str, Any]) -> None:
         label = val.get("label")
         if not isinstance(label, str):
             raise ValueError(f"review 字段 {key!r}: label 必须是字符串")
+
+
+def validate_nodes(nodes: dict[str, Any]) -> None:
+    """校验顶层 nodes 声明；
+
+    每节点校验：
+    - 定义必须是 dict
+    - kind 必须是 node|human|loop
+    - 字段必须在允许列表内（_KIND_FIELDS）
+    - kind 特定必需字段：
+      * human: prompt（必需），review（可选，需符合富映射格式）
+      * loop: body（必需非空）、condition（必需）
+      * node: type（必需）
+    """
+    if not isinstance(nodes, dict):
+        raise ValueError(f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}")
+
+    for name, spec in nodes.items():
+        if not isinstance(spec, dict):
+            raise ValueError(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
+
+        kind = spec.get("kind", "node")
+        allowed = _KIND_FIELDS.get(kind)
+        if allowed is None:
+            raise ValueError(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
+
+        unknown = set(spec) - {"kind"} - allowed
+        if unknown:
+            raise ValueError(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
+
+        # kind 特定必需字段校验
+        if kind == "node":
+            if "type" not in spec:
+                raise ValueError(f"节点 {name!r}: 需要 'type'（函数键）")
+        elif kind == "human":
+            review_spec = spec.get("review")
+            if review_spec is not None:
+                validate_review(review_spec)
+        elif kind == "loop":
+            body = spec.get("body")
+            if not isinstance(body, dict) or not body:
+                raise ValueError(f"循环节点 {name!r}: 需要非空的 'body' 映射")
+            if not spec.get("condition"):
+                raise ValueError(f"循环节点 {name!r}: 需要 'condition' 函数键")
 
 
 def read_yaml(path: str | Path) -> tuple[str, Any]:
@@ -119,7 +164,9 @@ def load_dag(
     else:
         raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 
-    validate_params(config)
+    validate_params(config.get("params") or {}, config.get("nodes") or {})
+    validate_nodes(config.get("nodes") or {})
+
     # human 节点的 review 声明（载入后统一校验键的存在性）
     review_specs: dict[str, dict[str, str]] = {}
 
@@ -130,17 +177,7 @@ def load_dag(
     )
 
     for name, spec in (config.get("nodes") or {}).items():
-        if not isinstance(spec, dict):
-            raise ValueError(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
-
         kind = spec.get("kind", "node")
-        allowed = _KIND_FIELDS.get(kind)
-        if allowed is None:
-            raise ValueError(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
-        
-        unknown = set(spec) - {"kind"} - allowed
-        if unknown:
-            raise ValueError(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
 
         deps = spec.get("depends_on") or []
         retry = parse_retry(spec.get("retry"))
@@ -151,7 +188,6 @@ def load_dag(
             review_spec = spec.get("review")
             review: dict[str, str] | None = None
             if review_spec is not None:
-                validate_review(review_spec)
                 review = {key: val["label"] or key for key, val in review_spec.items()}
                 review_specs[name] = review
             cond_func = None
@@ -227,11 +263,6 @@ def load_dag(
     errors = dag.validate()
     if errors:
         raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
-
-    # 输入键与节点名共享 ctx 命名空间：声明的参数键重名会被节点输出覆盖，直接拒绝
-    clash = sorted(set(dag.params) & set(dag.node_names))
-    if clash:
-        raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
 
     # review 视图键必须在运行时可能出现的名字里（参数键或节点名）：
     # 拼写错误在载入时就拦截，而不是审核时静默显示 None
