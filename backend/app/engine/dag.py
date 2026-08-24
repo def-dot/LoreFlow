@@ -54,6 +54,45 @@ async def terminal_approver(node_name: str, payload: dict[str, Any]) -> dict[str
         print("  Please answer y or n")
 
 
+def find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
+    """DFS 环检测：``edges = {节点名: 依赖名列表}``，返回环路径或 ``None``。
+
+    DAG.validate 与 declarative 的配置层结构校验共用：依赖图中指向
+    不存在节点的边直接跳过（缺失依赖由调用方单独报错，缺失不可能成环）。
+    """
+    WHITE, GRAY, BLACK = 0, 1, 2
+    colour: dict[str, int] = {n: WHITE for n in edges}
+    path_stack: list[str] = []
+
+    def dfs(node_name: str) -> list[str] | None:
+        colour[node_name] = GRAY
+        path_stack.append(node_name)  # 入栈
+
+        for dep in edges[node_name]:
+            if dep not in colour:
+                continue
+            if colour[dep] == GRAY:
+                # 发现环：从 dep 第一次出现的位置直接切片提取完整环路径
+                cycle_start_idx = path_stack.index(dep)
+                return path_stack[cycle_start_idx:]
+
+            if colour[dep] == WHITE:
+                cycle = dfs(dep)
+                if cycle:
+                    return cycle
+
+        colour[node_name] = BLACK
+        path_stack.pop()  # 出栈（回溯）
+        return None
+
+    for name in edges:
+        if colour[name] == WHITE:
+            cycle = dfs(name)
+            if cycle:
+                return cycle
+    return None
+
+
 class DAG:
     """A Directed Acyclic Graph workflow.
 
@@ -413,36 +452,10 @@ class DAG:
         return errors
 
     def _find_cycle(self) -> list[str] | None:
-        """DFS-based cycle detection using path stack slicing."""
-        WHITE, GRAY, BLACK = 0, 1, 2
-        colour: dict[str, int] = {n: WHITE for n in self._nodes}
-        path_stack: list[str] = []
-
-        def dfs(node_name: str) -> list[str] | None:
-            colour[node_name] = GRAY
-            path_stack.append(node_name)  # 入栈
-
-            for dep in self._nodes[node_name].depends_on:
-                if colour[dep] == GRAY:
-                    # 发现环：从 dep 第一次出现的位置直接切片提取完整环路径
-                    cycle_start_idx = path_stack.index(dep)
-                    return path_stack[cycle_start_idx:]
-
-                if colour[dep] == WHITE:
-                    cycle = dfs(dep)
-                    if cycle:
-                        return cycle
-
-            colour[node_name] = BLACK
-            path_stack.pop()  # 出栈（回溯）
-            return None
-
-        for name in self._nodes:
-            if colour[name] == WHITE:
-                cycle = dfs(name)
-                if cycle:
-                    return cycle
-        return None
+        """委托共享的 :func:`find_cycle`（edges 视图来自已注册节点）。"""
+        return find_cycle(
+            {name: node.depends_on for name, node in self._nodes.items()}
+        )
 
     # ------------------------------------------------------------------
     # Topological order (informational)

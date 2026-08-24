@@ -388,9 +388,6 @@ def test_validate_review_rejects() -> None:
 
 def test_validate_nodes_accepts() -> None:
     """validate_nodes 接受合法的节点配置"""
-    # 未声明 nodes（空流水线）
-    assert validate_nodes({}) == []
-
     # node 类型节点
     assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch"}}}) == []
     assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": []}}}) == []
@@ -417,7 +414,11 @@ def test_validate_nodes_accepts_loop(registered: Any) -> None:
 
 def test_validate_nodes_rejects() -> None:
     """validate_nodes 返回非法配置的全部错误"""
-    # nodes 不是 dict（None = 未声明，合法；列表才是错误）
+    # nodes 是必填键：缺失（None）与空映射都不行
+    assert validate_nodes({}) == ["缺少 'nodes' 声明"]
+    assert validate_nodes({"nodes": {}}) == ["流水线至少需要一个节点"]
+
+    # nodes 不是 dict
     assert validate_nodes({"nodes": []}) == [
         "nodes 必须是映射(dict)，实际是 list"
     ]
@@ -483,14 +484,8 @@ def test_validate_nodes_collects_errors_across_nodes() -> None:
 
 
 def test_validate_config_accepts() -> None:
-    """validate_config 接受合法的完整配置"""
-    # 最小配置
-    assert validate_config({}) == []
-
-    # 只有 params
-    assert validate_config({"params": {"query": {"required": True}}}) == []
-
-    # 只有 nodes
+    """validate_config 接受合法的完整配置（结构检查要求至少一个节点）"""
+    # 只有 nodes（params 可选）
     assert validate_config({"nodes": {"a": {"type": "cfg_fetch"}}}) == []
 
     # 完整配置
@@ -498,6 +493,40 @@ def test_validate_config_accepts() -> None:
         "params": {"query": {"required": True}},
         "nodes": {"fetch": {"type": "cfg_fetch"}},
     }) == []
+
+
+def test_validate_config_rejects_bad_structure(registered: Any) -> None:
+    """图结构错误：空流水线 / 依赖缺失 / 循环依赖（loop body 递归同查）"""
+    # nodes 是必填键：未声明（含只声明 params）与空映射都报错
+    assert validate_config({}) == ["缺少 'nodes' 声明"]
+    assert validate_config({"params": {"q": {"required": True}}}) == [
+        "缺少 'nodes' 声明"
+    ]
+    assert validate_config({"nodes": {}}) == ["流水线至少需要一个节点"]
+
+    # 依赖缺失
+    assert validate_config(
+        {"nodes": {"a": {"type": "cfg_fetch", "depends_on": ["ghost"]}}}
+    ) == ["节点 'a' 依赖的 'ghost' 不在 DAG 中"]
+
+    # 循环依赖
+    assert validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "depends_on": ["b"]},
+        "b": {"type": "cfg_fetch", "depends_on": ["a"]},
+    }}) == ["检测到循环依赖: a → b"]
+
+    # loop body 是独立命名空间：body 内依赖缺失带循环节点名前缀
+    def keep(ctx: dict[str, Any], iteration: int) -> bool:
+        return False
+
+    registered("t_keep", keep, "condition")
+    assert validate_config({"nodes": {
+        "l": {
+            "kind": "loop",
+            "condition": "t_keep",
+            "body": {"b": {"type": "cfg_fetch", "depends_on": ["ghost"]}},
+        },
+    }}) == ["循环节点 'l': 节点 'b' 依赖的 'ghost' 不在 DAG 中"]
 
 
 def test_validate_config_rejects_param_node_clash() -> None:

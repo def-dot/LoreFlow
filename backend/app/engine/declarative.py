@@ -11,7 +11,7 @@ from typing import Any
 
 from app.registry import REGISTRY, NodeType
 
-from .dag import DAG
+from .dag import DAG, find_cycle
 from .node import ApproverFunc, Node
 from .resolve import parse_retry
 from .types import NodeEventFunc
@@ -70,10 +70,6 @@ def _validate_review(
     review_spec: dict[str, Any], available_keys: set[str]
 ) -> list[str]:
     """校验 human 节点的 review 声明并检查键引用，返回全部错误（空列表 = 合法）。
-
-    校验项：
-    - 键引用：review 键必须在 available_keys 中（参数键或节点名）
-    - 格式：{key: {label: 文本}}，label 必须为字符串
     """
     if not isinstance(review_spec, dict):
         return [f"review 必须是映射，实际是 {type(review_spec).__name__}"]
@@ -105,21 +101,11 @@ def _validate_review(
 
 def validate_nodes(config: dict[str, Any]) -> list[str]:
     """校验顶层 nodes 声明，返回全部错误（空列表 = 合法）。
-
-    每节点校验：
-    - 定义必须是 dict
-    - kind 必须是 node|human|loop
-    - 字段必须在允许列表内（_KIND_FIELDS）
-    - condition 字段（如果存在）必须在 REGISTRY 中
-    - kind 特定必需字段：
-      * human: review（可选，需符合富映射格式且键已声明）
-      * loop: body（必需非空）、condition（必需且已注册）
-      * node: type（必需且已注册）
     """
     errors: list[str] = []
     nodes = config.get("nodes")
-    if nodes is None:
-        return errors
+    if not nodes:
+        return ["流水线至少需要一个节点"]
     if not isinstance(nodes, dict):
         return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
 
@@ -141,6 +127,12 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         unknown = set(spec) - {"kind"} - allowed
         if unknown:
             errors.append(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
+
+        deps = spec.get("depends_on")
+        if deps is not None and (
+            not isinstance(deps, list) or not all(isinstance(d, str) for d in deps)
+        ):
+            errors.append(f"节点 {name!r}: depends_on 必须是字符串列表")
 
         # 校验 condition 字段（如果存在）
         condition_key = spec.get("condition")
@@ -166,6 +158,42 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 errors.append(f"循环节点 {name!r}: 需要非空的 'body' 映射")
             if not condition_key:
                 errors.append(f"循环节点 {name!r}: 需要 'condition' 函数键")
+    return errors
+
+
+def _validate_structure(config: dict[str, Any]) -> list[str]:
+    """图结构校验（依赖存在性 / 环），返回全部错误（空列表 = 合法）。
+    """
+    nodes = config.get("nodes")
+    if not isinstance(nodes, dict) or not nodes:
+        return []
+
+    errors: list[str] = []
+    edges: dict[str, list[str]] = {}
+    for name, spec in nodes.items():
+        deps = spec.get("depends_on") if isinstance(spec, dict) else None
+        if not isinstance(deps, list):
+            continue  # 类型错误已由 validate_nodes 报告
+        edges[name] = deps
+        for dep in deps:
+            if dep not in nodes:
+                errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
+
+    # 环检测只在依赖齐全时做（与 DAG.validate 同约定：缺失依赖时环结论不可信）
+    if not errors:
+        cycle = find_cycle(edges)
+        if cycle:
+            errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
+
+    # loop 的 body 是独立命名空间（body 只能依赖 body 内节点），递归同一套检查
+    for name, spec in nodes.items():
+        if isinstance(spec, dict) and spec.get("kind") == "loop":
+            body = spec.get("body")
+            if isinstance(body, dict) and body:
+                errors.extend(
+                    f"循环节点 {name!r}: {msg}"
+                    for msg in _validate_structure({"nodes": body})
+                )
     return errors
 
 
@@ -198,10 +226,11 @@ def validate_config(config: dict[str, Any]) -> list[str]:
 
     校验项：
     - params 声明（字段合法性、与节点名无冲突）
-    - nodes 声明（结构合法性、kind 特定必需字段、condition/type 注册校验）
+    - nodes 声明（必须声明且非空、字段合法性、kind 特定必需字段、注册校验）
     - review 声明格式和键引用（必须在参数键或节点名中）
+    - 图结构（依赖存在性、环；loop body 递归同查）
     """
-    return validate_params(config) + validate_nodes(config)
+    return validate_params(config) + validate_nodes(config) + _validate_structure(config)
 
 
 def load_dag(
@@ -228,7 +257,8 @@ def load_dag(
         on_event=on_event,
     )
 
-    for name, spec in (config.get("nodes") or {}).items():
+    # validate_config 已保证 nodes 必声明且非空，直接索引
+    for name, spec in config["nodes"].items():
         kind = spec.get("kind", "node")
 
         deps = spec.get("depends_on") or []
@@ -271,8 +301,6 @@ def load_dag(
             if condition:
                 cond_func = REGISTRY[condition].func
 
-            # 注册表类型键与 label 写进 metadata 供 to_mermaid 展示；YAML 的
-            # metadata 在后，同名 key（如自定义 label）可覆盖默认值
             node_type = REGISTRY[spec["type"]]
             dag.add_node(
                 Node(
@@ -290,8 +318,6 @@ def load_dag(
                 )
             )
 
-    errors = dag.validate()
-    if errors:
-        raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
-
+    # 结构检查（依赖/环/非空）已由 validate_config 前置完成；
+    # dag.run 自带 validate 兜底程序化构建的 DAG。
     return dag
