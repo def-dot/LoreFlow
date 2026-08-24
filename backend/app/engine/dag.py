@@ -142,13 +142,6 @@ class DAG:
         self, inputs: dict[str, Any] | None
     ) -> list[str]:
         """输入校验 —— :meth:`run` 与编排层 ``create_run`` 共用的单一事实源。
-
-        未声明键：声明了 params 契约才查（inputs ⊆ 声明键）。未声明 params
-        的 DAG（loop body 重放、程序化构建）inputs 即自由上下文种子，不查——
-        loop 的 body 以整个父上下文为 inputs 重跑，拦了循环就废了。
-        必填键必须显式提供有效值：缺失 / 显式 null / 空白字符串算未提供；
-        ``0``/``False``/空集合是合法值，不按 falsy 判断；声明的 default
-        只是表单建议值，不顶班。返回错误消息（空列表 = 通过）。
         """
         errors: list[str] = []
         if self.params:
