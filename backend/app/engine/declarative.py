@@ -68,14 +68,18 @@ def _validate_review(
     """校验 human 节点的 review 声明并检查键引用。
 
     校验项：
-    - 格式：{key: {label: 文本}}，label 必须为字符串
     - 键引用：review 键必须在 available_keys 中（参数键或节点名）
+    - 格式：{key: {label: 文本}}，label 必须为字符串
     """
     if not isinstance(review_spec, dict):
         raise ValueError(f"review 必须是映射，实际是 {type(review_spec).__name__}")
 
     if not review_spec:
         raise ValueError("review 声明不能为空映射")
+
+    unknown_keys = [k for k in review_spec if k not in available_keys]
+    if unknown_keys:
+        raise ValueError(f"review 引用了未声明的键 {', '.join(unknown_keys)}")
 
     for key, val in review_spec.items():
         if not isinstance(val, dict):
@@ -90,10 +94,6 @@ def _validate_review(
         label = val.get("label")
         if not isinstance(label, str):
             raise ValueError(f"review 字段 {key!r}: label 必须是字符串")
-
-    unknown_keys = [k for k in review_spec if k not in available_keys]
-    if unknown_keys:
-        raise ValueError(f"review 引用了未声明的键 {', '.join(unknown_keys)}")
 
 
 def validate_nodes(nodes: dict[str, Any]) -> None:
