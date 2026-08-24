@@ -116,11 +116,12 @@ async def create_run(
     valid_keys = set(dag.params)
     invalid_keys = set(inputs) - valid_keys
     if invalid_keys:
-        raise ValueError(f"未声明的参数键（YAML params 中未定义）: {', '.join(sorted(invalid_keys))}")
-    # 必填输入在落库前校验：缺参的 run 不该创建出来（引擎 run() 还会再兜底一次）
+        raise ValueError(f"未声明的参数键: {', '.join(sorted(invalid_keys))}")
+    
     missing = [k for k in dag.required_inputs if k not in inputs]
     if missing:
         raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")
+    
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
     record.inputs = inputs

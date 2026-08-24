@@ -178,7 +178,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                     for msg in validate_nodes({"nodes": body})
                 )
 
-    # 环检测只在依赖齐全时做（与 DAG.validate 同约定：缺失依赖时环结论不可信）
     if not deps_missing:
         cycle = find_cycle(edges)
         if cycle:
@@ -246,7 +245,6 @@ def load_dag(
         on_event=on_event,
     )
 
-    # validate_config 已保证 nodes 必声明且非空，直接索引
     for name, spec in config["nodes"].items():
         kind = spec.get("kind", "node")
 
