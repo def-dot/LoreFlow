@@ -606,7 +606,9 @@ async def test_inputs_restart_resume_replays_inputs(client: AsyncClient, monkeyp
 
 async def test_create_run_inputs_clash_node_name_400(client: AsyncClient) -> None:
     """输入键必须是 YAML params 中声明的参数，否则 400 且不产生 run 记录。"""
-    resp = await client.post("/api/v1/runs", json={"inputs": {"review": 1}})
+    resp = await client.post(
+        "/api/v1/runs", json={"config_file": "05_human_review.yaml", "inputs": {"review": 1}}
+    )
     assert resp.status_code == 400
     assert "未声明的参数键" in resp.json()["msg"]
 
@@ -681,7 +683,7 @@ async def test_dual_review_missing_required_400(client: AsyncClient) -> None:
         "/api/v1/runs", json={"config_file": "08_dual_review.yaml", "inputs": {"title": "只有标题"}}
     )
     assert resp.status_code == 400
-    assert "缺少必填输入参数: content" in resp.json()["msg"]
+    assert "必填参数缺失或为空: content" in resp.json()["msg"]
 
     resp = await client.get("/api/v1/runs")
     assert resp.json()["data"]["items"] == []
@@ -691,10 +693,63 @@ async def test_required_inputs_missing_400(client: AsyncClient) -> None:
     """02 意图路由必填参数示例：不传 prompt → 400 列出缺的键，不产生 run 记录。"""
     resp = await client.post("/api/v1/runs", json={"config_file": "02_condition_branching.yaml"})
     assert resp.status_code == 400
-    assert "缺少必填输入参数: prompt" in resp.json()["msg"]
+    assert "必填参数缺失或为空: prompt" in resp.json()["msg"]
 
     resp = await client.get("/api/v1/runs")
     assert resp.json()["data"]["items"] == []
+
+
+async def test_required_inputs_empty_rejected_400(client: AsyncClient) -> None:
+    """02 必填 prompt：null/空串/空白串都算未提供 → 400，不产生 run 记录。"""
+    for bad in ("", "   ", None):
+        resp = await client.post(
+            "/api/v1/runs",
+            json={"config_file": "02_condition_branching.yaml", "inputs": {"prompt": bad}},
+        )
+        assert resp.status_code == 400, f"{bad!r} 应被拒绝"
+        assert "必填参数缺失或为空: prompt" in resp.json()["msg"]
+
+    resp = await client.get("/api/v1/runs")
+    assert resp.json()["data"]["items"] == []
+
+
+async def test_required_with_default_must_be_explicit_at_api(client: AsyncClient, monkeypatch, tmp_path) -> None:
+    """必填+default：default 只是表单建议值不顶班——不传 → 400；
+    显式提供才创建成功；显式空串/null 同样 400。"""
+    pipe = tmp_path / "required_default.yaml"
+    pipe.write_text(
+        "name: required_default\n"
+        "params:\n"
+        "  tick:\n"
+        "    required: true\n"
+        "    default: 5\n"
+        "nodes:\n"
+        "  counter:\n"
+        "    type: demo_tick\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
+
+    resp = await client.post("/api/v1/runs", json={"config_file": "required_default.yaml"})
+    assert resp.status_code == 400  # default 不顶班
+    assert "必填参数缺失或为空: tick" in resp.json()["msg"]
+
+    for bad in ("", None):
+        resp = await client.post(
+            "/api/v1/runs", json={"config_file": "required_default.yaml", "inputs": {"tick": bad}}
+        )
+        assert resp.status_code == 400
+
+    resp = await client.post(
+        "/api/v1/runs", json={"config_file": "required_default.yaml", "inputs": {"tick": 5}}
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert data["inputs"] == {"tick": 5}  # 快照 = 可选默认 + 显式输入（必填必须显式）
+    assert data["nodes"]["counter"]["output"] == 6
 
 
 async def test_required_inputs_run_completes(client: AsyncClient) -> None:

@@ -125,8 +125,7 @@ class DAG:
 
     @property
     def default_inputs(self) -> dict[str, Any]:
-        """声明了 ``default`` 的参数 → 默认值（run 未传 inputs 时使用，
-        与 ``required`` 无关：必填键的 default 在缺显式输入时顶班）。
+        """声明了 ``default`` 的可选参数 → 默认值（run 未传 inputs 时使用）。
         """
         return {
             name: spec["default"]
@@ -138,6 +137,33 @@ class DAG:
     def required_inputs(self) -> list[str]:
         """``required: true`` 的参数键（run 前缺失即 ``ValueError``）。"""
         return [name for name, spec in self.params.items() if spec.get("required")]
+
+    def validate_inputs(
+        self, inputs: dict[str, Any] | None
+    ) -> list[str]:
+        """输入校验 —— :meth:`run` 与编排层 ``create_run`` 共用的单一事实源。
+
+        未声明键：声明了 params 契约才查（inputs ⊆ 声明键）。未声明 params
+        的 DAG（loop body 重放、程序化构建）inputs 即自由上下文种子，不查——
+        loop 的 body 以整个父上下文为 inputs 重跑，拦了循环就废了。
+        必填键必须显式提供有效值：缺失 / 显式 null / 空白字符串算未提供；
+        ``0``/``False``/空集合是合法值，不按 falsy 判断；声明的 default
+        只是表单建议值，不顶班。返回错误消息（空列表 = 通过）。
+        """
+        errors: list[str] = []
+        if self.params:
+            invalid = sorted(set(inputs or {}) - set(self.params))
+            if invalid:
+                errors.append(f"未声明的参数键: {', '.join(invalid)}")
+
+        missing: list[str] = []
+        for name in self.required_inputs:
+            value = (inputs or {}).get(name)
+            if value is None or (isinstance(value, str) and not value.strip()):
+                missing.append(name)
+        if missing:
+            errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
+        return errors
 
     # ------------------------------------------------------------------
     # Registration
@@ -508,7 +534,8 @@ class DAG:
             A dict mapping every node name to its :class:`NodeResult`.
 
         Raises:
-            ValueError: If the DAG fails validation or required inputs are missing.
+            ValueError: If the DAG fails validation or required inputs are
+                        missing/empty (see :meth:`validate_inputs`).
             DAGExecutionError: If any nodes failed.
         """
         errors = self.validate()
@@ -518,9 +545,9 @@ class DAG:
         if inputs is None:
             inputs = self.default_inputs
 
-        missing = [k for k in self.required_inputs if k not in (inputs or {})]
-        if missing:
-            raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")
+        errors = self.validate_inputs(inputs)
+        if errors:
+            raise ValueError(f"DAG {self.name!r} 校验失败:\n  " + "\n  ".join(errors))
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
         if logger.isEnabledFor(logging.DEBUG):

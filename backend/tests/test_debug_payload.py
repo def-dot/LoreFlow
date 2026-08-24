@@ -8,7 +8,8 @@ from httpx import AsyncClient
 
 async def test_print_reviewing_payload(client: AsyncClient) -> None:
     resp = await client.post(
-        "/api/v1/runs", json={"inputs": {"title": "调试标题", "content": "调试正文"}}
+        "/api/v1/runs",
+        json={"config_file": "05_human_review.yaml", "inputs": {"title": "调试标题", "content": "调试正文"}},
     )
     assert resp.status_code == 201
     run_id = resp.json()["data"]["run_id"]

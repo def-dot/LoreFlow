@@ -207,7 +207,7 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     registered("t_only", only, "function")
     dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "params": {"query": {"required": True}}})
 
-    with pytest.raises(ValueError, match="缺少必填输入参数: query"):
+    with pytest.raises(ValueError, match="必填参数缺失或为空: query"):
         await dag.run()
     assert ran["n"] == 0  # 缺参时节点零执行
 
@@ -215,9 +215,9 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     assert results["only"].output == "hello"
 
 
-async def test_required_with_default_fills_when_missing(registered: Any) -> None:
-    """必填键可同时声明 default：default 与 required 无关，
-    缺显式输入时 default 顶班，显式输入覆盖 default。"""
+async def test_required_with_default_must_be_explicit(registered: Any) -> None:
+    """必填键可同时声明 default：default 只是表单建议值，不顶班——
+    未显式提供仍报缺，显式提供才生效。"""
     ran = {"n": 0}
 
     async def only(ctx: dict[str, Any]) -> str:
@@ -230,11 +230,11 @@ async def test_required_with_default_fills_when_missing(registered: Any) -> None
          "params": {"query": {"required": True, "default": "建议值"}}}
     )
     assert dag.required_inputs == ["query"]
-    assert dag.default_inputs == {"query": "建议值"}  # default 与 required 无关
+    assert dag.default_inputs == {}  # 必填键的 default 不进回填视图
 
-    results = await dag.run()  # 未显式传入 → default 顶班
-    assert ran["n"] == 1
-    assert results["only"].output == "建议值"
+    with pytest.raises(ValueError, match="必填参数缺失或为空: query"):
+        await dag.run()  # default 不顶班
+    assert ran["n"] == 0
 
     results = await dag.run(inputs={"query": "显式值"})
     assert results["only"].output == "显式值"
@@ -244,6 +244,54 @@ def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
     errors = validate_params({"params": {"query": {"required": "yes"}}})
     assert errors == ["参数 'query': required 必须是布尔值"]
+
+
+async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
+    """必填校验不看 falsy：null/空串/空白串算未提供，0/False 是合法值。"""
+
+    async def only(ctx: dict[str, Any]) -> Any:
+        return ctx["count"]
+
+    registered("t_echo_count", only, "function")
+    dag = load_dag(
+        {"nodes": {"echo": {"type": "t_echo_count"}},
+         "params": {"count": {"required": True}}}
+    )
+
+    for bad in (None, "", "   "):
+        with pytest.raises(ValueError, match="必填参数缺失或为空: count"):
+            await dag.run(inputs={"count": bad})
+
+    for good in (0, False):
+        results = await dag.run(inputs={"count": good})
+        assert results["echo"].output == good  # 0/False 是填了的合法值
+
+
+async def test_validate_inputs_unknown_keys_gated_on_params(registered: Any) -> None:
+    """未声明键检查以「声明了 params 契约」为前提：声明 → inputs ⊆ 声明键，
+    run() 同样拦；未声明（loop body 重放 / 程序化 DAG）→ inputs 是自由
+    上下文种子，不查。"""
+
+    async def echo(ctx: dict[str, Any]) -> Any:
+        return ctx["extra"]
+
+    registered("t_echo_extra", echo, "function")
+
+    # 声明了 params 契约：extra 未声明 → validate_inputs / run() 都拦
+    declared = load_dag(
+        {"nodes": {"echo": {"type": "t_echo_extra"}},
+         "params": {"q": {"required": True}}}
+    )
+    inputs = {"q": "ok", "extra": 1}
+    assert declared.validate_inputs(inputs) == ["未声明的参数键: extra"]
+    with pytest.raises(ValueError, match="未声明的参数键: extra"):
+        await declared.run(inputs=inputs)
+
+    # 未声明 params：任意键进上下文（loop body 依赖此语义）
+    free = load_dag({"nodes": {"echo": {"type": "t_echo_extra"}}})
+    assert free.validate_inputs(inputs) == []
+    results = await free.run(inputs=inputs)
+    assert results["echo"].output == 1
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
@@ -301,7 +349,7 @@ async def test_params_rich_form_runs(registered: Any) -> None:
     assert dag.default_inputs == {"topic": "默认主题"}
     assert dag.required_inputs == ["query"]
 
-    with pytest.raises(ValueError, match="缺少必填输入参数: query"):
+    with pytest.raises(ValueError, match="必填参数缺失或为空: query"):
         await dag.run()
     # run(inputs=...) 整体替换默认值；合并语义在 orchestrator（runtime 覆盖默认）
     results = await dag.run(inputs={**dag.default_inputs, "query": "洛伦佐"})

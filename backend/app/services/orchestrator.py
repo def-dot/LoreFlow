@@ -70,9 +70,8 @@ async def run_pipeline(
 ) -> None:
     """执行一次 run：dag.run 返回 → completed；
     """
-    inputs = {**dag.default_inputs, **(record.inputs or {})}
     try:
-        await dag.run(inputs=inputs, resume=resume)
+        await dag.run(inputs=record.inputs, resume=resume)
         record.status = RunStatus.COMPLETED
     except asyncio.CancelledError:
         record.status = RunStatus.CANCELLED
@@ -95,7 +94,8 @@ async def create_run(
 ) -> int:
     """校验配置并落库一个新 run，返回 run_id。
     """
-    config_file = config_file or "05_human_review.yaml"
+    if not config_file:
+        raise ValueError("config_file 必填")
     path = settings.PIPELINES_DIR / config_file
     if not path.is_file():
         raise ValueError(f"未知的流水线配置 {config_file!r}")
@@ -113,19 +113,13 @@ async def create_run(
         on_event=make_event_sink(record),
     )
     
-    valid_keys = set(dag.params)
-    invalid_keys = set(inputs) - valid_keys
-    if invalid_keys:
-        raise ValueError(f"未声明的参数键: {', '.join(sorted(invalid_keys))}")
-    
-    missing = [k for k in dag.required_inputs if not inputs.get(k)]
-    if missing:
-        raise ValueError(f"输入参数必填: {', '.join(missing)}")
+    input_errors = dag.validate_inputs(inputs)
+    if input_errors:
+        raise ValueError("\n".join(input_errors))
     
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
-    # 生效输入快照：默认值并入后落库（用户值优先），run 记录自描述；
-    # YAML 之后改默认值不影响旧记录，与 mermaid 快照同一语义
+    
     record.inputs = {**dag.default_inputs, **inputs}
     await runs.save(record)
     asyncio.create_task(run_pipeline(record, dag))
