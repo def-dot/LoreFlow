@@ -237,7 +237,7 @@ async def test_required_with_default_still_needs_explicit_input(registered: Any)
 def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
     with pytest.raises(ValueError, match="required 必须是布尔值"):
-        validate_params({"query": {"required": "yes"}})
+        validate_params({"params": {"query": {"required": "yes"}}})
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
@@ -273,7 +273,7 @@ def test_params_rich_form() -> None:
 
 def test_params_multiline_bad_type_rejected() -> None:
     with pytest.raises(ValueError, match="multiline 必须是布尔值"):
-        validate_params({"b": {"multiline": "yes"}})
+        validate_params({"params": {"b": {"multiline": "yes"}}})
 
 
 async def test_params_rich_form_runs(registered: Any) -> None:
@@ -304,7 +304,7 @@ async def test_params_rich_form_runs(registered: Any) -> None:
 
 def test_params_unknown_field_rejected() -> None:
     with pytest.raises(ValueError, match="不支持的字段"):
-        validate_params({"q": {"type": "string"}})
+        validate_params({"params": {"q": {"type": "string"}}})
 
 
 def test_params_node_name_clash_rejected() -> None:
@@ -314,7 +314,7 @@ def test_params_node_name_clash_rejected() -> None:
         "nodes": {"query": {"type": "cfg_fetch"}},
     }
     with pytest.raises(ValueError, match="输入参数键与节点名冲突"):
-        validate_params(config, config["nodes"])
+        validate_params(config)
 
 
 def test_params_no_clash_accepted() -> None:
@@ -323,7 +323,7 @@ def test_params_no_clash_accepted() -> None:
         "params": {"query": {"required": True}},
         "nodes": {"fetch": {"type": "cfg_fetch"}},
     }
-    validate_params(config, config["nodes"])  # 应该通过
+    validate_params(config)  # 应该通过
 
 
 # ---------------------------------------------------------------------------
@@ -365,15 +365,19 @@ def test_validate_nodes_accepts() -> None:
     validate_nodes({})
 
     # node 类型节点
-    validate_nodes({"a": {"type": "cfg_fetch"}})
-    validate_nodes({"a": {"type": "cfg_fetch", "depends_on": []}})
+    validate_nodes({"nodes": {"a": {"type": "cfg_fetch"}}})
+    validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": []}}})
 
     # human 类型节点
-    validate_nodes({"a": {"kind": "human", "prompt": "审核"}})
-    validate_nodes({"a": {"kind": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}})
+    validate_nodes({"nodes": {"a": {"kind": "human", "prompt": "审核"}}})
+    # human 节点 review - 键必须在 params 或 nodes 中
+    validate_nodes({
+        "nodes": {"a": {"kind": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}},
+        "params": {"title": {}}
+    })
 
     # loop 类型节点
-    validate_nodes({"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "x"}})
+    validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "x"}}})
 
 
 def test_validate_nodes_rejects() -> None:
@@ -386,31 +390,34 @@ def test_validate_nodes_rejects() -> None:
 
     # 节点定义不是 dict
     with pytest.raises(ValueError, match="必须是映射"):
-        validate_nodes({"a": "not_dict"})
+        validate_nodes({"nodes": {"a": "not_dict"}})
 
     # 未知 kind
     with pytest.raises(ValueError, match="未知类型"):
-        validate_nodes({"a": {"kind": "quantum"}})
+        validate_nodes({"nodes": {"a": {"kind": "quantum"}}})
 
     # 不支持的字段
     with pytest.raises(ValueError, match="不支持的字段"):
-        validate_nodes({"a": {"type": "cfg_fetch", "bogus": 1}})
+        validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}})
 
     # node 类型缺少 type
     with pytest.raises(ValueError, match="需要 'type'"):
-        validate_nodes({"a": {}})
+        validate_nodes({"nodes": {"a": {}}})
 
     # loop 类型缺少 body
     with pytest.raises(ValueError, match="需要非空的 'body'"):
-        validate_nodes({"a": {"kind": "loop", "condition": "x"}})
+        validate_nodes({"nodes": {"a": {"kind": "loop", "condition": "x"}}})
 
     # loop 类型缺少 condition
     with pytest.raises(ValueError, match="需要 'condition'"):
-        validate_nodes({"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}})
+        validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}}})
 
     # human 节点 review 校验失败
     with pytest.raises(ValueError, match="label 必须是字符串"):
-        validate_nodes({"a": {"kind": "human", "review": {"t": {"label": None}}}})
+        validate_nodes({
+            "nodes": {"a": {"kind": "human", "review": {"a": {"label": None}}}},
+            "params": {"a": {}}
+        })
 
 
 # ---------------------------------------------------------------------------

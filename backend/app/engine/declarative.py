@@ -28,16 +28,18 @@ _KIND_FIELDS = {
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline"}
 
 
-def validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any] | None = None) -> None:
+def validate_params(config: dict[str, Any]) -> None:
     """校验顶层 ``params`` 声明；
     每键 spec 只接受 ``{label, description, default, required, multiline}``。
     输入键与节点名不能相同。
     """
+    params = config.get("params")
     if params is None:
         return
     if not isinstance(params, dict):
         raise ValueError(f"params 必须是映射(dict)，实际是 {type(params).__name__}")
 
+    nodes = config.get("nodes") or {}
     if nodes:
         param_keys = set(params.keys())
         node_names = set(nodes.keys())
@@ -96,7 +98,7 @@ def _validate_review(
             raise ValueError(f"review 字段 {key!r}: label 必须是字符串")
 
 
-def validate_nodes(nodes: dict[str, Any]) -> None:
+def validate_nodes(config: dict[str, Any]) -> None:
     """校验顶层 nodes 声明；
 
     每节点校验：
@@ -108,8 +110,13 @@ def validate_nodes(nodes: dict[str, Any]) -> None:
       * loop: body（必需非空）、condition（必需）
       * node: type（必需）
     """
+    nodes = config.get("nodes") or {}
     if not isinstance(nodes, dict):
         raise ValueError(f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}")
+
+    params = config.get("params")
+    # 可用键集合 = 参数键 + 节点名
+    available = set(nodes.keys()) | set(params.keys() if params else [])
 
     for name, spec in nodes.items():
         if not isinstance(spec, dict):
@@ -129,8 +136,9 @@ def validate_nodes(nodes: dict[str, Any]) -> None:
             if "type" not in spec:
                 raise ValueError(f"节点 {name!r}: 需要 'type'（函数键）")
         elif kind == "human":
-            # review 校验移到 validate_config 中，因为需要知道可用键（参数+节点名）
-            pass
+            review_spec = spec.get("review")
+            if review_spec is not None:
+                _validate_review(review_spec, available)
         elif kind == "loop":
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
@@ -168,22 +176,8 @@ def validate_config(config: dict[str, Any]) -> None:
     - nodes 声明（结构合法性、kind 特定必需字段）
     - review 声明格式和键引用（必须在参数键或节点名中）
     """
-    params = config.get("params")
-    nodes = config.get("nodes") or {}
-
-    validate_params(params, nodes)
-    validate_nodes(nodes)
-
-    # 可用键集合 = 参数键 + 节点名
-    available = set(nodes.keys()) | set(params.keys() if params else [])
-
-    # 校验 human 节点的 review 声明（格式 + 键引用）
-    for name, spec in nodes.items():
-        kind = spec.get("kind", "node")
-        if kind == "human":
-            review_spec = spec.get("review")
-            if review_spec is not None:
-                _validate_review(review_spec, available)
+    validate_params(config)
+    validate_nodes(config)
 
 
 def load_dag(
