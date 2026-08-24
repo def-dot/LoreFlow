@@ -95,7 +95,6 @@ async def create_run(
 ) -> int:
     """校验配置并落库一个新 run，返回 run_id。
     """
-    config_file = config_file or "05_human_review.yaml"
     path = settings.PIPELINES_DIR / config_file
     if not path.is_file():
         raise ValueError(f"未知的流水线配置 {config_file!r}")
