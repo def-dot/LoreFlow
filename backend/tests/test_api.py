@@ -520,6 +520,7 @@ async def test_inputs_yaml_default_kept_when_not_overridden(client: AsyncClient,
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
     assert data["nodes"]["counter"]["output"] == 2  # YAML 默认 tick=1 生效
+    assert data["inputs"] == {"tick": 1}  # 生效输入快照含 YAML 默认值，run 自描述
 
 
 async def test_inputs_survive_review_resume(client: AsyncClient, monkeypatch, tmp_path) -> None:

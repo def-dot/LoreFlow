@@ -17,8 +17,8 @@ const configFile = ref('pipeline.yaml')
 const creating = ref(false)
 
 // ---------------------------------------------------------------------------
-// 运行时输入参数：流水线声明了 params 时按声明渲染表单（label/说明/默认值/
-// 必填一目了然）；未声明或切「JSON 模式」时退回原始 JSON 文本。
+// 运行时输入参数：流水线声明了 params 时按声明渲染表单（label/说明/默认值
+// 预填/必填一目了然）；未声明或切「JSON 模式」时退回原始 JSON 文本。
 // 空 → 只用 YAML 默认 inputs；无效 JSON → 拦截提交并提示。
 // ---------------------------------------------------------------------------
 const inputsText = ref('')
@@ -59,12 +59,31 @@ const defaultInputs = computed(() =>
 const hasDefaults = computed(() => Object.keys(defaultInputs.value).length > 0)
 const defaultsJson = computed(() => JSON.stringify(defaultInputs.value, null, 2))
 
-// 切换流水线时清空参数状态（表单值 + JSON 文本）：不同流水线的参数集不同，
-// 旧值没有意义 —— 参数按钮未声明时是隐藏的，残留 JSON 会静默随新建运行提交
-watch(configFile, () => {
-  paramValues.value = {}
-  inputsText.value = ''
-})
+// 切换流水线时重置参数状态（表单值 + JSON 文本）：不同流水线的参数集不同，
+// 旧值没有意义 —— 参数按钮未声明时是隐藏的，残留 JSON 会静默随新建运行提交。
+// 监听「解析到的文件名」而非 configFile：列表异步加载使 configFile 首次命中
+// 流水线时也会触发；对象级刷新不改变文件名字符串，不会误清用户已填的表单。
+// 表单值重置为默认值预填（可改可清空）—— 所见即所传，留空只剩「无默认值
+// 且未填」一种含义；multiline 的非字符串默认值与 null 默认值不预填
+// （前者提交时不解析 JSON 会把值变字符串，后者预填文本 "null" 同样变味，
+// 留空 = 不传 = 后端按声明默认执行）。
+watch(
+  () => selectedPipeline.value?.filename ?? '',
+  () => {
+    paramValues.value = Object.fromEntries(
+      paramSpecs.value
+        .filter((s) => s.has_default && s.default != null && (typeof s.default === 'string' || !s.multiline))
+        .map((s) => [s.name, defaultToText(s.default)]),
+    )
+    inputsText.value = ''
+  },
+)
+
+// 默认值 → 预填文本：字符串原样，数字/布尔/JSON 值序列化后提交时由
+// parseFieldValue 解析回原类型（往返一致）
+function defaultToText(v: unknown): string {
+  return typeof v === 'string' ? v : (JSON.stringify(v) ?? '')
+}
 
 // 字段文本 → 提交值：空串 = 未提供；数字/布尔/JSON 字面量按 JSON 解析，其余原样字符串。
 // multiline 字段声明为文本语义，跳过 JSON 启发式（正文以 { 开头不该变成对象）
@@ -398,7 +417,7 @@ onUnmounted(() => {
               缺少必填参数: {{ missingRequiredText }}，「新建运行」将被拦截
             </div>
             <div v-else-if="submitInputs.count" class="inputs-hint">
-              已填 {{ submitInputs.count }} 个参数，随「新建运行」提交；留空字段用默认值或不传。
+              已填 {{ submitInputs.count }} 个参数（默认值已预填），随「新建运行」提交；留空字段用默认值或不传。
             </div>
             <div v-else class="inputs-hint">留空字段用 YAML 默认值或不传；未填必填项将被拦截。</div>
           </template>

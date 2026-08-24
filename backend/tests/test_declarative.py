@@ -215,8 +215,9 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     assert results["only"].output == "hello"
 
 
-async def test_required_with_default_still_needs_explicit_input(registered: Any) -> None:
-    """必填键可同时声明 default：default 只是表单建议值不回填，仍必须显式提供。"""
+async def test_required_with_default_fills_when_missing(registered: Any) -> None:
+    """必填键可同时声明 default：default 与 required 无关，
+    缺显式输入时 default 顶班，显式输入覆盖 default。"""
     ran = {"n": 0}
 
     async def only(ctx: dict[str, Any]) -> str:
@@ -229,11 +230,11 @@ async def test_required_with_default_still_needs_explicit_input(registered: Any)
          "params": {"query": {"required": True, "default": "建议值"}}}
     )
     assert dag.required_inputs == ["query"]
-    assert dag.default_inputs == {}  # 必填键的 default 不进回填视图
+    assert dag.default_inputs == {"query": "建议值"}  # default 与 required 无关
 
-    with pytest.raises(ValueError, match="缺少必填输入参数: query"):
-        await dag.run()
-    assert ran["n"] == 0  # 缺显式输入时节点零执行（default 不顶班）
+    results = await dag.run()  # 未显式传入 → default 顶班
+    assert ran["n"] == 1
+    assert results["only"].output == "建议值"
 
     results = await dag.run(inputs={"query": "显式值"})
     assert results["only"].output == "显式值"

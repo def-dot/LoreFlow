@@ -125,15 +125,13 @@ class DAG:
 
     @property
     def default_inputs(self) -> dict[str, Any]:
-        """声明了 ``default`` 的可选参数 → 默认值（run 未传 inputs 时使用）。
-
-        必填键即使声明了 default 也不回填——default 只是表单建议值，
-        「必填必须显式提供」的语义不变。
+        """声明了 ``default`` 的参数 → 默认值（run 未传 inputs 时使用，
+        与 ``required`` 无关：必填键的 default 在缺显式输入时顶班）。
         """
         return {
             name: spec["default"]
             for name, spec in self.params.items()
-            if "default" in spec and not spec.get("required")
+            if "default" in spec
         }
 
     @property

@@ -112,19 +112,21 @@ async def create_run(
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
-    # 运行时输入只能使用 YAML params 里声明的键（load_dag 已校验不与节点名冲突）
+    
     valid_keys = set(dag.params)
     invalid_keys = set(inputs) - valid_keys
     if invalid_keys:
         raise ValueError(f"未声明的参数键: {', '.join(sorted(invalid_keys))}")
     
-    missing = [k for k in dag.required_inputs if k not in inputs]
+    missing = [k for k in dag.required_inputs if not inputs.get(k)]
     if missing:
-        raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")
+        raise ValueError(f"输入参数必填: {', '.join(missing)}")
     
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
-    record.inputs = inputs
+    # 生效输入快照：默认值并入后落库（用户值优先），run 记录自描述；
+    # YAML 之后改默认值不影响旧记录，与 mermaid 快照同一语义
+    record.inputs = {**dag.default_inputs, **inputs}
     await runs.save(record)
     asyncio.create_task(run_pipeline(record, dag))
     return record.id
