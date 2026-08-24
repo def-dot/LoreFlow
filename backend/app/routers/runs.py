@@ -1,11 +1,10 @@
 """Run 相关 API — 挂载在 /api/v1 下的 /runs 路由组"""
 
-from typing import Literal
-
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.response import UnifiedResponseRoute
 from app.engine import NodeStatus
+from app.models.run import RunStatus
 from app.schemas.runs import (
     ApproveRequest,
     ApproveResponse,
@@ -35,8 +34,7 @@ async def create_run(body: RunCreateRequest | None = None) -> RunCreateResponse:
 async def list_runs(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
-    status: Literal["pending", "running", "reviewing", "completed", "failed", "cancelled"]
-    | None = Query(None, description="按 run 状态筛选"),
+    status: RunStatus | None = Query(None, description="按 run 状态筛选"),
     config_file: str | None = Query(None, max_length=200, description="按流水线文件名筛选"),
 ) -> RunListResponse:
     rows, total = await run_service.list_runs(

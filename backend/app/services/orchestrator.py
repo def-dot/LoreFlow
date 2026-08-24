@@ -33,7 +33,7 @@ from app.engine import (
 )
 from app.engine.node import ApproverFunc
 from app.engine.types import NodeEventFunc
-from app.models.run import RunRecord
+from app.models.run import RunRecord, RunStatus
 from app.services import reviews, runs
 
 logger = get_logger(__name__)
@@ -55,7 +55,7 @@ def make_approver(record: RunRecord) -> ApproverFunc:
         
         entry["status"] = NodeStatus.REVIEWING.value
         entry["payload"] = payload
-        record.status = "reviewing"
+        record.status = RunStatus.REVIEWING
         await runs.save(record)
         raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批")
 
@@ -103,18 +103,18 @@ async def run_pipeline(
     inputs = {**(dag.default_inputs or {}), **(record.inputs or {})}
     try:
         await dag.run(inputs=inputs, resume=resume)
-        record.status = "completed"
+        record.status = RunStatus.COMPLETED
     except asyncio.CancelledError:
-        record.status = "cancelled"
+        record.status = RunStatus.CANCELLED
         raise
     except SuspendExecution:
         # 挂起：节点+run 两层状态已由 approver 落库，这里不重复写
         return
     except Exception as exc:
         record.error = _failure_summary(exc)
-        record.status = "failed"
+        record.status = RunStatus.FAILED
     finally:
-        if record.status != "reviewing":  # 挂起非终态：finished_at 不写
+        if record.status != RunStatus.REVIEWING:  # 挂起非终态：finished_at 不写
             record.finished_at = datetime.now().isoformat(timespec="seconds")
         await runs.save(record)
 
@@ -136,7 +136,7 @@ async def create_run(
         config_file=path.name,
         mermaid="",
         created_at=datetime.now().isoformat(timespec="seconds"),
-        status="running",
+        status=RunStatus.RUNNING,
     )
     dag = load_dag(
         path,
@@ -166,7 +166,7 @@ async def resume_record(record: RunRecord) -> None:
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
-    record.status = "running"
+    record.status = RunStatus.RUNNING
     await runs.save(record)
     asyncio.create_task(run_pipeline(record, dag, resume=record.nodes))
 
@@ -196,7 +196,7 @@ async def resume_stuck_runs() -> None:
     try:
         rows, _ = await runs.list_runs()
         for record in rows:
-            if record.status in ("running", "reviewing"):
+            if record.status in (RunStatus.RUNNING, RunStatus.REVIEWING):
                 await resume_record(record)
     finally:
         await _release_recovery_lock(raw)

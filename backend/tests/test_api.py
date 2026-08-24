@@ -305,7 +305,7 @@ async def test_create_run_with_config_file(client: AsyncClient) -> None:
     assert data["status"] == "completed"
     assert data["config_file"] == "01_basic_chain.yaml"
     assert all(n["status"] != "reviewing" for n in data["nodes"].values())  # 无人工审核节点
-    assert data["nodes"]["report"]["status"] == "completed"
+    assert data["nodes"]["upsert"]["status"] == "completed"
 
 
 async def test_create_run_unknown_config_400(client: AsyncClient) -> None:

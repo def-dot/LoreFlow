@@ -10,7 +10,7 @@ from __future__ import annotations
 from sqlmodel import func, select
 
 from app.core import database
-from app.models.run import RunRecord
+from app.models.run import RunRecord, RunStatus
 
 
 async def save(record: RunRecord) -> None:
@@ -29,7 +29,7 @@ async def save(record: RunRecord) -> None:
 async def list_runs(
     offset: int = 0,
     limit: int | None = None,
-    status: str | None = None,
+    status: RunStatus | None = None,
     config_file: str | None = None,
 ) -> tuple[list[RunRecord], int]:
     """分页取 run（新在前），支持按状态/流水线筛选；total 为**筛选后**总数。
@@ -56,7 +56,7 @@ async def list_runs(
 
 
 # run 终态集合：与前端 TERMINAL_STATUSES 对应
-TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 
 
 async def run_counts() -> dict[str, int]:
@@ -64,7 +64,9 @@ async def run_counts() -> dict[str, int]:
     active（含 reviewing 等非终态）驱动导航“电流”等页面状态。"""
     async with database.AsyncSessionLocal() as session:
         running = (
-            await session.exec(select(func.count(RunRecord.id)).where(RunRecord.status == "running"))
+            await session.exec(
+                select(func.count(RunRecord.id)).where(RunRecord.status == RunStatus.RUNNING)
+            )
         ).one()
         active = (
             await session.exec(

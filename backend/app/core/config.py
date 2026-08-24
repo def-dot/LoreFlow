@@ -10,14 +10,16 @@ class Settings(BaseSettings):
     APP_NAME: str = "LoreFlow"
     APP_ENV: str = "dev"  # dev | staging | prod
     LOG_LEVEL: str = "INFO"
-    WORKERS: int = 1  # 多 worker 各自 lifespan 会重复恢复未完成的 run，保持 1
 
-    # Pipelines — 声明式编排定义目录与缺省文件（app/pipelines）
     PIPELINES_DIR: Path = Path(__file__).resolve().parent.parent / "pipelines"
 
-    # Node plugins — 自定义插件目录：启动时加载，之后后台轮询自动重扫（@node 导入即注册）
+    # Node plugins — 自定义插件目录
     PLUGINS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "custom_plugins"
-    PLUGINS_POLL_SECONDS: int = 3  # 插件目录变更检测间隔
+    PLUGINS_POLL_SECONDS: int = 3
+
+    OLLAMA_BASE_URL: str = "http://192.168.2.228:11434"
+    OLLAMA_MODEL: str = "qwen2.5:latest"
+    OLLAMA_TIMEOUT_SECONDS: float = 120.0
 
     # Database
     POSTGRES_SERVER: str = "localhost"

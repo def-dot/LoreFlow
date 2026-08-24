@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 
+from app.models.run import RunStatus
+
 
 class RunListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -12,7 +14,7 @@ class RunListItem(BaseModel):
     name: str
     created_at: str | None = None
     finished_at: str | None = None
-    status: str
+    status: RunStatus
     error: str | None = None
     config_file: str = ""  # 流水线文件名：列表筛选/展示用
 

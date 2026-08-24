@@ -18,8 +18,6 @@ class NodeStatus(Enum):
     RETRYING = "retrying"
     COMPLETED = "completed"
     FAILED = "failed"
-    # 失败的爆炸半径：节点想跑但被上游失败阻断，未执行。对下游的行为等同
-    # FAILED（阻断并传递）；SKIPPED 则是正常分支结果，下游照常执行。
     UPSTREAM_FAILED = "upstream_failed"
     SKIPPED = "skipped"
     CANCELLED = "cancelled"

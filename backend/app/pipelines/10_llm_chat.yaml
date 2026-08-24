@@ -1,0 +1,20 @@
+# LLM 对话示例 — 运行时输入提示词，调用本地 Ollama 模型生成回答。
+#
+# 前置：
+#     ollama serve              # 启动本地服务（默认 11434 端口）
+#     ollama pull qwen3:4b      # 拉取缺省模型（或在 .env 改 OLLAMA_MODEL）
+# 配置经 .env 覆盖：OLLAMA_BASE_URL / OLLAMA_MODEL / OLLAMA_TIMEOUT_SECONDS
+name: LLM 对话
+description: 实际示例：用户输入提示词，本地 Ollama 模型生成回答。
+
+params:
+  prompt:
+    required: true
+    multiline: true
+    label: 提示词
+    description: 发给 LLM 的内容，创建运行时必须提供
+
+nodes:
+  chat:
+    type: llm_chat
+    timeout: 300          # 本地模型冷启动（首次加载进内存）可能较慢
