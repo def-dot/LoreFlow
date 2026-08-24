@@ -116,10 +116,13 @@ class DAGExecutor:
         # ----- surface failures as DAGExecutionError -----
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
-            raise DAGExecutionError(
-                f"DAG 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}",
-                results,
-            )
+            # 构建详细失败消息：节点名 + 异常类型 + 消息
+            fail_lines = [f"DAG 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}"]
+            for name in failed:
+                result = results[name]
+                if result.error is not None:
+                    fail_lines.append(f"  {name}: {type(result.error).__name__}: {result.error}")
+            raise DAGExecutionError("\n".join(fail_lines), results)
 
         return results
 
