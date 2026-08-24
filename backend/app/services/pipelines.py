@@ -50,7 +50,7 @@ def list_pipelines() -> list[dict[str, Any]]:
         try:
             _, config = read_yaml(path)
             # 与 load_dag 同源校验（坏声明跳过并告警）
-            validate_params(config)
+            validate_params(config.get("params"), config.get("nodes"))
         except ValueError as exc:
             logger.warning("Skip demo pipeline %s: %s", path.name, exc)
             continue

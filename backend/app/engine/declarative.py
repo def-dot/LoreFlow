@@ -28,7 +28,7 @@ _KIND_FIELDS = {
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline"}
 
 
-def validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any] | None = None) -> None:
+def _validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any] | None = None) -> None:
     """校验顶层 ``params`` 声明；
     每键 spec 只接受 ``{label, description, default, required, multiline}``。
     输入键与节点名不能相同。
@@ -62,7 +62,7 @@ def validate_params(params: dict[str, Any] | None = None, nodes: dict[str, Any] 
             raise ValueError(f"参数 {name!r}: multiline 必须是布尔值")
 
 
-def validate_review(spec: dict[str, Any]) -> None:
+def _validate_review(spec: dict[str, Any]) -> None:
     """校验 human 节点的 review 视图声明
     形式：``{key: {label: 显示文本}}``
     """
@@ -85,7 +85,7 @@ def validate_review(spec: dict[str, Any]) -> None:
             raise ValueError(f"review 字段 {key!r}: label 必须是字符串")
 
 
-def validate_nodes(nodes: dict[str, Any]) -> None:
+def _validate_nodes(nodes: dict[str, Any]) -> None:
     """校验顶层 nodes 声明；
 
     每节点校验：
@@ -120,7 +120,7 @@ def validate_nodes(nodes: dict[str, Any]) -> None:
         elif kind == "human":
             review_spec = spec.get("review")
             if review_spec is not None:
-                validate_review(review_spec)
+                _validate_review(review_spec)
         elif kind == "loop":
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
@@ -150,6 +150,20 @@ def read_yaml(path: str | Path) -> tuple[str, Any]:
     return raw, config
 
 
+def validate_config(config: dict[str, Any]) -> None:
+    """校验完整的 DAG 配置；只做校验，不解析/构建。
+
+    校验项：
+    - params 声明（字段合法性、与节点名无冲突）
+    - nodes 声明（结构合法性、kind 特定必需字段）
+    """
+    params = config.get("params")
+    nodes = config.get("nodes") or {}
+
+    _validate_params(params, nodes)
+    _validate_nodes(nodes)
+
+
 def load_dag(
     source: str | Path | dict[str, Any],
     approver: ApproverFunc | None = None,
@@ -164,8 +178,7 @@ def load_dag(
     else:
         raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 
-    validate_params(config.get("params") or {}, config.get("nodes") or {})
-    validate_nodes(config.get("nodes") or {})
+    validate_config(config)
 
     # human 节点的 review 声明（载入后统一校验键的存在性）
     review_specs: dict[str, dict[str, str]] = {}

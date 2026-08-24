@@ -5,7 +5,7 @@ from typing import Any, Literal
 import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
-from app.engine.declarative import validate_nodes, validate_review, validate_params
+from app.engine.declarative import validate_config, validate_nodes, validate_review, validate_params
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY, NodeType
 
@@ -237,7 +237,7 @@ async def test_required_with_default_still_needs_explicit_input(registered: Any)
 def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
     with pytest.raises(ValueError, match="required 必须是布尔值"):
-        validate_params({"params": {"query": {"required": "yes"}}})
+        validate_params({"query": {"required": "yes"}})
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
@@ -273,7 +273,7 @@ def test_params_rich_form() -> None:
 
 def test_params_multiline_bad_type_rejected() -> None:
     with pytest.raises(ValueError, match="multiline 必须是布尔值"):
-        validate_params({"params": {"b": {"multiline": "yes"}}})
+        validate_params({"b": {"multiline": "yes"}})
 
 
 async def test_params_rich_form_runs(registered: Any) -> None:
@@ -304,7 +304,7 @@ async def test_params_rich_form_runs(registered: Any) -> None:
 
 def test_params_unknown_field_rejected() -> None:
     with pytest.raises(ValueError, match="不支持的字段"):
-        validate_params({"params": {"q": {"type": "string"}}})
+        validate_params({"q": {"type": "string"}})
 
 
 def test_params_node_name_clash_rejected() -> None:
@@ -411,6 +411,54 @@ def test_validate_nodes_rejects() -> None:
     # human 节点 review 校验失败
     with pytest.raises(ValueError, match="label 必须是字符串"):
         validate_nodes({"a": {"kind": "human", "review": {"t": {"label": None}}}})
+
+
+# ---------------------------------------------------------------------------
+# validate_config — 完整配置校验
+# ---------------------------------------------------------------------------
+
+
+def test_validate_config_accepts() -> None:
+    """validate_config 接受合法的完整配置"""
+    # 最小配置
+    validate_config({})
+
+    # 只有 params
+    validate_config({"params": {"query": {"required": True}}})
+
+    # 只有 nodes
+    validate_config({"nodes": {"a": {"type": "cfg_fetch"}}})
+
+    # 完整配置
+    validate_config({
+        "params": {"query": {"required": True}},
+        "nodes": {"fetch": {"type": "cfg_fetch"}},
+    })
+
+
+def test_validate_config_rejects_param_node_clash() -> None:
+    """validate_config 拒绝参数键与节点名冲突"""
+    config = {
+        "params": {"query": {"required": True}},
+        "nodes": {"query": {"type": "cfg_fetch"}},
+    }
+    with pytest.raises(ValueError, match="输入参数键与节点名冲突"):
+        validate_config(config)
+
+
+def test_validate_config_catches_all_errors() -> None:
+    """validate_config 捕获各种配置错误"""
+    # params 错误
+    with pytest.raises(ValueError, match="不支持的字段"):
+        validate_config({"params": {"q": {"type": "string"}}})
+
+    # nodes 错误
+    with pytest.raises(ValueError, match="未知类型"):
+        validate_config({"nodes": {"a": {"kind": "quantum"}}})
+
+    # node 缺少 type
+    with pytest.raises(ValueError, match="需要 'type'"):
+        validate_config({"nodes": {"a": {}}})
 
 
 async def test_human_review_view_payload(registered: Any) -> None:
