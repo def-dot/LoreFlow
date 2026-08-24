@@ -1,13 +1,5 @@
-# LLM 对话示例 — 运行时输入提示词，调用 Ollama 模型生成回答。
-#
-# 提示词里含 http(s) 链接时，先抓取网页正文，再连同正文一起发给 LLM。
-#
-# 前置：
-#     ollama serve              # 启动服务（默认 11434 端口）
-#     ollama pull qwen2.5:latest  # 拉取缺省模型（或在 .env 改 OLLAMA_MODEL）
-# 配置经 .env 覆盖：OLLAMA_BASE_URL / OLLAMA_MODEL / OLLAMA_TIMEOUT_SECONDS
-name: LLM 对话
-description: 实际示例：用户输入提示词；其中包含的链接会先抓取网页正文，再一起交给 Ollama 生成回答。
+name: LLM 对话 - 支持链接
+description: 用户输入提示词；如果包含链接会先抓取网页正文，再一起交给 Ollama 生成回答。
 
 params:
   prompt:
@@ -18,9 +10,9 @@ params:
 
 nodes:
   pages:
-    type: web_fetch         # 从提示词提取链接并抓正文；无链接输出空列表
+    type: web_fetch
 
   chat:
     type: llm_chat
-    depends_on: [pages]     # 网页正文作为参考上下文一起发给 LLM
+    depends_on: [pages]
     timeout: 300

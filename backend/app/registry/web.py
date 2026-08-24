@@ -41,10 +41,10 @@ def _html_to_text(html: str) -> str:
     return " ".join(text.split())
 
 
-async def _fetch_page(client: httpx.AsyncClient, url: str) -> dict[str, str]:
+async def _fetch_page(url: str) -> dict[str, str]:
     """抓单页 → ``{url, text}``；失败/非文本以中文注记占位，不抛出。"""
     try:
-        resp = await client.get(url)
+        resp = await http_client().get(url)
         resp.raise_for_status()
 
         ctype = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
@@ -60,7 +60,7 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> dict[str, str]:
 
 @node(
     label="抓取链接正文",
-    description="从 ctx['prompt'] 提取 http(s) 链接并发抓取网页正文，输出 [{url, text}]；无链接输出空列表",
+    description="从 ctx['prompt'] 提取 http(s) 链接并发抓取网页正文",
 )
 async def web_fetch(ctx: dict[str, Any]) -> list[dict[str, str]]:
     prompt = ctx.get("prompt")
@@ -78,5 +78,4 @@ async def web_fetch(ctx: dict[str, Any]) -> list[dict[str, str]]:
     if not urls:
         return []
 
-    async with http_client() as client:
-        return list(await asyncio.gather(*(_fetch_page(client, u) for u in urls)))
+    return list(await asyncio.gather(*(_fetch_page(u) for u in urls)))

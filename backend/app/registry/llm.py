@@ -20,12 +20,11 @@ from app.utils.http import http_client
 async def _ollama_chat(model: str, messages: list[dict[str, str]]) -> str:
     """POST /api/chat（非流式）→ 助手回复文本。"""
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
-    async with http_client() as client:
-        resp = await client.post(
-            url, json={"model": model, "messages": messages, "stream": False}
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    resp = await http_client().post(
+        url, json={"model": model, "messages": messages, "stream": False}
+    )
+    resp.raise_for_status()
+    data = resp.json()
         
     content = data["message"]["content"]
     return str(content)
@@ -34,8 +33,7 @@ async def _ollama_chat(model: str, messages: list[dict[str, str]]) -> str:
 @node(
     label="LLM 对话",
     description=(
-        "读取 ctx['prompt'] 调用本地 Ollama 生成回答；可选 ctx['system'] 系统提示、"
-        "ctx['model'] 覆盖模型、ctx['pages']（web_fetch 输出）把链接正文作为参考"
+        "读取 ctx['prompt'] 调用本地 Ollama 生成回答"
     ),
 )
 async def llm_chat(ctx: dict[str, Any]) -> str:
