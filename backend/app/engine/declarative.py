@@ -17,14 +17,6 @@ from .resolve import parse_retry
 from .types import NodeEventFunc
 
 
-def _resolve_type(name: str) -> NodeType:
-    """按名字查全局注册表；未注册时抛中文 ValueError（异常处理器映射为 400）。"""
-    node_type = REGISTRY.get(name)
-    if node_type is None:
-        raise ValueError(f"节点 {name!r} 未注册")
-    return node_type
-
-
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
     "node": {"type", "depends_on", "retry", "timeout", "condition", "metadata"},
@@ -40,33 +32,17 @@ def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str
     """归一化输入参数声明 → ``(参数行, default_inputs, required_inputs)``。
 
     两种声明形式产出统一的参数行 ``{name, label, description, default,
-    has_default, required}``（供 API/前端表单渲染）：
+    has_default, required}``（供 API/前端表单渲染）。
 
-    - 富形式：顶层 ``params``，每键 spec ``{label, description, default,
-      required}``，引擎用的默认值/必填键由 spec 派生
-    - 简式：``inputs``（默认值映射）+ ``required_inputs``（裸键列表），
-      行内 label 退化为键名、无说明
-
-    两种形式互斥（同键两处声明必然二义）。
+    顶层 ``params``：每键 spec ``{label, description, default, required, multiline}``，
+    引擎用的默认值/必填键由 spec 派生。
     """
     params = config.get("params")
-    if params is not None and ("inputs" in config or "required_inputs" in config):
-        raise ValueError("params 不能与 inputs/required_inputs 混用，统一用 params 声明")
-
+    if params is not None and not isinstance(params, dict):
+        raise ValueError(f"params 必须是映射(dict)，实际是 {type(params).__name__}")
     if params is None:
-        required = config.get("required_inputs") or []
-        if not isinstance(required, list) or not all(isinstance(k, str) and k for k in required):
-            raise ValueError(f"required_inputs 必须是非空字符串列表，实际是 {required!r}")
-        defaults = config.get("inputs") or {}
-        overlapped = sorted(set(required) & set(defaults))
-        if overlapped:
-            raise ValueError(f"required_inputs 与 inputs 默认值重叠（必填键不应有默认值）: {', '.join(overlapped)}")
-        rows = [{"name": k, "label": k, "description": None, "default": None, "has_default": False, "required": True, "multiline": False} for k in required]
-        rows += [{"name": k, "label": k, "description": None, "default": v, "has_default": True, "required": False, "multiline": False} for k, v in defaults.items()]
-        return rows, defaults, list(required)
+        return [], {}, []
 
-    if not isinstance(params, dict) or not params:
-        raise ValueError(f"params 必须是非空映射(dict)，实际是 {params!r}")
     rows: list[dict[str, Any]] = []
     defaults: dict[str, Any] = {}
     required: list[str] = []
@@ -79,7 +55,10 @@ def parse_params(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str
         for text_field in ("label", "description"):
             if spec.get(text_field) is not None and not isinstance(spec[text_field], str):
                 raise ValueError(f"参数 {name!r}: {text_field} 必须是字符串")
-        is_required = bool(spec.get("required"))
+        required_value = spec.get("required")
+        if required_value is not None and not isinstance(required_value, bool):
+            raise ValueError(f"参数 {name!r}: required 必须是布尔值")
+        is_required = bool(required_value)
         has_default = "default" in spec
         if is_required and has_default:
             raise ValueError(f"参数 {name!r}: 必填参数不应有默认值")
@@ -200,11 +179,17 @@ def load_dag(
             review = parse_review(spec.get("review"))
             if review is not None:
                 review_specs[name] = review
+            cond_func = None
+            if condition:
+                cond_type = REGISTRY.get(condition)
+                if cond_type is None:
+                    raise ValueError(f"条件谓词 {condition!r} 未注册")
+                cond_func = cond_type.func
             dag.human_node(
                 name,
                 depends_on=deps,
                 prompt=spec.get("prompt"),
-                condition=_resolve_type(condition).func if condition else None,
+                condition=cond_func,
                 retry=retry,
                 approver=approver,
                 review=review,
@@ -220,10 +205,13 @@ def load_dag(
 
             # Body nodes go through the same parsing path as top-level nodes.
             body_dag = load_dag({"nodes": body}, approver=approver)
+            cond_type = REGISTRY.get(spec["condition"])
+            if cond_type is None:
+                raise ValueError(f"条件谓词 {spec['condition']!r} 未注册")
             dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
-                condition=_resolve_type(spec["condition"]).func,
+                condition=cond_type.func,
                 depends_on=deps,
                 max_iterations=int(spec.get("max_iterations", 100)),
                 retry=retry,
@@ -234,9 +222,17 @@ def load_dag(
             if "type" not in spec:
                 raise ValueError(f"节点 {name!r} 需要 'type'（函数键）")
             condition = spec.get("condition")
-            node_type = _resolve_type(spec["type"])
             # 注册表类型键与 label 写进 metadata 供 to_mermaid 展示；YAML 的
             # metadata 在后，同名 key（如自定义 label）可覆盖默认值
+            node_type = REGISTRY.get(spec["type"])
+            if node_type is None:
+                raise ValueError(f"节点 {spec['type']!r} 未注册")
+            cond_func = None
+            if condition:
+                cond_type = REGISTRY.get(condition)
+                if cond_type is None:
+                    raise ValueError(f"条件谓词 {condition!r} 未注册")
+                cond_func = cond_type.func
             dag.add_node(
                 Node(
                     name=name,
@@ -244,7 +240,7 @@ def load_dag(
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
-                    condition=_resolve_type(condition).func if condition else None,
+                    condition=cond_func,
                     metadata={
                         "type": node_type.name,
                         "label": node_type.label,

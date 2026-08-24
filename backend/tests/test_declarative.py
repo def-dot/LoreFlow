@@ -192,7 +192,7 @@ def test_load_dag_bad_file(tmp_path) -> None:
 
 
 async def test_required_inputs_enforced_at_run(registered: Any) -> None:
-    """required_inputs 声明的键在 run() 前校验：缺参 ValueError，不跑任何节点。"""
+    """params 声明的必填键在 run() 前校验：缺参 ValueError，不跑任何节点。"""
     ran = {"n": 0}
 
     async def only(ctx: dict[str, Any]) -> str:
@@ -200,7 +200,7 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
         return ctx["query"]
 
     registered("t_only", only, "function")
-    dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "required_inputs": ["query"]})
+    dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "params": {"query": {"required": True}}})
 
     with pytest.raises(ValueError, match="缺少必填输入参数: query"):
         await dag.run()
@@ -212,28 +212,23 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
 
 def test_required_inputs_overlap_defaults_rejected() -> None:
     """必填键同时声明默认值 → 配置错误（必填就不该有默认）。"""
-    with pytest.raises(ValueError, match="重叠"):
-        load_dag(
-            {
-                "nodes": {"only": {"type": "cfg_fetch"}},
-                "required_inputs": ["query"],
-                "inputs": {"query": "有默认值"},
-            }
-        )
+    with pytest.raises(ValueError, match="必填参数不应有默认值"):
+        parse_params({"params": {"query": {"required": True, "default": "有默认值"}}})
 
 
 def test_required_inputs_bad_type_rejected() -> None:
-    with pytest.raises(ValueError, match="非空字符串列表"):
-        load_dag({"nodes": {"only": {"type": "cfg_fetch"}}, "required_inputs": "query"})
+    """required 布尔值 → 类型校验。"""
+    with pytest.raises(ValueError, match="required 必须是布尔值"):
+        parse_params({"params": {"query": {"required": "yes"}}})
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
-    """默认/必填输入键与节点名冲突 → load_dag 拒绝（ctx 命名空间共享）。"""
-    with pytest.raises(ValueError, match="冲突"):
+    """参数键与节点名冲突 → load_dag 拒绝（ctx 命名空间共享）。"""
+    with pytest.raises(ValueError, match="参数键与节点名冲突"):
         load_dag(
             {
                 "nodes": {"only": {"type": "cfg_fetch"}},
-                "inputs": {"only": 1},
+                "params": {"only": {"required": True}},
             }
         )
 
@@ -270,18 +265,6 @@ def test_params_multiline_bad_type_rejected() -> None:
         parse_params({"params": {"b": {"multiline": "yes"}}})
 
 
-def test_parse_params_legacy_form_rows() -> None:
-    """inputs/required_inputs 简式 → 同样产出参数行（label=键名、无说明）。"""
-    rows, defaults, required = parse_params(
-        {"required_inputs": ["query"], "inputs": {"topic": "默认主题"}}
-    )
-    assert rows == [
-        {"name": "query", "label": "query", "description": None, "default": None, "has_default": False, "required": True, "multiline": False},
-        {"name": "topic", "label": "topic", "description": None, "default": "默认主题", "has_default": True, "required": False, "multiline": False},
-    ]
-    assert defaults == {"topic": "默认主题"} and required == ["query"]
-
-
 async def test_params_rich_form_runs(registered: Any) -> None:
     """params 声明的必填/默认与简式语义一致：run 前校验、默认值进 ctx。"""
 
@@ -316,12 +299,6 @@ def test_params_required_with_default_rejected() -> None:
 def test_params_unknown_field_rejected() -> None:
     with pytest.raises(ValueError, match="不支持的字段"):
         parse_params({"params": {"q": {"type": "string"}}})
-
-
-def test_params_mixed_with_legacy_rejected() -> None:
-    """params 与 inputs/required_inputs 混用 → 二义，拒绝。"""
-    with pytest.raises(ValueError, match="不能与 inputs/required_inputs 混用"):
-        parse_params({"params": {"q": {"required": True}}, "inputs": {"topic": "t"}})
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +372,7 @@ def test_review_unknown_key_rejected() -> None:
     with pytest.raises(ValueError, match="review 引用了未声明的键 ttile"):
         load_dag(
             {
+                "params": {},
                 "nodes": {
                     "work": {"type": "cfg_fetch"},
                     "gate": {"kind": "human", "depends_on": ["work"], "review": ["ttile"]},

@@ -499,8 +499,9 @@ async def test_inputs_yaml_default_kept_when_not_overridden(client: AsyncClient,
     pipe = tmp_path / "inputs_demo.yaml"
     pipe.write_text(
         "name: inputs_demo\n"
-        "inputs:\n"
-        "  tick: 1\n"
+        "params:\n"
+        "  tick:\n"
+        "    default: 1\n"
         "nodes:\n"
         "  counter:\n"
         "    type: demo_tick\n",
@@ -526,6 +527,9 @@ async def test_inputs_survive_review_resume(client: AsyncClient, monkeypatch, tm
     pipe = tmp_path / "inputs_review.yaml"
     pipe.write_text(
         "name: inputs_review\n"
+        "params:\n"
+        "  tick:\n"
+        "    label: 计数\n"
         "nodes:\n"
         "  review:\n"
         "    kind: human\n"
@@ -561,6 +565,9 @@ async def test_inputs_restart_resume_replays_inputs(client: AsyncClient, monkeyp
     pipe = tmp_path / "inputs_review.yaml"
     pipe.write_text(
         "name: inputs_review\n"
+        "params:\n"
+        "  tick:\n"
+        "    label: 计数\n"
         "nodes:\n"
         "  review:\n"
         "    kind: human\n"
@@ -596,10 +603,10 @@ async def test_inputs_restart_resume_replays_inputs(client: AsyncClient, monkeyp
 
 
 async def test_create_run_inputs_clash_node_name_400(client: AsyncClient) -> None:
-    """输入键与节点名冲突（共享 ctx 命名空间会被节点输出覆盖）→ 400 且不产生 run 记录。"""
+    """输入键必须是 YAML params 中声明的参数，否则 400 且不产生 run 记录。"""
     resp = await client.post("/api/v1/runs", json={"inputs": {"review": 1}})
     assert resp.status_code == 400
-    assert "冲突" in resp.json()["msg"]
+    assert "未声明的参数键" in resp.json()["msg"]
 
     resp = await client.get("/api/v1/runs")
     assert resp.json()["data"]["items"] == []

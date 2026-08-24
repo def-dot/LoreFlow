@@ -95,6 +95,7 @@ async def create_run(
 ) -> int:
     """校验配置并落库一个新 run，返回 run_id。
     """
+    config_file = config_file or "05_human_review.yaml"
     path = settings.PIPELINES_DIR / config_file
     if not path.is_file():
         raise ValueError(f"未知的流水线配置 {config_file!r}")
@@ -111,10 +112,11 @@ async def create_run(
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
-    # 输入键与节点名共享同一个 ctx 命名空间，重名会被节点输出覆盖 —— 直接拒绝
-    clash = sorted(set(inputs) & set(dag.nodes))
-    if clash:
-        raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
+    # 运行时输入只能使用 YAML params 里声明的键（params 在 load_dag 已校验不与节点名冲突）
+    valid_keys = set(dag.required_inputs) | set(dag.default_inputs.keys())
+    invalid_keys = set(inputs) - valid_keys
+    if invalid_keys:
+        raise ValueError(f"未声明的参数键（YAML params 中未定义）: {', '.join(sorted(invalid_keys))}")
     # 必填输入在落库前校验：缺参的 run 不该创建出来（引擎 run() 还会再兜底一次）
     missing = [k for k in dag.required_inputs if k not in inputs]
     if missing:

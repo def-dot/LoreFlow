@@ -68,8 +68,7 @@ class RunDetail(RunListItem):
 
 class RunCreateRequest(BaseModel):
     """POST /runs 请求体：可选 config_file（缺省用人工审核演示流水线）与
-    inputs（运行时输入，进入共享上下文；与 YAML 顶层 inputs 合并，同名键
-    运行时优先；键不能与节点名冲突）。"""
+    inputs（运行时输入，必须与 YAML params 声明的键一致；多传或错传会被拒绝）。"""
 
     config_file: str | None = None
     inputs: dict[str, Any] | None = None
