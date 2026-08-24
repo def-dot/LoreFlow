@@ -17,9 +17,10 @@ function defaultPreview(value: unknown): string {
   return text.length > 40 ? `${text.slice(0, 40)}…` : text
 }
 // 审核视图文本：label(key)；未声明时节点行 review=null 不渲染
-function reviewView(review: Record<string, string>): string {
+// review 是 YAML 声明原文 {key: {label}}，此处取 label 展示
+function reviewView(review: Record<string, { label: string }>): string {
   return Object.entries(review)
-    .map(([key, label]) => (label === key ? key : `${label}(${key})`))
+    .map(([key, { label }]) => (label === key || label === '' ? key : `${label}(${key})`))
     .join('、')
 }
 </script>

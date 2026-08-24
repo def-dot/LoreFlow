@@ -5,7 +5,12 @@ from typing import Any, Literal
 import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
-from app.engine.declarative import validate_config, validate_nodes, validate_review, validate_params
+from app.engine.declarative import (
+    _validate_review,
+    validate_config,
+    validate_nodes,
+    validate_params,
+)
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY, NodeType
 
@@ -141,7 +146,7 @@ def test_validation_errors() -> None:
         load_dag({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}})
     with pytest.raises(ValueError, match="需要 'type'"):
         load_dag({"nodes": {"a": {}}})
-    with pytest.raises(ValueError, match="节点 'no_such_fn' 未注册"):
+    with pytest.raises(ValueError, match="类型函数 'no_such_fn' 未注册"):
         load_dag({"nodes": {"a": {"type": "no_such_fn"}}})
     with pytest.raises(ValueError, match="不在 DAG 中"):
         load_dag({"nodes": {"a": {"type": "cfg_fetch", "depends_on": ["ghost"]}}})
@@ -236,8 +241,8 @@ async def test_required_with_default_still_needs_explicit_input(registered: Any)
 
 def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
-    with pytest.raises(ValueError, match="required 必须是布尔值"):
-        validate_params({"params": {"query": {"required": "yes"}}})
+    errors = validate_params({"params": {"query": {"required": "yes"}}})
+    assert errors == ["参数 'query': required 必须是布尔值"]
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
@@ -272,8 +277,8 @@ def test_params_rich_form() -> None:
 
 
 def test_params_multiline_bad_type_rejected() -> None:
-    with pytest.raises(ValueError, match="multiline 必须是布尔值"):
-        validate_params({"params": {"b": {"multiline": "yes"}}})
+    errors = validate_params({"params": {"b": {"multiline": "yes"}}})
+    assert errors == ["参数 'b': multiline 必须是布尔值"]
 
 
 async def test_params_rich_form_runs(registered: Any) -> None:
@@ -303,8 +308,23 @@ async def test_params_rich_form_runs(registered: Any) -> None:
 
 
 def test_params_unknown_field_rejected() -> None:
-    with pytest.raises(ValueError, match="不支持的字段"):
-        validate_params({"params": {"q": {"type": "string"}}})
+    errors = validate_params({"params": {"q": {"type": "string"}}})
+    assert errors == ["参数 'q': 不支持的字段 ['type']"]
+
+
+def test_params_collects_all_errors() -> None:
+    """多个参数错误一次性全部返回，而非遇错即抛。"""
+    errors = validate_params({
+        "params": {
+            "q": {"bogus": 1},
+            "r": {"required": "yes"},
+            "s": "not-a-mapping",
+        }
+    })
+    assert len(errors) == 3
+    assert any("不支持的字段" in e for e in errors)
+    assert any("required 必须是布尔值" in e for e in errors)
+    assert any("定义必须是映射" in e for e in errors)
 
 
 def test_params_node_name_clash_rejected() -> None:
@@ -313,8 +333,7 @@ def test_params_node_name_clash_rejected() -> None:
         "params": {"query": {"required": True}},
         "nodes": {"query": {"type": "cfg_fetch"}},
     }
-    with pytest.raises(ValueError, match="输入参数键与节点名冲突"):
-        validate_params(config)
+    assert validate_params(config) == ["输入参数键与节点名冲突: query"]
 
 
 def test_params_no_clash_accepted() -> None:
@@ -323,7 +342,7 @@ def test_params_no_clash_accepted() -> None:
         "params": {"query": {"required": True}},
         "nodes": {"fetch": {"type": "cfg_fetch"}},
     }
-    validate_params(config)  # 应该通过
+    assert validate_params(config) == []
 
 
 # ---------------------------------------------------------------------------
@@ -332,26 +351,34 @@ def test_params_no_clash_accepted() -> None:
 
 
 def test_validate_review_accepts() -> None:
-    """validate_review 只接受富映射格式：{key: {label: 文本}}，允许空字符串"""
-    validate_review({"title": {"label": "标题"}})
-    validate_review({"title": {"label": "标题"}, "content": {"label": "内容"}})
-    validate_review({"title": {"label": ""}})  # 空字符串允许
+    """_validate_review 只接受富映射格式：{key: {label: 文本}}，允许空字符串"""
+    keys = {"title"}
+    assert _validate_review({"title": {"label": "标题"}}, keys) == []
+    assert _validate_review({"title": {"label": ""}}, keys) == []  # 空字符串允许
 
 
 def test_validate_review_rejects() -> None:
-    """非法格式抛出 ValueError"""
-    with pytest.raises(ValueError, match="必须是映射"):
-        validate_review(None)
-    with pytest.raises(ValueError, match="必须是映射"):
-        validate_review(["title"])
-    with pytest.raises(ValueError, match="不能为空映射"):
-        validate_review({})
-    with pytest.raises(ValueError, match="必须是 \\{label: 文本\\} 格式"):
-        validate_review({"title": "标题"})
-    with pytest.raises(ValueError, match="不支持的字段"):
-        validate_review({"t": {"format": "text"}})
-    with pytest.raises(ValueError, match="label 必须是字符串"):
-        validate_review({"t": {"label": None}})
+    """非法格式返回错误列表"""
+    assert _validate_review(None, set()) == ["review 必须是映射，实际是 NoneType"]
+    assert _validate_review(["title"], set()) == ["review 必须是映射，实际是 list"]
+    assert _validate_review({}, set()) == ["review 声明不能为空映射"]
+    # 裸字符串值（非富映射）
+    assert _validate_review({"title": "标题"}, {"title"}) == [
+        "review 字段 'title': 必须是 {label: 文本} 格式，实际是 str"
+    ]
+    # 不支持的字段 + 缺 label（收集全部错误）
+    assert _validate_review({"t": {"format": "text"}}, {"t"}) == [
+        "review 字段 't': 不支持的字段 ['format']",
+        "review 字段 't': label 必须是字符串",
+    ]
+    # label 非字符串
+    assert _validate_review({"t": {"label": None}}, {"t"}) == [
+        "review 字段 't': label 必须是字符串"
+    ]
+    # 键引用未声明
+    assert _validate_review({"ghost": {"label": "x"}}, {"title"}) == [
+        "review 引用了未声明的键 ghost"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -361,63 +388,93 @@ def test_validate_review_rejects() -> None:
 
 def test_validate_nodes_accepts() -> None:
     """validate_nodes 接受合法的节点配置"""
-    # 空 nodes
-    validate_nodes({})
+    # 未声明 nodes（空流水线）
+    assert validate_nodes({}) == []
 
     # node 类型节点
-    validate_nodes({"nodes": {"a": {"type": "cfg_fetch"}}})
-    validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": []}}})
+    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch"}}}) == []
+    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": []}}}) == []
 
     # human 类型节点
-    validate_nodes({"nodes": {"a": {"kind": "human", "prompt": "审核"}}})
+    assert validate_nodes({"nodes": {"a": {"kind": "human", "prompt": "审核"}}}) == []
     # human 节点 review - 键必须在 params 或 nodes 中
-    validate_nodes({
+    assert validate_nodes({
         "nodes": {"a": {"kind": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}},
-        "params": {"title": {}}
-    })
+        "params": {"title": {}},
+    }) == []
 
-    # loop 类型节点
-    validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "x"}}})
+
+def test_validate_nodes_accepts_loop(registered: Any) -> None:
+    """loop 节点的 condition 必须是已注册的条件函数"""
+    def keep(ctx: dict[str, Any], iteration: int) -> bool:
+        return False
+
+    registered("t_keep", keep, "condition")
+    assert validate_nodes({
+        "nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "t_keep"}}
+    }) == []
 
 
 def test_validate_nodes_rejects() -> None:
-    """validate_nodes 拒绝非法的节点配置"""
-    # nodes 不是 dict
-    with pytest.raises(ValueError, match="必须是映射"):
-        validate_nodes(None)
-    with pytest.raises(ValueError, match="必须是映射"):
-        validate_nodes([])
+    """validate_nodes 返回非法配置的全部错误"""
+    # nodes 不是 dict（None = 未声明，合法；列表才是错误）
+    assert validate_nodes({"nodes": []}) == [
+        "nodes 必须是映射(dict)，实际是 list"
+    ]
 
     # 节点定义不是 dict
-    with pytest.raises(ValueError, match="必须是映射"):
-        validate_nodes({"nodes": {"a": "not_dict"}})
+    assert validate_nodes({"nodes": {"a": "not_dict"}}) == [
+        "节点 'a': 定义必须是映射(dict)，实际是 str"
+    ]
 
     # 未知 kind
-    with pytest.raises(ValueError, match="未知类型"):
-        validate_nodes({"nodes": {"a": {"kind": "quantum"}}})
+    assert validate_nodes({"nodes": {"a": {"kind": "quantum"}}}) == [
+        "节点 'a': 未知类型 'quantum'（支持 node|human|loop）"
+    ]
 
     # 不支持的字段
-    with pytest.raises(ValueError, match="不支持的字段"):
-        validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}})
+    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}}) == [
+        "节点 'a'（node）: 不支持的字段 ['bogus']"
+    ]
 
     # node 类型缺少 type
-    with pytest.raises(ValueError, match="需要 'type'"):
-        validate_nodes({"nodes": {"a": {}}})
+    assert validate_nodes({"nodes": {"a": {}}}) == [
+        "节点 'a': 需要 'type'（函数键）"
+    ]
 
-    # loop 类型缺少 body
-    with pytest.raises(ValueError, match="需要非空的 'body'"):
-        validate_nodes({"nodes": {"a": {"kind": "loop", "condition": "x"}}})
+    # type 未注册
+    assert validate_nodes({"nodes": {"a": {"type": "no_such_fn"}}}) == [
+        "节点 'a': 类型函数 'no_such_fn' 未注册"
+    ]
 
-    # loop 类型缺少 condition
-    with pytest.raises(ValueError, match="需要 'condition'"):
-        validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}}})
+    # loop 类型缺少 body / condition、condition 未注册（condition 注册检查先于 body 检查）
+    assert validate_nodes({"nodes": {"a": {"kind": "loop", "condition": "x"}}}) == [
+        "节点 'a'（loop）: 条件函数 'x' 未注册",
+        "循环节点 'a': 需要非空的 'body' 映射",
+    ]
+    assert validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}}}) == [
+        "循环节点 'a': 需要 'condition' 函数键"
+    ]
 
-    # human 节点 review 校验失败
-    with pytest.raises(ValueError, match="label 必须是字符串"):
-        validate_nodes({
-            "nodes": {"a": {"kind": "human", "review": {"a": {"label": None}}}},
-            "params": {"a": {}}
-        })
+    # human 节点 review 校验失败（带节点名前缀）
+    assert validate_nodes({
+        "nodes": {"a": {"kind": "human", "review": {"a": {"label": None}}}},
+        "params": {"a": {}},
+    }) == ["审核节点 'a': review 字段 'a': label 必须是字符串"]
+
+
+def test_validate_nodes_collects_errors_across_nodes() -> None:
+    """不同节点的错误一次性全部返回。"""
+    errors = validate_nodes({
+        "nodes": {
+            "a": {},                       # 缺 type
+            "b": {"kind": "quantum"},      # 未知 kind
+            "c": {"type": "cfg_fetch"},    # 合法
+        }
+    })
+    assert len(errors) == 2
+    assert any("需要 'type'" in e for e in errors)
+    assert any("未知类型" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -428,19 +485,19 @@ def test_validate_nodes_rejects() -> None:
 def test_validate_config_accepts() -> None:
     """validate_config 接受合法的完整配置"""
     # 最小配置
-    validate_config({})
+    assert validate_config({}) == []
 
     # 只有 params
-    validate_config({"params": {"query": {"required": True}}})
+    assert validate_config({"params": {"query": {"required": True}}}) == []
 
     # 只有 nodes
-    validate_config({"nodes": {"a": {"type": "cfg_fetch"}}})
+    assert validate_config({"nodes": {"a": {"type": "cfg_fetch"}}}) == []
 
     # 完整配置
-    validate_config({
+    assert validate_config({
         "params": {"query": {"required": True}},
         "nodes": {"fetch": {"type": "cfg_fetch"}},
-    })
+    }) == []
 
 
 def test_validate_config_rejects_param_node_clash() -> None:
@@ -449,23 +506,32 @@ def test_validate_config_rejects_param_node_clash() -> None:
         "params": {"query": {"required": True}},
         "nodes": {"query": {"type": "cfg_fetch"}},
     }
-    with pytest.raises(ValueError, match="输入参数键与节点名冲突"):
-        validate_config(config)
+    assert validate_config(config) == ["输入参数键与节点名冲突: query"]
 
 
-def test_validate_config_catches_all_errors() -> None:
-    """validate_config 捕获各种配置错误"""
-    # params 错误
-    with pytest.raises(ValueError, match="不支持的字段"):
-        validate_config({"params": {"q": {"type": "string"}}})
+def test_validate_config_collects_all_errors() -> None:
+    """params 与 nodes 的错误一次性全部返回（load_dag 抛出时含全部信息）"""
+    config = {
+        "params": {
+            "q": {"bogus": 1},          # 不支持的字段
+            "r": {"required": "yes"},   # required 类型错误
+        },
+        "nodes": {
+            "a": {},                    # 缺 type
+            "b": {"kind": "quantum"},   # 未知 kind
+        },
+    }
+    errors = validate_config(config)
+    assert len(errors) == 4
 
-    # nodes 错误
-    with pytest.raises(ValueError, match="未知类型"):
-        validate_config({"nodes": {"a": {"kind": "quantum"}}})
-
-    # node 缺少 type
-    with pytest.raises(ValueError, match="需要 'type'"):
-        validate_config({"nodes": {"a": {}}})
+    # load_dag 将全部错误合并进同一个 ValueError
+    with pytest.raises(ValueError) as exc_info:
+        load_dag(config)
+    message = str(exc_info.value)
+    assert "不支持的字段 ['bogus']" in message
+    assert "required 必须是布尔值" in message
+    assert "需要 'type'" in message
+    assert "未知类型" in message
 
 
 async def test_human_review_view_payload(registered: Any) -> None:

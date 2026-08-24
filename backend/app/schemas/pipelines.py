@@ -39,7 +39,7 @@ class PipelineNodeOut(BaseModel):
     retry: str | None = None         # 中文摘要，如 "重试 3 次，退避 0.05s×2（≤0.5s）"
     condition: str | None = None     # 条件谓词注册表键
     condition_label: str | None = None
-    review: dict[str, str] | None = None  # (kind=human) 审核视图 {key: label}；None=全量上下文
+    review: dict[str, dict[str, str]] | None = None  # (kind=human) 审核视图原文 {key: {label}}；None=全量上下文
 
 
 class PipelineDetail(PipelineListItem):

@@ -67,8 +67,8 @@ async def test_pipeline_detail_human(client: AsyncClient) -> None:
     assert review["type_description"] == "请审核合并结果。"
     assert review["condition"] == "demo_needs_review"
     assert review["condition_label"] == "演示按需审核"
-    # 声明式审核视图：{key: label}（未声明 → None = 全量上下文）
-    assert review["review"] == {"merge": "合并结果"}
+    # 声明式审核视图原文直通：{key: {label}}（未声明 → None = 全量上下文）
+    assert review["review"] == {"merge": {"label": "合并结果"}}
 
     report = nodes["report"]
     assert report["depends_on"] == ["merge"]  # 不依赖 review：审核被跳过时照常执行

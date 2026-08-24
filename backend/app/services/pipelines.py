@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
-from app.engine.declarative import validate_review, read_yaml, validate_params
+from app.engine.declarative import read_yaml, validate_config
 from app.engine.resolve import parse_retry
 from app.registry import REGISTRY
 
@@ -49,10 +49,13 @@ def list_pipelines() -> list[dict[str, Any]]:
     for path in sorted(settings.PIPELINES_DIR.glob("*.yaml")):
         try:
             _, config = read_yaml(path)
-            # 与 load_dag 同源校验（坏声明跳过并告警）
-            validate_params(config)
         except ValueError as exc:
             logger.warning("Skip demo pipeline %s: %s", path.name, exc)
+            continue
+        # 与 load_dag 同源校验（坏声明跳过并告警，一次报全部错误）
+        errors = validate_config(config)
+        if errors:
+            logger.warning("Skip demo pipeline %s: %s", path.name, "; ".join(errors))
             continue
         entries.append({
             "filename": path.name,
@@ -108,11 +111,8 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     elif kind == "human":
         row["type_label"] = "人工审核"
         row["type_description"] = spec.get("prompt")
-        review_spec = spec.get("review")
-        if review_spec is not None:
-            validate_review(review_spec)
-            # 与引擎同规则派生 {key: label}（空 label 退化为键名）
-            row["review"] = {key: val["label"] or key for key, val in review_spec.items()}
+        # 原始富声明 {key: {label}} 直通前端；格式已由 load_dag 校验
+        row["review"] = spec.get("review")
     elif kind == "loop":
         row["type_label"] = "循环"
         body = spec.get("body") or {}
