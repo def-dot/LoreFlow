@@ -43,6 +43,69 @@ async def test_human_approve_completes_review() -> None:
     assert results["publish"].output == 42
 
 
+async def test_human_approve_edits_override_payload() -> None:
+    """通过时的审核修订覆盖 payload 对应键；原始上游输出保持不动。"""
+    dag = DAG("human_edit")
+
+    @dag.node("draft")
+    async def draft(ctx: dict[str, Any]) -> str:
+        return "草稿有一个错别子"
+
+    dag.human_node(
+        "review",
+        depends_on=["draft"],
+        approver=fake_approver({"approve": True, "edits": {"draft": "草稿没有错别字"}}),
+    )
+
+    @dag.node("publish", depends_on=["review"])
+    async def publish(ctx: dict[str, Any]) -> str:
+        return ctx["review"]["payload"]["draft"]
+
+    results = await dag.run()
+    assert results["publish"].output == "草稿没有错别字"  # 下游拿到修订版
+    assert results["draft"].output == "草稿有一个错别子"  # 上游原始输出未被改动
+    assert results["review"].output["decision"]["edits"] == {"draft": "草稿没有错别字"}  # 修订留档
+
+
+async def test_human_edits_cannot_inject_new_keys() -> None:
+    """修订只覆盖 payload 已有键：借 edits 注入新键无效（防越权改写上下文）。"""
+    dag = DAG("human_inject")
+
+    @dag.node("data")
+    async def data(ctx: dict[str, Any]) -> str:
+        return "内容"
+
+    dag.human_node(
+        "review",
+        depends_on=["data"],
+        approver=fake_approver({"approve": True, "edits": {"data": "改", "injected": "新键"}}),
+    )
+
+    results = await dag.run()
+    payload = results["review"].output["payload"]
+    assert payload["data"] == "改"
+    assert "injected" not in payload
+
+
+async def test_human_reject_ignores_edits() -> None:
+    """拒绝不应用修订：payload 保持原样，意见走 reason。"""
+    dag = DAG("human_reject_edits")
+
+    @dag.node("data")
+    async def data(ctx: dict[str, Any]) -> str:
+        return "内容"
+
+    dag.human_node(
+        "review",
+        depends_on=["data"],
+        approver=fake_approver({"approve": False, "reason": "重写", "edits": {"data": "改"}}),
+    )
+
+    with pytest.raises(DAGExecutionError) as excinfo:
+        await dag.run()
+    assert excinfo.value.results["review"].output["payload"]["data"] == "内容"
+
+
 def test_dag_human_nodes_property() -> None:
     """human_nodes 属性只列出人工审核节点，普通节点不在内。"""
     dag = DAG("human_nodes")

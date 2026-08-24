@@ -1,15 +1,4 @@
 """Run 编排服务 — 执行生命周期：审批器/事件落库、执行、挂起-恢复、启动选主。
-
-从 services/runs.py 抽出的执行侧逻辑，RunRecord 与审批决策的落库
-分别见 services/runs.py、services/reviews.py。审批节点挂起（节点 REVIEWING
-与 run reviewing 同一次落库后 run 任务干净退出），/api/approve 写决策后
-resume_record 续跑，
-与重启恢复共用同一套重放机制；决策认领是原子的（claim_decision 单条
-UPDATE..RETURNING），并发续跑恰好一个消费者，行保留作审计痕迹。认领后
-决策同时写进节点快照——进程在"认领到节点完成"窗口内崩溃时，重启重放
-从快照原样复用决策，不会把已批准过的节点重新挂起。多 worker 启动恢复
-靠 advisory lock 选主、仅 leader 执行扫描续跑。create_run /
-resume_stuck_runs 是对外入口（路由与 lifespan），其余为内部实现。
 """
 
 from __future__ import annotations
@@ -44,15 +33,14 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
-        
         if entry.get('output') and entry["output"].get("decision"):
             # 重跑时已审核过
             return entry["output"]["decision"]
-        
+
         decision = await reviews.claim_decision(record.id, node_name)
         if decision is not None:
             return decision
-        
+
         entry["status"] = NodeStatus.REVIEWING.value
         entry["payload"] = payload
         record.status = RunStatus.REVIEWING
@@ -143,14 +131,14 @@ async def create_run(
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
-    # 必填输入在落库前校验：缺参的 run 不该创建出来（引擎 run() 还会再兜底一次）
-    missing = [k for k in dag.required_inputs if k not in inputs]
-    if missing:
-        raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")
     # 输入键与节点名共享同一个 ctx 命名空间，重名会被节点输出覆盖 —— 直接拒绝
     clash = sorted(set(inputs) & set(dag.nodes))
     if clash:
         raise ValueError(f"输入参数键与节点名冲突: {', '.join(clash)}")
+    # 必填输入在落库前校验：缺参的 run 不该创建出来（引擎 run() 还会再兜底一次）
+    missing = [k for k in dag.required_inputs if k not in inputs]
+    if missing:
+        raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
     record.inputs = inputs

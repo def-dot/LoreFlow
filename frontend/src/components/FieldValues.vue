@@ -9,7 +9,11 @@ export interface FieldValue {
   value: unknown
 }
 
-const props = defineProps<{ fields: FieldValue[] }>()
+const props = defineProps<{
+  fields: FieldValue[]
+  /** 审核修订草稿（键 → 改后文本）：传入即开启字符串字段的行内编辑 */
+  drafts?: Record<string, string>
+}>()
 
 interface RenderedField extends FieldValue {
   kind: 'empty' | 'text' | 'json'
@@ -43,6 +47,16 @@ function jsonTitle(field: RenderedField): string {
         <code v-if="field.label !== field.key" class="field-key">{{ field.key }}</code>
       </div>
       <div v-if="field.kind === 'empty'" class="field-empty">未提供</div>
+      <!-- 审核场景：文本字段可就地修改（改动随「通过」提交，改过的高亮） -->
+      <el-input
+        v-else-if="field.kind === 'text' && drafts"
+        v-model="drafts[field.key]"
+        type="textarea"
+        :autosize="{ minRows: 2, maxRows: 10 }"
+        resize="vertical"
+        class="field-edit"
+        :class="{ edited: drafts[field.key] !== field.text }"
+      />
       <div v-else-if="field.kind === 'text'" class="field-text">{{ field.text }}</div>
       <el-collapse v-else class="field-json">
         <el-collapse-item :title="jsonTitle(field)">
@@ -92,6 +106,17 @@ function jsonTitle(field: RenderedField): string {
   font-size: 12.5px;
   color: var(--ink-3);
   padding: 6px 0;
+}
+/* 审核修订输入框：与只读文本同底色；有改动时琥珀描边（HITL 语义色） */
+.field-edit :deep(.el-textarea__inner) {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: #0c1122;
+  border-color: #1a2038;
+}
+.field-edit.edited :deep(.el-textarea__inner) {
+  border-color: var(--amber);
 }
 .json {
   margin: 0;

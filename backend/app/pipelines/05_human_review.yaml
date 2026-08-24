@@ -1,41 +1,31 @@
 # DAG Flow — 人工审核示例。
 #
-# review 节点挂起等待决策；approver 返回 {"approve": bool, "reason": str}。
-#   - 通过：review 完成，输出 {approved, payload, ...}，下游继续。
-#   - 拒绝：抛 HumanRejected（拒绝详情记入 output）→ review 失败 → 下游（如 publish）级联跳过。
+# kind: human 节点挂起等待决策。审核结果：
+#   - 通过：输出 {approved, payload, ...}，下游继续
+#   - 拒绝：抛 HumanRejected（拒绝详情记入 output）→ 下游级联跳过
 #
-# 加载时必须提供 approver —— 终端交互用 terminal_approver，
-# Web 审批场景由 orchestrator.make_approver 提供：
-#     from app.engine import load_dag, terminal_approver
-#     dag = load_dag("app/pipelines/05_human_review.yaml", approver=terminal_approver)
-#     results = await dag.run()
-
+# 本示例：用户输入标题+正文 → 人工审核 → 通过才发布。
 name: 人工审核
-description: 人工审核示例：review 节点挂起等待决策，通过则继续、拒绝则级联跳过下游。
+description: 输入标题和正文，人工审核通过后发布。
+
+params:
+  title:
+    required: true
+    label: 标题
+    description: 待审核文章标题
+  content:
+    required: true
+    label: 正文
+    description: 待审核文章正文
+    multiline: true
 
 nodes:
-  fetch:
-    type: cfg_fetch
-
-  clean:
-    type: cfg_clean
-    depends_on: [fetch]
-
-  enrich:
-    type: cfg_enrich
-    depends_on: [fetch]
-
-  merge:
-    type: cfg_merge
-    depends_on: [clean, enrich]
-
   review:
     kind: human
-    depends_on: [merge]
-    prompt: "请审核合并结果：同意输入 y，拒绝输入 n。"
-    # 审核视图：审核者只看 merge 的最终结果，不看 fetch/clean/enrich 中间态
+    prompt: "请审核文章内容是否可以发布"
     review:
-      merge: {label: 合并结果}
+      title: {label: 标题}
+      content: {label: 正文}
 
   publish:
     type: cfg_publish

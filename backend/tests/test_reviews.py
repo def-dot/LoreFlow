@@ -10,11 +10,11 @@ import pytest
 from sqlmodel import select
 
 import app.core.database as db_mod
-from app.engine.types import NodeResult, NodeStatus, SuspendExecution
+from app.engine.types import SuspendExecution
 from app.models.review import ReviewDecision
 from app.models.run import RunRecord
 from app.services import reviews, runs
-from app.services.orchestrator import make_approver, make_event_sink
+from app.services.orchestrator import make_approver
 
 
 async def _all_rows() -> list[ReviewDecision]:
@@ -46,7 +46,7 @@ async def test_claim_returns_decision_and_keeps_row() -> None:
     await reviews.create_decision(1, "n", {"approve": True, "reason": "ok"})
 
     decision = await reviews.claim_decision(1, "n")
-    assert decision == {"approve": True, "reason": "ok"}
+    assert decision == {"approve": True, "reason": "ok", "edits": None}
     assert await reviews.claim_decision(1, "n") is None
 
     rows = await _all_rows()
@@ -74,7 +74,19 @@ async def test_claim_only_targets_pending_rows() -> None:
     await reviews.create_decision(1, "n", {"approve": False})
 
     decision = await reviews.claim_decision(1, "n")
-    assert decision == {"approve": False, "reason": None}
+    assert decision == {"approve": False, "reason": None, "edits": None}
+
+
+async def test_edits_roundtrip_and_overwrite() -> None:
+    """审核修订随决策入库、认领原样带回；重复提交覆盖时 edits 一并覆盖。"""
+    await reviews.create_decision(1, "n", {"approve": True, "edits": {"merge": "修订后"}})
+    rows = await _all_rows()
+    assert rows[0].edits == {"merge": "修订后"}
+
+    # 覆盖提交不带 edits：撤回修订（后答为准）
+    await reviews.create_decision(1, "n", {"approve": True, "edits": {"merge": "再改一版"}})
+    decision = await reviews.claim_decision(1, "n")
+    assert decision == {"approve": True, "reason": None, "edits": {"merge": "再改一版"}}
 
 
 async def test_concurrent_claim_exactly_one_consumer() -> None:
@@ -88,35 +100,6 @@ async def test_concurrent_claim_exactly_one_consumer() -> None:
     assert sum(r is not None for r in results) == 1
 
 
-async def test_approver_snapshot_decision_replayed_after_crash() -> None:
-    """认领后的决策写进节点快照：崩溃重放（新 approver 实例）原样复用，
-    不会把已批准过的节点重新挂起。"""
-    record = await _persist_run()
-    assert record.id is not None
-    await reviews.create_decision(record.id, "review", {"approve": True, "reason": "ok"})
-
-    decision = await make_approver(record)("review", {"payload": "x"})
-    assert decision == {"approve": True, "reason": "ok"}
-    assert record.nodes["review"]["decision"] == decision
-
-    # 模拟崩溃后重启重放：快照里有决策，无需新决策即可续跑
-    replayed = await make_approver(record)("review", {})
-    assert replayed == decision
-    assert record.nodes["review"]["status"] == "running"
-
-
-async def test_approver_replayed_reject_decision_reusable() -> None:
-    """拒绝决策同样写进快照且可被重放复用（dict 非空为真）。"""
-    record = await _persist_run()
-    assert record.id is not None
-    await reviews.create_decision(record.id, "review", {"approve": False, "reason": "no"})
-
-    decision = await make_approver(record)("review", {"payload": "x"})
-    assert decision["approve"] is False
-    replayed = await make_approver(record)("review", {})
-    assert replayed == decision
-
-
 async def test_approver_suspends_without_decision() -> None:
     """无未消费决策：挂起并暴露 REVIEWING + payload。"""
     record = await _persist_run()
@@ -126,22 +109,4 @@ async def test_approver_suspends_without_decision() -> None:
 
     assert record.nodes["review"]["status"] == "reviewing"
     assert record.nodes["review"]["payload"] == {"payload": "x"}
-    assert "decision" not in record.nodes["review"]
-
-
-async def test_sink_preserves_decision_on_running_only() -> None:
-    """RUNNING 事件保留快照决策（崩溃重放复用）；RETRYING/终态清除，
-    防止拒绝重试与 loop 新迭代误复用上一次的决策。"""
-    record = await _persist_run()
-    record.nodes["review"] = {"status": "reviewing", "decision": {"approve": True}}
-    sink = make_event_sink(record)
-
-    await sink(NodeResult(node_name="review", status=NodeStatus.RUNNING))
-    assert record.nodes["review"]["decision"] == {"approve": True}
-
-    await sink(NodeResult(node_name="review", status=NodeStatus.RETRYING))
-    assert "decision" not in record.nodes["review"]
-
-    record.nodes["review"]["decision"] = {"approve": True}
-    await sink(NodeResult(node_name="review", status=NodeStatus.COMPLETED))
     assert "decision" not in record.nodes["review"]

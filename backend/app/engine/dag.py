@@ -316,7 +316,13 @@ class DAG:
             decision = await approver(name, payload)
             if decision.get("approve"):
                 logger.info("[%s] approved by human reviewer", name)
+                # 审核修订（"改了再通过"）：只覆盖 payload 已有的键，防注入
+                # 新键；原始上游输出不动，修订痕迹由决策行（edits）留档
+                edits = decision.get("edits")
+                if isinstance(edits, dict) and edits:
+                    payload = {**payload, **{k: v for k, v in edits.items() if k in payload}}
                 return {
+                    "approved": True,
                     "payload": payload,
                     "decision": decision,
                     "approved_at": datetime.now().isoformat(timespec="seconds"),
@@ -327,6 +333,8 @@ class DAG:
             raise HumanRejected(
                 reason,
                 output={
+                    "approved": False,
+                    "reason": reason,
                     "payload": payload,
                     "decision": decision,
                     "approved_at": datetime.now().isoformat(timespec="seconds"),
@@ -468,7 +476,6 @@ class DAG:
         if inputs is None:
             inputs = self.default_inputs
 
-        # 必填输入在跑任何节点前校验：缺参的 run 不该执行到一半才 KeyError
         missing = [k for k in self.required_inputs if k not in (inputs or {})]
         if missing:
             raise ValueError(f"缺少必填输入参数: {', '.join(missing)}")

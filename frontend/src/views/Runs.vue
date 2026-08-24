@@ -277,8 +277,8 @@ async function startNewRun() {
   }
 }
 
-async function decide(node: string, ok: boolean, reason: string | null) {
-  await store.decide(node, ok, reason)
+async function decide(node: string, ok: boolean, reason: string | null, edits: Record<string, string> | null) {
+  await store.decide(node, ok, reason, edits)
   if (store.detail?.status === 'running') {
     // 审批后 run 回到执行中：恢复两路轮询（列表在挂起期间已停）
     startDetailPolling()

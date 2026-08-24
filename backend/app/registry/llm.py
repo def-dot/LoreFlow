@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from app.core.config import settings
 from app.registry.core import node
 from app.utils.http import http_client
@@ -56,3 +54,63 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
     messages.append({"role": "user", "content": content})
     model = str(ctx.get("model") or settings.OLLAMA_MODEL)
     return await _ollama_chat(model, messages)
+
+
+@node(
+    label="意图分类",
+    description="LLM 判断 ctx['prompt'] 属于闲聊（chat）还是知识检索（rag），输出 {intent, raw}",
+)
+async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
+    prompt = ctx.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
+    system = (
+        "你是意图分类器，只输出一个小写单词，不要输出任何其他内容：\n"
+        "chat —— 问候、闲聊、创作、翻译等无需查询资料的请求\n"
+        "rag —— 需要查询知识库/设定资料才能回答的问题"
+    )
+    raw = await _ollama_chat(
+        settings.OLLAMA_MODEL,
+        [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+    )
+    # 宽松解析：本地模型不总按指令输出小写英文（实测会把闲聊答成「聊天」），
+    # 按中英关键词识别；识别不出按闲聊（不至于编造检索结果）
+    text = raw.lower()
+    intent = "rag" if any(k in text for k in ("rag", "知识", "检索", "问答")) else "chat"
+    return {"intent": intent, "raw": raw.strip()}
+
+
+@node(kind="condition", label="是闲聊类", description="意图为 chat：闲聊支路执行")
+def is_chat(ctx: dict[str, Any]) -> bool:
+    classify = ctx.get("classify")
+    return isinstance(classify, dict) and classify.get("intent") == "chat"
+
+
+@node(kind="condition", label="是知识类", description="意图为 rag：知识支路执行")
+def is_rag(ctx: dict[str, Any]) -> bool:
+    classify = ctx.get("classify")
+    return isinstance(classify, dict) and classify.get("intent") == "rag"
+
+
+@node(
+    label="知识库问答",
+    description="结合检索片段回答 ctx['prompt']（片段来自 YAML 命名为 retrieve 的 rag_retrieve 节点输出）",
+)
+async def llm_rag_reply(ctx: dict[str, Any]) -> str:
+    prompt = ctx.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
+    chunks = ctx.get("retrieve") or []
+    if not isinstance(chunks, list) or not chunks:
+        return "知识库中没有检索到相关内容。"
+    refs = "\n\n".join(
+        f"[{i}] {c.get('source', '')} {c.get('text', '')}"
+        for i, c in enumerate(chunks, 1)
+        if isinstance(c, dict)
+    )
+    system = "你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。"
+    user = f"参考资料：\n{refs}\n\n问题：{prompt}"
+    return await _ollama_chat(
+        settings.OLLAMA_MODEL,
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    )

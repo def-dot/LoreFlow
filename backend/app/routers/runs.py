@@ -79,6 +79,8 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
     entry = (record.nodes or {}).get(node_name) if record else None
     if record is None or not isinstance(entry, dict) or entry.get("status") != NodeStatus.REVIEWING.value:
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
-    await review_service.create_decision(run_id, node_name, {"approve": body.approve, "reason": body.reason})
+    await review_service.create_decision(
+        run_id, node_name, {"approve": body.approve, "reason": body.reason, "edits": body.edits}
+    )
     await orchestrator.resume_record(record)
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

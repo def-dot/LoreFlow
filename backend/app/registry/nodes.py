@@ -141,3 +141,31 @@ async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
 async def rag_upsert(ctx: dict[str, Any]) -> str:
     await asyncio.sleep(0.05)
     return f"upserted {len(ctx['embed'])} chunks from {ctx['load']['doc_id']}"
+
+
+# 模拟知识库：与 rag_load 的演示文档同源（真实实现应为向量库检索，见 rag_embed/rag_upsert）
+_MOCK_KB: list[dict[str, Any]] = [
+    {
+        "source": "lore-001#c0",
+        "keywords": ("北境", "要塞", "长城", "纪元", "山脉"),
+        "text": "北境要塞建于第二纪元，横贯大陆北端的霜脊山脉。",
+    },
+    {
+        "source": "lore-001#c1",
+        "keywords": ("堡垒", "兵力", "风哨", "寒鸦", "冬炉", "驻军"),
+        "text": "要塞由风哨、寒鸦、冬炉三段堡垒群组成，常驻兵力约八千。",
+    },
+    {
+        "source": "lore-001#c2",
+        "keywords": ("长冬", "补给", "存粮", "商路", "防线"),
+        "text": "每逢长冬，商路断绝，冬炉堡的存粮要支撑整条防线的补给。",
+    },
+]
+
+
+@node(label="知识库检索", description="模拟 RAG 检索：按提示词关键词打分返回设定片段（演示骨架，未接向量库）")
+async def rag_retrieve(ctx: dict[str, Any]) -> list[dict[str, str]]:
+    await asyncio.sleep(0.05)
+    prompt = str(ctx.get("prompt", ""))
+    ranked = sorted(_MOCK_KB, key=lambda c: -sum(prompt.count(k) for k in c["keywords"]))
+    return [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]

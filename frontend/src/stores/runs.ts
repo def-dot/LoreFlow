@@ -92,11 +92,11 @@ export const useRunsStore = defineStore('runs', {
       await this.fetchRuns()
     },
 
-    async decide(node: string, ok: boolean, reason: string | null) {
+    async decide(node: string, ok: boolean, reason: string | null, edits?: Record<string, string> | null) {
       if (this.selectedId === null || this.deciding) return
       this.deciding = true
       try {
-        await approve(this.selectedId, node, ok, ok ? null : reason)
+        await approve(this.selectedId, node, ok, ok ? null : reason, edits ?? undefined)
         await this.fetchDetail()
       } finally {
         this.deciding = false

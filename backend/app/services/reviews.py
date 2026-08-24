@@ -1,14 +1,4 @@
-"""审批决策持久化 — ReviewDecision 的写入与认领。
-
-决策走"浏览器写入、审批器续跑消费"的模式：/api/approve 落一条决策，
-续跑（resume）的 approver 在挂起检查中 claim_decision 认领最近一条
-未消费决策，认领后状态推进、继续执行。
-
-行认领后保留（consumed_at 标记），作为审计痕迹：谁在何时批了什么。
-未消费决策对 (run_id, node_name) 最多一条——create_decision 先查后写：
-已有未消费决策则覆盖，重复提交（双击）后答为准，避免陈旧决策被该节点
-的下一次到达误消费。持久化函数调用时才查找 ``database.AsyncSessionLocal``
-——conftest 直接换掉该全局即可换库。
+"""审批决策持久化
 """
 
 from __future__ import annotations
@@ -44,12 +34,14 @@ async def create_decision(run_id: int, node_name: str, decision: dict[str, Any])
                     node_name=node_name,
                     approve=decision["approve"],
                     reason=decision.get("reason"),
+                    edits=decision.get("edits"),
                     created_at=now,
                 )
             )
         else:
             pending.approve = decision["approve"]
             pending.reason = decision.get("reason")
+            pending.edits = decision.get("edits")
             pending.created_at = now
         await session.commit()
 
@@ -73,10 +65,10 @@ async def claim_decision(run_id: int, node_name: str) -> dict[str, Any] | None:
             update(ReviewDecision)
             .where(ReviewDecision.id == target)
             .values(consumed_at=now)
-            .returning(ReviewDecision.approve, ReviewDecision.reason)
+            .returning(ReviewDecision.approve, ReviewDecision.reason, ReviewDecision.edits)
         )
         row = result.first()
         await session.commit()
         if row is None:
             return None
-        return {"approve": row.approve, "reason": row.reason}
+        return {"approve": row.approve, "reason": row.reason, "edits": row.edits}

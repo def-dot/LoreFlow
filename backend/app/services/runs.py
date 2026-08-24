@@ -7,6 +7,8 @@ services/orchestrator.py。持久化函数调用时才查找
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from sqlalchemy import delete as sa_delete
 from sqlmodel import func, select
 
@@ -95,7 +97,8 @@ async def delete_run(run_id: int) -> bool:
         record = await session.get(RunRecord, run_id)
         if record is None or record.status not in TERMINAL_STATUSES:
             return False
-        await session.execute(sa_delete(ReviewDecision).where(ReviewDecision.run_id == run_id))
+        # cast：SQLModel 列比较的 mypy 摩擦与 reviews.py 同款（列表达式运行时是 InstrumentedAttribute）
+        await session.execute(sa_delete(ReviewDecision).where(cast(Any, ReviewDecision.run_id) == run_id))
         await session.delete(record)
         await session.commit()
         return True

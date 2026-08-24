@@ -69,7 +69,10 @@ async def _wait_node_reviewing(
 
 async def _create_and_approve(client: AsyncClient, approve: bool = True) -> int:
     """建一个 run 并走完审批流，返回 run_id。"""
-    resp = await client.post("/api/v1/runs")
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "05_human_review.yaml", "inputs": {"title": "测试标题", "content": "测试正文"}},
+    )
     assert resp.status_code == 201
     run_id = resp.json()["data"]["run_id"]
 
@@ -120,14 +123,24 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
     assert set(types[0]) == {"name", "kind", "label", "description"}
 
     conditions = [t["name"] for t in types if t["kind"] == "condition"]
-    assert conditions == ["cfg_needs_report", "demo_keep_iterating", "demo_needs_review", "notify_long_body"]
+    assert conditions == [
+        "is_chat",
+        "is_rag",
+        "cfg_needs_report",
+        "demo_keep_iterating",
+        "demo_needs_review",
+        "notify_long_body",
+    ]
 
     notify = {t["name"]: t for t in types}["notify_message"]  # 插件类型随目录自动出现
     assert notify["kind"] == "function" and notify["label"] == "生成通知"
 
 
 async def test_run_lifecycle_approve(client: AsyncClient) -> None:
-    resp = await client.post("/api/v1/runs")
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "05_human_review.yaml", "inputs": {"title": "测试标题", "content": "测试正文"}},
+    )
     assert resp.status_code == 201
     body = resp.json()
     assert body["code"] == 201 and body["msg"] == "ok"
@@ -138,8 +151,8 @@ async def test_run_lifecycle_approve(client: AsyncClient) -> None:
     assert data["finished_at"] is None  # 挂起不算结束
     assert data["error"] is None  # 挂起不算失败
     assert data["nodes"]["review"]["status"] == "reviewing"
-    assert "merge" in data["nodes"]["review"]["payload"]  # 审核卡片展示的待审 payload
-    assert data["nodes"]["fetch"]["status"] == "completed"
+    assert "title" in data["nodes"]["review"]["payload"]  # 审核卡片展示的待审 payload（来自 params）
+    assert "content" in data["nodes"]["review"]["payload"]
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
     assert resp.json()["data"] == {"status": "ok", "run_id": run_id, "node": "review", "approve": True}
@@ -147,7 +160,7 @@ async def test_run_lifecycle_approve(client: AsyncClient) -> None:
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
     assert data["nodes"]["publish"]["status"] == "completed"
-    assert data["nodes"]["merge"]["status"] == "completed"
+    assert data["nodes"]["review"]["status"] == "completed"
     assert data["error"] is None
 
 
@@ -332,7 +345,10 @@ async def _count_decisions(run_id: int) -> int:
 
 async def test_delete_run(client: AsyncClient) -> None:
     """DELETE /runs/{id}：终态可删（审批决策级联清理）；待审核拒绝；不存在 404。"""
-    resp = await client.post("/api/v1/runs", json={"config_file": "05_human_review.yaml"})
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "05_human_review.yaml", "inputs": {"title": "测试标题", "content": "测试正文"}},
+    )
     rid = resp.json()["data"]["run_id"]
     await _wait_status(client, rid, "reviewing")
 
@@ -400,14 +416,9 @@ async def test_resume_stuck_run(client: AsyncClient) -> None:
         created_at="2026-01-01T00:00:00",
         status="running",
         nodes={
-            "fetch": {
-                "status": "completed",
-                "output": {"title": "DAG Flow v0.1", "body": "  declarative config rocks  "},
-                "error": None,
-                "attempts": 1,
-                "duration_ms": 1,
-            },
+            # 新版 05 无 fetch 节点，直接用输入参数；空 nodes 表示刚开始执行
         },
+        inputs={"title": "恢复测试", "content": "崩溃前的正文"},
     )
     await run_service.save(record)
     run_id = record.id
@@ -417,7 +428,6 @@ async def test_resume_stuck_run(client: AsyncClient) -> None:
 
     data = await _wait_reviewing(client, run_id)
     assert data["nodes"]["review"]["status"] == "reviewing"  # 05_human_review 有人工审核节点
-    assert data["nodes"]["fetch"]["status"] == "completed"  # 已完成节点不重跑
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
     assert resp.status_code == 200
@@ -429,7 +439,10 @@ async def test_resume_stuck_run(client: AsyncClient) -> None:
 
 async def test_resume_suspended_run_re_suspends(client: AsyncClient) -> None:
     """挂起中的 run 被再次 resume（无新决策）：幂等重挂起，审批后照常完成。"""
-    resp = await client.post("/api/v1/runs")
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "05_human_review.yaml", "inputs": {"title": "重复恢复", "content": "测试正文"}},
+    )
     run_id = resp.json()["data"]["run_id"]
     await _wait_reviewing(client, run_id)
 
@@ -666,26 +679,27 @@ async def test_dual_review_missing_required_400(client: AsyncClient) -> None:
 
 
 async def test_required_inputs_missing_400(client: AsyncClient) -> None:
-    """09 必填参数示例：不传 query → 400 列出缺的键，不产生 run 记录。"""
-    resp = await client.post("/api/v1/runs", json={"config_file": "09_required_input.yaml"})
+    """02 意图路由必填参数示例：不传 prompt → 400 列出缺的键，不产生 run 记录。"""
+    resp = await client.post("/api/v1/runs", json={"config_file": "02_condition_branching.yaml"})
     assert resp.status_code == 400
-    assert "缺少必填输入参数: query" in resp.json()["msg"]
+    assert "缺少必填输入参数: prompt" in resp.json()["msg"]
 
     resp = await client.get("/api/v1/runs")
     assert resp.json()["data"]["items"] == []
 
 
 async def test_required_inputs_run_completes(client: AsyncClient) -> None:
-    """09 带 query 运行：必填值进上下文，topic 用 YAML 默认；覆盖 topic 也生效。"""
+    """02 带 prompt 运行：必填值进上下文，LLM 分类并走相应支路完成。"""
     resp = await client.post(
         "/api/v1/runs",
-        json={"config_file": "09_required_input.yaml", "inputs": {"query": "洛伦佐"}},
+        json={"config_file": "02_condition_branching.yaml", "inputs": {"prompt": "你好呀"}},
     )
     assert resp.status_code == 201
     run_id = resp.json()["data"]["run_id"]
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
-    assert data["nodes"]["检索"]["output"] == {"query": "洛伦佐", "topic": "默认主题"}
+    assert data["nodes"]["classify"]["status"] == "completed"
+    assert data["nodes"]["chat_reply"]["status"] == "completed"
 
     resp = await client.post(
         "/api/v1/runs",

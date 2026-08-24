@@ -20,7 +20,7 @@ from app.registry.plugins import load_plugins
 
 load_plugins()  # 模拟 lifespan 的插件加载（ASGITransport 不运行 lifespan）
 
-TEST_DATABASE_URL = "sqlite+aiosqlite://"
+TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_db.sqlite"
 test_engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 

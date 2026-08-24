@@ -77,6 +77,9 @@ export function approve(
   node: string,
   ok: boolean,
   reason: string | null,
+  edits?: Record<string, string>,
 ): Promise<{ status: string; run_id: number; node: string; approve: boolean }> {
-  return api.post(`/runs/${runId}/approve/${node}`, { approve: ok, reason })
+  // edits 为空对象时不带（后端视为无修订）
+  const hasEdits = edits !== undefined && Object.keys(edits).length > 0
+  return api.post(`/runs/${runId}/approve/${node}`, { approve: ok, reason, edits: hasEdits ? edits : undefined })
 }

@@ -28,11 +28,6 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 
-def _blocks_downstream(dep_result: NodeResult) -> bool:
-    """上游终态是否阻断下游：FAILED 及其级联（UPSTREAM_FAILED）——阻断要传递。"""
-    return dep_result.status in (NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED)
-
-
 class DAGExecutor:
     """Executes a DAG concurrently, respecting node dependencies.
 
@@ -155,7 +150,8 @@ class DAGExecutor:
             blocked_deps = [
                 dep
                 for dep in node.depends_on
-                if dep in tasks and _blocks_downstream(tasks[dep].result())
+                if dep in tasks
+                and tasks[dep].result().status in (NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED)
             ]
             if blocked_deps:
                 logger.warning("[%s] Upstream failed, node not executed: %s", node.name, blocked_deps)
