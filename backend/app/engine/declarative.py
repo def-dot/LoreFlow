@@ -107,8 +107,9 @@ def validate_nodes(config: dict[str, Any]) -> None:
     - 字段必须在允许列表内（_KIND_FIELDS）
     - kind 特定必需字段：
       * human: prompt（必需），review（可选，需符合富映射格式）
-      * loop: body（必需非空）、condition（必需）
-      * node: type（必需）
+      * loop: body（必需非空）、condition（必需且已注册）
+      * node: type（必需且已注册）
+    - condition 字段（如果存在）必须在 REGISTRY 中
     """
     nodes = config.get("nodes") or {}
     if not isinstance(nodes, dict):
@@ -131,10 +132,18 @@ def validate_nodes(config: dict[str, Any]) -> None:
         if unknown:
             raise ValueError(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
 
+        # 校验 condition 字段（如果存在）
+        condition_key = spec.get("condition")
+        if condition_key is not None and condition_key not in REGISTRY:
+            raise ValueError(f"节点 {name!r}（{kind}）: 条件函数 {condition_key!r} 未注册")
+
         # kind 特定必需字段校验
         if kind == "node":
-            if "type" not in spec:
+            type_key = spec.get("type")
+            if not type_key:
                 raise ValueError(f"节点 {name!r}: 需要 'type'（函数键）")
+            if type_key not in REGISTRY:
+                raise ValueError(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
         elif kind == "human":
             review_spec = spec.get("review")
             if review_spec is not None:
@@ -143,7 +152,7 @@ def validate_nodes(config: dict[str, Any]) -> None:
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
                 raise ValueError(f"循环节点 {name!r}: 需要非空的 'body' 映射")
-            if not spec.get("condition"):
+            if not condition_key:
                 raise ValueError(f"循环节点 {name!r}: 需要 'condition' 函数键")
 
 
@@ -173,7 +182,7 @@ def validate_config(config: dict[str, Any]) -> None:
 
     校验项：
     - params 声明（字段合法性、与节点名无冲突）
-    - nodes 声明（结构合法性、kind 特定必需字段）
+    - nodes 声明（结构合法性、kind 特定必需字段、condition/type 注册校验）
     - review 声明格式和键引用（必须在参数键或节点名中）
     """
     validate_params(config)
@@ -212,10 +221,7 @@ def load_dag(
             condition = spec.get("condition")
             cond_func = None
             if condition:
-                cond_type = REGISTRY.get(condition)
-                if cond_type is None:
-                    raise ValueError(f"条件谓词 {condition!r} 未注册")
-                cond_func = cond_type.func
+                cond_func = REGISTRY[condition].func
             dag.human_node(
                 name,
                 depends_on=deps,
@@ -223,22 +229,15 @@ def load_dag(
                 condition=cond_func,
                 retry=retry,
                 approver=approver,
-                review=spec.get("review"), 
+                review=spec.get("review"),
             )
 
         elif kind == "loop":
             body = spec.get("body")
-            if not isinstance(body, dict) or not body:
-                raise ValueError(f"循环节点 {name!r} 需要非空的 'body' 映射")
-            
-            if not spec.get("condition"):
-                raise ValueError(f"循环节点 {name!r} 需要 'condition' 函数键")
 
             # Body nodes go through the same parsing path as top-level nodes.
             body_dag = load_dag({"nodes": body}, approver=approver)
-            cond_type = REGISTRY.get(spec["condition"])
-            if cond_type is None:
-                raise ValueError(f"条件谓词 {spec['condition']!r} 未注册")
+            cond_type = REGISTRY[spec["condition"]]
             dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
@@ -250,20 +249,14 @@ def load_dag(
             )
 
         else:
-            if "type" not in spec:
-                raise ValueError(f"节点 {name!r} 需要 'type'（函数键）")
             condition = spec.get("condition")
-            # 注册表类型键与 label 写进 metadata 供 to_mermaid 展示；YAML 的
-            # metadata 在后，同名 key（如自定义 label）可覆盖默认值
-            node_type = REGISTRY.get(spec["type"])
-            if node_type is None:
-                raise ValueError(f"节点 {spec['type']!r} 未注册")
             cond_func = None
             if condition:
-                cond_type = REGISTRY.get(condition)
-                if cond_type is None:
-                    raise ValueError(f"条件谓词 {condition!r} 未注册")
-                cond_func = cond_type.func
+                cond_func = REGISTRY[condition].func
+
+            # 注册表类型键与 label 写进 metadata 供 to_mermaid 展示；YAML 的
+            # metadata 在后，同名 key（如自定义 label）可覆盖默认值
+            node_type = REGISTRY[spec["type"]]
             dag.add_node(
                 Node(
                     name=name,
