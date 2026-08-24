@@ -16,27 +16,33 @@ from app.core.config import settings
 from app.registry.core import node
 
 
-async def _ollama_chat(model: str, messages: list[dict[str, str]]) -> str:
-    """POST /api/chat（非流式）→ 助手回复文本。
-
-    连接层错误（服务未启动/超时）与 HTTP 错误（模型不存在等）分别给出
-    可定位的中文提示，底层异常链保留在 ``__cause__``。
-    """
+async def _ollama_chat(
+    model: str, 
+    messages: list[dict[str, str]]
+) -> str:
+    """POST /api/chat（非流式）→ 助手回复文本。"""
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
-    # trust_env=False：本地服务不走系统代理（否则代理拦截回环流量会得到莫名 502）；
-    # 连接 10s 快速失败，读超时（等模型生成）放宽到 OLLAMA_TIMEOUT_SECONDS
-    timeout = httpx.Timeout(10.0, read=settings.OLLAMA_TIMEOUT_SECONDS)
+
     try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            resp = await client.post(url, json={"model": model, "messages": messages, "stream": False})
+        async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as http_client:
+            resp = await http_client.post(
+                url, 
+                json={"model": model, "messages": messages, "stream": False}
+            )
+            resp.raise_for_status()
+            
+            data = resp.json()
+            content = data.get("message", {}).get("content")
+            if content is None:
+                raise ValueError(f"Ollama 响应格式异常：{resp.text[:200]!r}")
+                
+            return str(content)
+    except httpx.HTTPStatusError as exc:
+        raise ValueError(
+            f"Ollama 返回 {exc.response.status_code}（模型 {model!r}）：{exc.response.text[:200]}"
+        ) from exc
     except httpx.HTTPError as exc:
         raise ValueError(f"无法连接 Ollama（{url}）：{exc}") from exc
-    if resp.status_code != 200:
-        raise ValueError(f"Ollama 返回 {resp.status_code}（模型 {model!r}）：{resp.text[:200]}")
-    try:
-        return str(resp.json()["message"]["content"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"Ollama 响应格式异常：{resp.text[:200]!r}") from exc
 
 
 @node(

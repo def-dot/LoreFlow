@@ -1,36 +1,35 @@
-import asyncio
-
-class SuspendExecution(Exception):
-    """自定义挂起异常"""
-    pass
-
-async def task_b():
-    print("Task B 开始运行...")
-    await asyncio.sleep(0.5)
-    # 模拟 Task B 抛出异常
-    raise SuspendExecution("Task B 触发了挂起异常！")
-
-async def task_a(b_task: asyncio.Task):
-    print("Task A 开始等待 Task B 完成...")
-    # 等待 Task B 执行结束
-    await asyncio.sleep(1)
-    
-    print("Task A 尝试获取 Task B 的结果...")
+# 1. 显式因果链：raise B from A（推荐）
+def divide_from_dict(data: dict):
     try:
-        # 调用 result() 时，Task B 内部的异常会在 Task A 中抛出
-        res = b_task.result()
-        print(f"Task B 结果: {res}")
-    except SuspendExecution as e:
-        print(f"Task A 捕获到了 Task B 的异常: {e}")
+        num = data["value"]  # 可能抛出 KeyError
+        return 100 / num  # 可能抛出 ZeroDivisionError
+    except KeyError as exc:
+        # 明确告诉 Python：因为缺了 key，所以我抛出 ValueError
+        raise ValueError("数据缺失，无法计算") from exc
 
-async def main():
-    # 启动 Task B
-    b_task = asyncio.create_task(task_b())
-    # 将 Task B 的句柄传给 Task A
-    a_task = asyncio.create_task(task_a(b_task))
+
+# 2. 隐藏底层细节：raise B from None
+def divide_clean(data: dict):
+    try:
+        num = data["value"]
+        return 100 / num
+    except KeyError:
+        # 彻底抹去 KeyError，只保留干净的 ValueError
+        raise ValueError("数据缺失，无法计算") from None
+
+
+# 3. 隐式报错：raise B (不带 from)
+def divide_implicit(data: dict):
+    try:
+        num = data["value"]
+        return 100 / num
+    except KeyError:
+        # 语言表达模糊，让人分不清是故意捕获还是二次 Bug
+        raise ValueError("数据缺失，无法计算")
     
-    # 等待 Task A 执行完毕
-    await a_task
 
-if __name__ == "__main__":
-    asyncio.run(main())
+try:
+    divide_from_dict({})
+except Exception as e:
+    print("=============")
+    print(str(e))
