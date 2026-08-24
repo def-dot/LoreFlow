@@ -17,8 +17,6 @@ export interface NodeSnapshot {
   attempts: number
   duration_ms: number
   payload?: unknown
-  /** skipped 时的原因：upstream_failed = 上游失败级联（会向下游传递）；condition_not_met = 条件不满足（分支语义） */
-  skip_reason?: string | null
 }
 
 export interface RunDetail extends RunListItem {

@@ -1,4 +1,4 @@
-# DAG Flow — 基础示例：串行依赖 + 并行分支 + 汇聚。
+# DAG Flow — 实际示例：RAG 文档入库的最简串行链。
 #
 # 节点函数在 Python 侧用 @node 装饰器注册（见 app/registry），
 # 这个文件只声明编排结构。
@@ -8,25 +8,21 @@
 #     dag = load_dag("app/pipelines/01_basic_chain.yaml")
 #     results = await dag.run()
 
-name: 基础链路
-description: 基础示例：串行依赖、并行分支与汇聚。
+name: 文档入库
+description: 实际示例：加载文档 → 切块 → 向量化 → 写入向量库。
 
 nodes:
-  fetch:
-    type: cfg_fetch            # 抓取数据，输出 {title, body}
+  load:
+    type: rag_load           # 加载设定文档，输出 {doc_id, title, text}
 
-  clean:
-    type: cfg_clean
-    depends_on: [fetch]        # clean 与 enrich 并行执行
+  chunk:
+    type: rag_chunk
+    depends_on: [load]       # 按空行切成语义段
 
-  enrich:
-    type: cfg_enrich
-    depends_on: [fetch]
+  embed:
+    type: rag_embed
+    depends_on: [chunk]      # 每段生成向量
 
-  merge:
-    type: cfg_merge
-    depends_on: [clean, enrich]  # 两个分支都完成后汇聚
-
-  report:
-    type: cfg_report
-    depends_on: [merge]
+  upsert:
+    type: rag_upsert
+    depends_on: [embed]      # 批量写入向量库

@@ -155,7 +155,7 @@ async def test_run_lifecycle_reject(client: AsyncClient) -> None:
     assert data["status"] == "failed"
     assert data["nodes"]["review"]["status"] == "failed"
     assert data["nodes"]["review"]["error"] == "Rejected in test"
-    assert data["nodes"]["publish"]["status"] == "skipped"
+    assert data["nodes"]["publish"]["status"] == "upstream_failed"
     # run-error 摘要带失败原因（节点名 + 异常类型 + 消息）
     assert "review" in data["error"]
     assert "HumanRejected: Rejected in test" in data["error"]

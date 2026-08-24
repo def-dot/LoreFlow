@@ -18,6 +18,9 @@ class NodeStatus(Enum):
     RETRYING = "retrying"
     COMPLETED = "completed"
     FAILED = "failed"
+    # 失败的爆炸半径：节点想跑但被上游失败阻断，未执行。对下游的行为等同
+    # FAILED（阻断并传递）；SKIPPED 则是正常分支结果，下游照常执行。
+    UPSTREAM_FAILED = "upstream_failed"
     SKIPPED = "skipped"
     CANCELLED = "cancelled"
 
@@ -57,13 +60,6 @@ class RetryPolicy:
         return isinstance(exception, self.retry_on)
 
 
-#: 跳过原因（status == SKIPPED 时有意义）。两种跳过对下游语义相反：
-#: 上游失败级联要继续向下游传递（隔代也拦）；条件不满足是分支语义，
-#: 下游照常执行。
-SKIP_UPSTREAM_FAILED = "upstream_failed"
-SKIP_CONDITION = "condition_not_met"
-
-
 @dataclass
 class NodeResult:
     """The result of executing a single DAG node.
@@ -75,8 +71,6 @@ class NodeResult:
         error: The exception that caused failure (if failed).
         attempts: Number of execution attempts (1 + retries).
         duration_ms: Wall-clock duration of the final attempt in milliseconds.
-        skip_reason: Why the node was skipped (status == SKIPPED) —
-                     ``SKIP_UPSTREAM_FAILED`` or ``SKIP_CONDITION``.
     """
 
     node_name: str
@@ -85,7 +79,6 @@ class NodeResult:
     error: Exception | None = None
     attempts: int = 0
     duration_ms: float = 0.0
-    skip_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe dict (the shape the web UI consumes)."""
@@ -95,7 +88,6 @@ class NodeResult:
             "error": str(self.error) if self.error else None,
             "attempts": self.attempts,
             "duration_ms": round(self.duration_ms) if self.duration_ms else 0,
-            "skip_reason": self.skip_reason,
         }
 
     def __repr__(self) -> str:

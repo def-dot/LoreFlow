@@ -13,19 +13,17 @@ const rows = computed<Row[]>(() =>
   Object.entries(props.detail.nodes).map(([name, node]) => ({ name, ...node })),
 )
 
-// 跳过原因：两种跳过对用户含义不同，级联跳过说明上游出了问题
-const SKIP_REASONS: Record<string, string> = {
-  upstream_failed: '上游失败，级联跳过',
-  condition_not_met: '条件不满足，分支未执行',
-}
-
-// 与旧 UI 一致：completed 显示输出，否则显示 error / 跳过原因
+// 与旧 UI 一致：completed 显示输出，否则显示 error / 跳过说明
+// skipped 只剩一种含义（条件不满足）；上游失败级联是独立状态 upstream_failed
 function cellText(row: Row): string {
   if (row.status === 'completed') {
     return row.output === null || row.output === undefined ? '' : JSON.stringify(row.output, null, 1)
   }
   if (row.status === 'skipped') {
-    return row.skip_reason ? (SKIP_REASONS[row.skip_reason] ?? row.skip_reason) : '已跳过'
+    return '条件不满足，分支未执行'
+  }
+  if (row.status === 'upstream_failed') {
+    return '上游失败，未执行'
   }
   return row.error ?? ''
 }

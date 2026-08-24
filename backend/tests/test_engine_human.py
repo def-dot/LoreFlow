@@ -11,8 +11,6 @@ from app.engine import (
     NodeStatus,
     RetryPolicy,
     SuspendExecution,
-    SKIP_CONDITION,
-    SKIP_UPSTREAM_FAILED,
 )
 from app.engine.node import ApproverFunc
 
@@ -82,7 +80,7 @@ async def test_human_reject_cascades_skip() -> None:
     assert "no good" in str(results["review"].error)
     assert results["review"].output["approved"] is False  # 拒绝详情记入 output
     assert results["review"].output["reason"] == "no good"
-    assert results["publish"].status == NodeStatus.SKIPPED
+    assert results["publish"].status == NodeStatus.UPSTREAM_FAILED
 
 
 async def test_reject_cascade_transmits_transitively() -> None:
@@ -108,10 +106,8 @@ async def test_reject_cascade_transmits_transitively() -> None:
         await dag.run()
     results = excinfo.value.results
     assert results["first_review"].status == NodeStatus.FAILED
-    assert results["second_review"].status == NodeStatus.SKIPPED
-    assert results["second_review"].skip_reason == SKIP_UPSTREAM_FAILED
-    assert results["publish"].status == NodeStatus.SKIPPED  # 隔代也拦，级联传递
-    assert results["publish"].skip_reason == SKIP_UPSTREAM_FAILED
+    assert results["second_review"].status == NodeStatus.UPSTREAM_FAILED
+    assert results["publish"].status == NodeStatus.UPSTREAM_FAILED  # 隔代也拦，级联传递
     assert published == []
 
 
@@ -169,7 +165,6 @@ async def test_human_node_condition_false_skips_review() -> None:
     results = await dag.run()
     assert called is False
     assert results["review"].status == NodeStatus.SKIPPED
-    assert results["review"].skip_reason == SKIP_CONDITION
     assert results["publish"].output == 1  # 条件跳过是分支语义，下游照跑
 
 
@@ -234,5 +229,5 @@ async def test_suspend_propagates_without_terminal_event() -> None:
     review_statuses = {e.status for e in collected if e.node_name == "review"}
     assert not (
         review_statuses
-        & {NodeStatus.COMPLETED, NodeStatus.FAILED, NodeStatus.SKIPPED, NodeStatus.CANCELLED}
+        & {NodeStatus.COMPLETED, NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED, NodeStatus.SKIPPED, NodeStatus.CANCELLED}
     )

@@ -68,8 +68,9 @@ class DAG:
                         :meth:`run` time (no default to fall back on).
                         Missing keys raise ``ValueError`` before any node runs.
         on_event: Optional async callback invoked on every node state change
-                  (running/retrying/completed/failed/skipped/cancelled) and
-                  awaited. Useful for live progress monitoring (e.g. a web UI).
+                  (running/retrying/completed/failed/upstream_failed/skipped/
+                  cancelled) and awaited. Useful for live progress monitoring
+                  (e.g. a web UI).
     """
 
     def __init__(

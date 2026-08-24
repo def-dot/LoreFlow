@@ -38,8 +38,6 @@ from .types import (
     NodeStatus,
     RetryPolicy,
     SuspendExecution,
-    SKIP_CONDITION,
-    SKIP_UPSTREAM_FAILED,
 )
 
 __all__ = [
@@ -50,8 +48,6 @@ __all__ = [
     "NodeResult",
     "NodeStatus",
     "RetryPolicy",
-    "SKIP_CONDITION",
-    "SKIP_UPSTREAM_FAILED",
     "SuspendExecution",
     "load_dag",
     "terminal_approver",

@@ -49,7 +49,6 @@ class NodeSnapshot(BaseModel):
     attempts: int = 0
     duration_ms: float = 0
     payload: Any = None
-    skip_reason: str | None = None  # skipped 时区分：上游失败级联 / 条件不满足
 
 
 class RunDetail(RunListItem):

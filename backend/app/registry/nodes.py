@@ -112,3 +112,43 @@ async def demo_search(ctx: dict[str, Any]) -> dict[str, Any]:
     topic 有 YAML 默认值、可被运行时覆盖。"""
     await asyncio.sleep(0.05)
     return {"query": ctx["query"], "topic": ctx.get("topic", "")}
+
+
+# ---- RAG 文档入库 — 01_basic_chain.yaml 的实际链路 ----
+
+
+@node(label="加载文档", description="读入一篇设定文档，输出 {doc_id, title, text}")
+async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
+    await asyncio.sleep(0.05)
+    return {
+        "doc_id": "lore-001",
+        "title": "北境要塞",
+        "text": (
+            "北境要塞建于第二纪元，横贯大陆北端的霜脊山脉。\n\n"
+            "要塞由风哨、寒鸦、冬炉三段堡垒群组成，常驻兵力约八千。\n\n"
+            "每逢长冬，商路断绝，冬炉堡的存粮要支撑整条防线的补给。"
+        ),
+    }
+
+
+@node(label="切块", description="按空行把正文切成语义段（chunk 列表）")
+async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
+    return [p.strip() for p in ctx["load"]["text"].split("\n\n") if p.strip()]
+
+
+@node(label="向量化", description="为每个 chunk 生成 8 维确定性向量（内容哈希模拟，不依赖模型）")
+async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "chunk_id": f"{ctx['load']['doc_id']}-c{i}",
+            "text": chunk,
+            "vector": [float(sum(ord(c) * (d + 1) for c in chunk) % 997) for d in range(8)],
+        }
+        for i, chunk in enumerate(ctx["chunk"])
+    ]
+
+
+@node(label="写入向量库", description="批量 upsert 向量，返回写入统计")
+async def rag_upsert(ctx: dict[str, Any]) -> str:
+    await asyncio.sleep(0.05)
+    return f"upserted {len(ctx['embed'])} chunks from {ctx['load']['doc_id']}"

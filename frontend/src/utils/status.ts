@@ -5,6 +5,7 @@ const STATUS_TAG_TYPE: Record<string, 'success' | 'warning' | 'danger' | 'info' 
   reviewing: 'warning',
   retrying: 'warning',
   failed: 'danger',
+  upstream_failed: 'danger', // 失败的爆炸半径：归失败色系
   skipped: 'info',
   cancelled: 'info',
   pending: 'info',
@@ -21,6 +22,7 @@ const STATUS_LABEL: Record<string, string> = {
   reviewing: '待审核',
   retrying: '重试中',
   failed: '失败',
+  upstream_failed: '上游失败',
   skipped: '已跳过',
   cancelled: '已取消',
   pending: '待执行',

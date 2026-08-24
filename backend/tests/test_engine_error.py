@@ -31,7 +31,7 @@ async def test_failure_records_error_and_skips_downstream() -> None:
     results = excinfo.value.results
     assert results["critical"].status == NodeStatus.FAILED
     assert isinstance(results["critical"].error, ConnectionError)
-    assert results["dependant"].status == NodeStatus.SKIPPED
+    assert results["dependant"].status == NodeStatus.UPSTREAM_FAILED
     assert results["independent"].status == NodeStatus.COMPLETED
 
 
