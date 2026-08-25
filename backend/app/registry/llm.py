@@ -57,39 +57,40 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
 
 
 @node(
-    label="意图分类",
-    description="LLM 判断 ctx['prompt'] 属于闲聊（chat）还是知识检索（rag），输出 {intent, raw}",
+    label="意图识别",
+    description="LLM 判断 ctx['prompt'] 是简单问答（simple）还是复杂诉求（complex），输出 {intent, raw}",
 )
 async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
     system = (
-        "你是意图分类器，只输出一个小写单词，不要输出任何其他内容：\n"
-        "chat —— 问候、闲聊、创作、翻译等无需查询资料的请求\n"
-        "rag —— 需要查询知识库/设定资料才能回答的问题"
+        "你是客服意图分类器，只输出一个小写单词，不要输出任何其他内容：\n"
+        "simple —— 常见问题，凭知识库资料即可直接回答\n"
+        "complex —— 投诉、纠纷、个性化或多步骤等需要人工客服处理的复杂诉求"
     )
     raw = await _ollama_chat(
         settings.OLLAMA_MODEL,
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
     )
     # 宽松解析：本地模型不总按指令输出小写英文（实测会把闲聊答成「聊天」），
-    # 按中英关键词识别；识别不出按闲聊（不至于编造检索结果）
+    # 按中英关键词识别；识别不出按简单问答（自动回复只依据知识库作答，
+    # 资料不足会明说，不至于把诉求错误升级成人工）
     text = raw.lower()
-    intent = "rag" if any(k in text for k in ("rag", "知识", "检索", "问答")) else "chat"
+    intent = "complex" if any(k in text for k in ("complex", "复杂", "人工", "投诉", "纠纷")) else "simple"
     return {"intent": intent, "raw": raw.strip()}
 
 
-@node(kind="condition", label="是闲聊类", description="意图为 chat：闲聊支路执行")
-def is_chat(ctx: dict[str, Any]) -> bool:
+@node(kind="condition", label="是简单问答", description="意图为 simple：知识库自动回复支路执行")
+def is_simple(ctx: dict[str, Any]) -> bool:
     classify = ctx.get("classify")
-    return isinstance(classify, dict) and classify.get("intent") == "chat"
+    return isinstance(classify, dict) and classify.get("intent") == "simple"
 
 
-@node(kind="condition", label="是知识类", description="意图为 rag：知识支路执行")
-def is_rag(ctx: dict[str, Any]) -> bool:
+@node(kind="condition", label="是复杂诉求", description="意图为 complex：人工客服接管支路执行")
+def is_complex(ctx: dict[str, Any]) -> bool:
     classify = ctx.get("classify")
-    return isinstance(classify, dict) and classify.get("intent") == "rag"
+    return isinstance(classify, dict) and classify.get("intent") == "complex"
 
 
 @node(

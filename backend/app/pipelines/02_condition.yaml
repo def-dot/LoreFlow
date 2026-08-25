@@ -1,0 +1,31 @@
+name: 客服分流
+description: 意图识别分流：简单问答检索知识库后 AI 自动回复；复杂诉求转人工客服接管。
+
+params:
+  prompt:
+    required: true
+    multiline: true
+    label: 用户诉求
+    description: 用户的问题或诉求，由 LLM 判断走哪条支路
+
+nodes:
+  classify:
+    type: llm_classify            # 意图识别，输出 {intent: simple|complex}
+
+  retrieve:                       # 支路一：简单问答，检索知识库后自动回复
+    type: rag_retrieve
+    depends_on: [classify]
+    condition: is_simple
+
+  auto_reply:
+    type: llm_rag_reply
+    depends_on: [retrieve]
+    condition: is_simple          # SKIPPED 不级联，同支路每个节点都要挂条件
+
+  takeover:                       # 支路二：复杂诉求，人工客服接管
+    kind: human
+    depends_on: [classify]
+    condition: is_complex
+    prompt: "复杂诉求：请人工客服接管处理。"
+    review:
+      prompt: {label: 用户诉求}

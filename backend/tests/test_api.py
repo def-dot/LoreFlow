@@ -146,8 +146,8 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
 
     conditions = [t["name"] for t in types if t["kind"] == "condition"]
     assert conditions == [
-        "is_chat",
-        "is_rag",
+        "is_simple",
+        "is_complex",
         "cfg_needs_report",
         "demo_keep_iterating",
         "demo_needs_review",

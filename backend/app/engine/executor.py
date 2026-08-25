@@ -294,9 +294,9 @@ class DAGExecutor:
                 status=NodeStatus.CANCELLED,
             )
         except SuspendExecution:
-            # 挂起：不产生终态结果（REVIEWING+payload 由 approver 直接落库，
-            # emit 会覆盖它），但必须唤醒下游——让级联节点也以挂起退出，
-            # 否则 gather 会永远等它们。
+            # 挂起：不产生终态结果（REVIEWING+payload 由 approver 写进内存快照、
+            # run_pipeline 落库，emit 会覆盖它），但必须唤醒下游——让级联节点
+            # 也以挂起退出，否则 gather 会永远等它们。
             raise
         except Exception as exc:
             # Should not happen — the code above is defensive, but guard anyway

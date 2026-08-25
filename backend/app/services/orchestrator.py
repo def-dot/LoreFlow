@@ -47,21 +47,10 @@ def make_approver(record: RunRecord) -> ApproverFunc:
         if decision is not None:
             return decision
 
+        # 只写内存快照（节点级 reviewing + payload），落库由 run_pipeline 的
+        # SuspendExecution 处理统一做——status 与 nodes 必须同一条 UPDATE 原子写入
         entry["status"] = NodeStatus.REVIEWING.value
         entry["payload"] = payload
-
-        async with database.AsyncSessionLocal() as session:
-            result = await session.execute(
-                update(RunRecord)
-                .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
-                .values(status=RunStatus.REVIEWING, nodes=record.nodes)
-            )
-            await session.commit()
-
-        if not result.rowcount:
-            record = runs.get_run(record.id)
-            logger.info("[run %s] 挂起失败：当前状态 %s", record.id, record.status.value if record else '未知')
-            raise SuspendExecution(f"run {record.id} 节点 {node_name} 挂起失败")
         raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批")
 
     return approver
@@ -83,7 +72,7 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
 
 
 async def run_pipeline(record: RunRecord, dag: DAG) -> None:
-    """执行一次 run。终态走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
+    """执行一次 run。挂起与终态均走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
     """
     outcome = RunStatus.COMPLETED
     error: str | None = None
@@ -94,7 +83,18 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"
     except SuspendExecution:
+        # 挂起落库（approver 只写内存快照）：CAS 抢 REVIEWING，与取消并发时谁先到算谁的；
+        # rowcount 为 0 说明取消已抢先写终态，这里什么都不用做
         suspended = True
+        async with database.AsyncSessionLocal() as session:
+            result = await session.execute(
+                update(RunRecord)
+                .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
+                .values(status=RunStatus.REVIEWING, nodes=record.nodes)
+            )
+            await session.commit()
+        if not result.rowcount:
+            logger.info("[run %s] 挂起失败：状态已被并发修改（如取消）", record.id)
     except Exception as exc:
         outcome = RunStatus.FAILED
         error = str(exc)
