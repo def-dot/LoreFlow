@@ -1,5 +1,7 @@
 """Run 相关 API — 挂载在 /api/v1 下的 /runs 路由组"""
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.response import UnifiedResponseRoute
@@ -71,6 +73,23 @@ async def delete_run(run_id: int) -> dict[str, int]:
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id} 不存在")
     raise HTTPException(status_code=400, detail=f"仅终态记录可删除（当前：{record.status.value}）")
+
+
+@router.post("/{run_id}/cancel")
+async def cancel_run(run_id: int) -> dict[str, Any]:
+    """取消运行中或待审核的 run：标记为 CANCELLED，后台 pipeline 会检测并退出。
+    """
+    try:
+        await orchestrator.cancel_run(run_id)
+    except ValueError as e:
+        if "不存在" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+    record = await run_service.get_run(run_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"运行 {run_id} 不存在")
+    return {"data": record.model_dump()}
 
 
 @router.post("/{run_id}/approve/{node_name}", response_model=ApproveResponse)

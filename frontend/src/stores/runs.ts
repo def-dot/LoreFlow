@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { approve, deleteRun, getRun, listRuns, startRun } from '@/api/runs'
+import { approve, cancelRun, deleteRun, getRun, listRuns, startRun } from '@/api/runs'
 import type { RunDetail, RunListItem } from '@/api/runs'
 
 /**
@@ -101,6 +101,15 @@ export const useRunsStore = defineStore('runs', {
       } finally {
         this.deciding = false
       }
+    },
+
+    /** 取消运行中或待审核的 run：调用后端标记为 CANCELLED，详情页会立即更新状态。 */
+    async cancelRun(id: number) {
+      const { data } = await cancelRun(id)
+      // 同步更新本地详情（立即反馈）+ 列表该条目状态（列表轮询也会更新，但这里主动同步）
+      if (this.selectedId === id) this.detail = data
+      const idx = this.runs.findIndex((r) => r.id === id)
+      if (idx !== -1) this.runs[idx] = { ...this.runs[idx], status: data.status, finished_at: data.finished_at }
     },
   },
 })

@@ -83,23 +83,30 @@ class DAGExecutor:
         # ----- resume: 已完成/条件跳过的节点作为既成事实直接恢复 -----
         resume = resume or {}
         for name, saved in resume.items():
-            if saved.get("status") in ["completed", "skipped"]:
-                events[name].set()
-                results[name] = NodeResult(saved.get("node_name"), saved.get("status"), saved.get("output"),
-                    saved.get("error"), saved.get("attempts"), saved.get("duration_ms"),
-                )
+            if saved.get("status") not in ("completed", "skipped"):
+                continue
+            if name not in nodes:
+                # 快照来自旧版配置：当前 DAG 已无此节点（配置改版），跳过
+                logger.warning("[resume] 快照节点 %r 不在当前 DAG 中，跳过", name)
+                continue
+            events[name].set()
+            status = NodeStatus(saved.get("status"))
+            # 快照是 to_dict() 的有损串行化（无 node_name、status 为字符串），
+            # 须用循环变量名重建并把 status 还原成枚举才能满足返回契约
+            results[name] = NodeResult(
+                node_name=name,
+                status=status,
+                output=saved.get("output"),
+                attempts=saved.get("attempts") or (0 if status is NodeStatus.SKIPPED else 1),
+                duration_ms=saved.get("duration_ms") or 0.0,
+            )
 
-                output = saved.get("output")
-                if output:
-                    ctx[name] = output
+            ctx[name] = saved.get("output")  # falsy 输出（0/""）同样是合法结果
 
-                if nodes[name].metadata.get("human_review") and isinstance(output, dict):
-                    decision = output.get("decision")
-                    payload = output.get("payload")
-                    edits = decision.get("edits") if isinstance(decision, dict) else None
-                    for key, value in edits.items():
-                        if key in payload and not key.startswith("_"):
-                            ctx[key] = value
+            # 人工审核节点的修订写回是节点对共享上下文的可观察副作用：
+            # 恢复不重跑，须重放，否则 resume 后续节点退回看到修订前的值
+            if nodes[name].metadata.get("human_review"):
+                replay_review_edits(ctx, saved.get("output"))
 
         # Task registry — 节点任务表（下游跳过检查也从中读上游终态）
         tasks: dict[str, asyncio.Task[NodeResult]] = {}

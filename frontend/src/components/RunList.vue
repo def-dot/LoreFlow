@@ -18,13 +18,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: number]
   delete: [id: number]
+  cancel: [id: number]
   more: []
   'set-status': [v: string]
   'set-config': [v: string]
 }>()
 
-// 终态才可删（后端同样拒绝非终态）：运行中/待审核的行不出现删除按钮
-const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
+// 可取消状态：running 或 reviewing；其余（终态）可删，后端同样按此拒绝
+const CANCELLABLE = new Set(['running', 'reviewing'])
 
 // 状态筛选项：值用后端枚举，标签走统一中文映射
 const STATUS_OPTIONS = ['running', 'reviewing', 'completed', 'failed', 'cancelled'].map((v) => ({
@@ -93,19 +94,40 @@ function fmtFull(iso: string | null): string {
           :style="{ background: statusColor(r.status) }"
           :title="statusLabel(r.status)"
         ></span>
-        <span class="name" :title="r.name">{{ r.name }}</span>
-        <span class="idx">#{{ r.id }}</span>
-        <span class="time" :title="fmtFull(r.created_at)">{{ fmtShort(r.created_at) }}</span>
-        <button
-          v-if="TERMINAL.has(r.status)"
-          class="del"
-          title="删除该记录"
-          aria-label="删除该记录"
-          @click.stop="emit('delete', r.id)"
-          @keydown.enter.stop
-        >
-          ✕
-        </button>
+        <!-- 身份组：name + #id 紧贴常显。id 是同名 run 的唯一区分，
+             hover 展开操作按钮时恰恰是确认目标的时候，不能随时间淡出 -->
+        <div class="who">
+          <span class="name" :title="r.name">{{ r.name }}</span>
+          <span class="idx">#{{ r.id }}</span>
+        </div>
+        <!-- 尾槽：时间与操作按钮叠放同一格（grid 同槽），非 hover 显示
+             时间，hover 交叉淡变为按钮 —— 替换而非遮盖，不依赖背景色 -->
+        <div class="tail">
+          <span class="time" :title="fmtFull(r.created_at)">{{ fmtShort(r.created_at) }}</span>
+          <div class="actions">
+            <button
+              v-if="CANCELLABLE.has(r.status)"
+              class="act cancel"
+              title="取消运行"
+              aria-label="取消运行"
+              @click.stop="emit('cancel', r.id)"
+              @keydown.enter.stop
+            >
+              ⏹
+            </button>
+            <!-- v-else = 非 running/reviewing，即终态，可删（后端同样拒绝非终态） -->
+            <button
+              v-else
+              class="del"
+              title="删除该记录"
+              aria-label="删除该记录"
+              @click.stop="emit('delete', r.id)"
+              @keydown.enter.stop
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       </div>
       <div v-if="!runs.length" class="muted empty">
         {{ hasFilter ? '没有符合筛选的运行记录。' : '暂无运行记录 — 点击「新建运行」发起一个。' }}
@@ -247,8 +269,17 @@ function fmtFull(iso: string | null): string {
     opacity: 0.35;
   }
 }
-.name {
-  flex: 1;
+/* 身份组：可伸缩可收缩，内部 name 超长省略、#id 始终可见不被吞。
+ * 不设 flex-grow —— 右侧剩余空白由 .tail 的 margin-left:auto 吸收，
+ * 使 id 紧贴 name 实际宽度而非被推去贴时间 */
+.who {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.who .name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -256,7 +287,7 @@ function fmtFull(iso: string | null): string {
   font-size: 12.5px;
   color: var(--ink-2);
 }
-.run-item.sel .name {
+.run-item.sel .who .name {
   color: var(--ink);
 }
 /* 行内 #id：同一流水线反复运行时名字全一样，id 是唯一区分 */
@@ -267,41 +298,104 @@ function fmtFull(iso: string | null): string {
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
-.time {
+/* 尾槽：吃掉 name 的剩余空间把整组推到最右，内部 grid 叠放 ——
+ * 时间与操作按钮占同一格，hover 交叉淡变（时间淡出、按钮淡入）。
+ * 是替换而非遮盖，不依赖任何背景色；槽宽取两者较大者，
+ * 按钮数量增加时槽随之变宽，行整体布局不动 */
+.tail {
   flex: none;
+  margin-left: auto;
+  display: grid;
+  justify-items: end; /* 时间与按钮都贴右缘对齐 */
+}
+.tail > * {
+  grid-area: 1 / 1;
+}
+.time {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+  transition: opacity 0.15s ease;
 }
-/* 行内删除：默认隐形（列表以浏览为主），hover/focus 才出现；
- * 只占一枚符号宽，避免挤压 name/time 的常规布局 */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+/* hover（或键盘 tab 进行使按钮聚焦）时切换显示。
+ * 淡出侧掐掉事件：opacity 0 的元素仍会弹 title 提示、挡住下层 */
+.run-item:hover .time,
+.run-item:focus-within .time {
+  opacity: 0;
+  pointer-events: none;
+}
+.run-item:hover .actions,
+.run-item:focus-within .actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* 触摸设备没有 hover：按钮常显、时间让位（时间在右侧详情面板有完整版） */
+@media (hover: none) {
+  .time {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+/* 行内小操作按钮：透明底图标，hover 才上色 */
+.act,
 .del {
-  flex: none;
   width: 18px;
   height: 18px;
-  margin-right: -4px; /* 吃掉按钮自身视觉宽度，不 hover 时布局零变化 */
   padding: 0;
   border: none;
   border-radius: 4px;
   background: transparent;
   color: var(--ink-3);
-  font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    transform 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.run-item:hover .del,
-.del:focus-visible {
-  opacity: 1;
+
+.act {
+  font-size: 14px; /* 取消按钮图标稍大 */
 }
+
+.del {
+  font-size: 12px; /* 删除按钮图标 */
+}
+
 .del:hover {
   color: #ff8f8a;
-  background: rgba(239, 115, 112, 0.12);
+  background: rgba(239, 115, 112, 0.15);
+  transform: scale(1.05);
 }
+
 .del:focus-visible {
   outline: 1px solid rgba(239, 115, 112, 0.5);
+}
+
+.act:hover {
+  color: var(--ink);
+  background: rgba(139, 144, 176, 0.15);
+  transform: scale(1.05);
+}
+
+.act:focus-visible {
+  outline: 1px solid rgba(139, 144, 176, 0.5);
 }
 /* 单列布局下 sticky 全高侧栏会盖住页面：回到普通流，
  * 列表限高避免几百条把详情推到屏幕外 */

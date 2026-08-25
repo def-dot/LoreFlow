@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, update
 from sqlmodel import func, select
 
 from app.core import database
@@ -84,6 +84,18 @@ async def get_run(run_id: int) -> RunRecord | None:
     """One run record, or ``None``."""
     async with database.AsyncSessionLocal() as session:
         return await session.get(RunRecord, run_id)
+
+
+async def save_nodes(run_id: int, nodes: dict[str, Any]) -> None:
+    """只落节点快照（定向 UPDATE，不携带 status/error 等其他字段）。
+
+    status 的写权归各处的 CAS UPDATE 独占：事件回写若整体 merge
+    内存 record，会把执行进程里的旧状态（如 RUNNING）盖掉取消方刚
+    写入的 CANCELLED —— 取消就被"复活"了。
+    """
+    async with database.AsyncSessionLocal() as session:
+        await session.execute(update(RunRecord).where(RunRecord.id == run_id).values(nodes=nodes))
+        await session.commit()
 
 
 async def delete_run(run_id: int) -> bool:

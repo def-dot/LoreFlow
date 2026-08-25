@@ -63,6 +63,11 @@ export function deleteRun(runId: number): Promise<{ deleted: number }> {
   return api.delete(`/runs/${runId}`)
 }
 
+/** 取消运行中或待审核的 run：标记为 CANCELLED，后台 pipeline 会检测并退出 */
+export function cancelRun(runId: number): Promise<{ data: RunDetail }> {
+  return api.post(`/runs/${runId}/cancel`)
+}
+
 export function startRun(
   configFile: string,
   inputs?: Record<string, unknown>,

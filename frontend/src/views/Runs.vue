@@ -328,6 +328,17 @@ async function removeRun(id: number) {
   ElMessage.success(`已删除运行 #${id}`)
 }
 
+/** 取消运行中或待审核的 run：立即标记为 CANCELLED，后台 pipeline 会检测并退出。
+ * 失败提示由请求拦截器统一弹出。 */
+async function cancelRun(id: number) {
+  await store.cancelRun(id)
+  // 取消成功后立即刷新详情（如果选中就是当前 run）和列表，状态变更为 CANCELLED
+  if (store.selectedId === id) {
+    await store.fetchDetail()
+  }
+  await store.fetchRuns()
+}
+
 onMounted(async () => {
   try {
     await store.fetchRuns()
@@ -476,6 +487,7 @@ onUnmounted(() => {
         @set-config="store.setFilters({ configFile: $event })"
         @select="select"
         @delete="removeRun"
+        @cancel="cancelRun"
         @more="store.loadMoreRuns()"
       />
       <RunDetail
