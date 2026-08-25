@@ -31,7 +31,7 @@ from typing import Any
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
-from .validate import validate_graph, validate_params, validate_review
+from .validate import validate_graph, validate_inputs, validate_params, validate_review
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,9 @@ class DAG:
     def default_inputs(self) -> dict[str, Any]:
         """声明了 ``default`` 的参数 → 默认值（必填键也不例外）。
 
-        :meth:`run` 未传 inputs 时以本视图顶班；显式性由
-        共享的 ``validate.validate_inputs`` 只看传入 inputs 保证（不回退 default），
-        API 边界在 create_run 校验原始 inputs 时强制。
+        :meth:`run` 未传 inputs 时以本视图顶班，输入校验也看回退后的
+        生效输入（defaults 算已提供）；API 边界在 create_run 校验原始
+        inputs，required 即使有 default 也须显式传入。
         """
         return {
             name: spec["default"]
@@ -487,15 +487,20 @@ class DAG:
             A dict mapping every node name to its :class:`NodeResult`.
 
         Raises:
+            ValueError: 结构校验失败，或（声明了 params 时）输入不合法。
             DAGExecutionError: If any nodes failed.
-
-        信任语义：run 不校验。声明式 DAG 的结构由 load_dag 保证
-        （validate_config 有错即 raise）；程序化调用方自行组合
-        ``dag.validate()`` + ``validate.validate_inputs`` 再调 run，
-        编排层 create_run 只守输入增量。
         """
+        errors = self.validate()
+        if errors:
+            raise ValueError("DAG 结构无效:\n  " + "\n  ".join(errors))
+
         if inputs is None:
             inputs = self.default_inputs
+
+        if self.params:
+            errors = validate_inputs(inputs, self.params)
+            if errors:
+                raise ValueError("\n".join(errors))
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
         if logger.isEnabledFor(logging.DEBUG):

@@ -48,6 +48,21 @@ def test_cycle_rejected() -> None:
     assert any("循环依赖" in e for e in dag.validate())
 
 
+async def test_run_rejects_broken_structure() -> None:
+    """run() 开跑前结构校验：缺依赖/环 fail-fast——不再等执行器裸
+    KeyError，更不让环形依赖在全任务 upfront 模型下永久死锁。"""
+    missing = DAG("missing_dep")
+    missing.add_node(Node(name="a", func=noop, depends_on=["ghost"]))
+    with pytest.raises(ValueError, match="不在 DAG 中"):
+        await missing.run()
+
+    cycle = DAG("cycle")
+    cycle.add_node(Node(name="a", func=noop, depends_on=["b"]))
+    cycle.add_node(Node(name="b", func=noop, depends_on=["a"]))
+    with pytest.raises(ValueError, match="循环依赖"):
+        await cycle.run()
+
+
 def test_empty_dag_rejected() -> None:
     dag = DAG("empty")
     assert dag.validate() == ["DAG 没有节点"]

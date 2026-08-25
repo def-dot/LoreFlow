@@ -196,7 +196,7 @@ def test_load_dag_bad_file(tmp_path) -> None:
 
 
 async def test_required_inputs_enforced_at_run(registered: Any) -> None:
-    """params 声明的必填键：调用方组合 validate_inputs 拦截，run() 信任执行。"""
+    """params 声明的必填键：run() 对生效输入强制契约——缺必填开跑前即 ValueError。"""
     ran = {"n": 0}
 
     async def only(ctx: dict[str, Any]) -> str:
@@ -208,6 +208,9 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
 
     assert dag.validate() == []
     assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
+
+    with pytest.raises(ValueError, match="必填参数缺失或为空"):
+        await dag.run()
 
     results = await dag.run(inputs={"query": "hello"})
     assert results["only"].output == "hello"
@@ -290,6 +293,10 @@ async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
     # 未声明 params：白名单为空，q/extra 都是未声明的
     free = load_dag({"nodes": {"echo": {"type": "t_echo_extra"}}})
     assert validate_inputs(inputs, free.params) == ["未声明的参数键: extra, q"]
+
+    # 未声明 params = 自由上下文种子：run() 不设白名单，原样进 ctx
+    results = await free.run(inputs={"extra": 1})
+    assert results["echo"].output == 1
 
 
 def test_input_keys_clash_node_names_rejected() -> None:
