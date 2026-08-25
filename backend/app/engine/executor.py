@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from .node import HumanRejected, Node
+from .node import HumanRejected, Node, replay_review_edits
 from .types import (
     DAGExecutionError,
     NodeEventFunc,
@@ -87,7 +87,12 @@ class DAGExecutor:
                 logger.warning("[resume] 快照节点 %r 不在当前 DAG 中，跳过", name)
                 continue
             if saved.get("status") == "completed":
-                ctx[name] = saved.get("output")
+                output = saved.get("output")
+                ctx[name] = output
+                # 人工审核节点的修订写回是节点对共享上下文的可观察副作用：
+                # 恢复不重跑，须重放，否则 resume 后续节点退回看到修订前的值
+                if nodes[name].metadata.get("human_review"):
+                    replay_review_edits(ctx, output)
                 events[name].set()
                 results[name] = NodeResult(
                     node_name=name,

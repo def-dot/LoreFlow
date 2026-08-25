@@ -44,7 +44,9 @@ async def test_human_approve_completes_review() -> None:
 
 
 async def test_human_approve_edits_override_payload() -> None:
-    """通过时的审核修订覆盖 payload 对应键；原始上游输出保持不动。"""
+    """通过时的审核修订写回共享上下文（下游 ctx[key] 拿修订版）；
+    决策记录里的 payload 是审核时快照，保持原样不被修订覆盖；修订留档
+    在 decision.edits；上游 NodeResult 输出保持不动。"""
     dag = DAG("human_edit")
 
     @dag.node("draft")
@@ -59,16 +61,52 @@ async def test_human_approve_edits_override_payload() -> None:
 
     @dag.node("publish", depends_on=["review"])
     async def publish(ctx: dict[str, Any]) -> str:
-        return ctx["review"]["payload"]["draft"]
+        return ctx["draft"]
 
     results = await dag.run()
-    assert results["publish"].output == "草稿没有错别字"  # 下游拿到修订版
+    assert results["publish"].output == "草稿没有错别字"  # 下游经 ctx 拿到修订版
+    assert results["review"].output["payload"]["draft"] == "草稿有一个错别子"  # 快照保持审核时原样
     assert results["draft"].output == "草稿有一个错别子"  # 上游原始输出未被改动
     assert results["review"].output["decision"]["edits"] == {"draft": "草稿没有错别字"}  # 修订留档
 
 
+async def test_edits_propagate_to_next_review() -> None:
+    """多级审核：初审的修订写回共享上下文，终审视图读到修订后的值。
+
+    回归（08_dual_review）：修订曾只合并进初审节点自己的决策记录，
+    终审按 review 键重读 ctx（原始输入），终审卡片显示修订前的内容。
+    """
+    seen: dict[str, Any] = {}
+
+    async def first_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"approve": True, "edits": {"title": "修订后的标题"}}
+
+    async def final_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        seen["payload"] = payload
+        return {"approve": True}
+
+    dag = DAG(
+        "dual_review",
+        params={"title": {"required": True}, "content": {"required": True}},
+    )
+    view = {"title": {"label": "标题"}, "content": {"label": "正文"}}
+    dag.human_node("编辑初审", approver=first_approver, review=view)
+    dag.human_node("主编终审", depends_on=["编辑初审"], approver=final_approver, review=view)
+
+    results = await dag.run(inputs={"title": "原始标题", "content": "正文"})
+    assert results["主编终审"].status == NodeStatus.COMPLETED
+    assert seen["payload"]["title"] == "修订后的标题"
+    assert seen["payload"]["content"] == "正文"
+    # 初审决策记录的 payload 是审核时快照，保持原样（修订留档 decision.edits）
+    assert results["编辑初审"].output["payload"]["title"] == "原始标题"
+    assert results["编辑初审"].output["decision"]["edits"] == {"title": "修订后的标题"}
+
+
 async def test_human_edits_cannot_inject_new_keys() -> None:
-    """修订只覆盖 payload 已有键：借 edits 注入新键无效（防越权改写上下文）。"""
+    """修订只作用于审核 payload 已有键：借 edits 注入新键进不了共享上下文
+    （防越权改写）；决策 payload 快照保持审核时原样，生效值走 ctx 写回。"""
+    seen: dict[str, Any] = {}
+
     dag = DAG("human_inject")
 
     @dag.node("data")
@@ -81,10 +119,17 @@ async def test_human_edits_cannot_inject_new_keys() -> None:
         approver=fake_approver({"approve": True, "edits": {"data": "改", "injected": "新键"}}),
     )
 
+    @dag.node("after", depends_on=["review"])
+    async def after(ctx: dict[str, Any]) -> str:
+        seen.update(ctx)
+        return "ok"
+
     results = await dag.run()
     payload = results["review"].output["payload"]
-    assert payload["data"] == "改"
+    assert payload["data"] == "内容"  # 快照保持审核时原样
     assert "injected" not in payload
+    assert seen["data"] == "改"  # 写回只覆盖已有键
+    assert "injected" not in seen  # 注入的新键进不了上下文
 
 
 async def test_human_reject_ignores_edits() -> None:

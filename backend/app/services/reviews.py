@@ -35,6 +35,7 @@ async def create_decision(run_id: int, node_name: str, decision: dict[str, Any])
                     approve=decision["approve"],
                     reason=decision.get("reason"),
                     edits=decision.get("edits"),
+                    payload=decision.get("payload"),
                     created_at=now,
                 )
             )
@@ -42,6 +43,7 @@ async def create_decision(run_id: int, node_name: str, decision: dict[str, Any])
             pending.approve = decision["approve"]
             pending.reason = decision.get("reason")
             pending.edits = decision.get("edits")
+            pending.payload = decision.get("payload")
             pending.created_at = now
         await session.commit()
 

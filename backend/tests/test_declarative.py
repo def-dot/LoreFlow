@@ -645,7 +645,7 @@ def test_validate_config_collects_all_errors() -> None:
 
 
 async def test_human_review_view_payload(registered: Any) -> None:
-    """声明 review：payload 只含声明键 + 首位 _review 标签；运行时缺失的键置 None。"""
+    """声明 review：payload 只含声明键 + 首位 _review 富映射；运行时缺失的键置 None。"""
     seen: dict[str, Any] = {}
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -675,7 +675,8 @@ async def test_human_review_view_payload(registered: Any) -> None:
     results = await dag.run()
     assert seen == {
         "_prompt": "重点核对工作成果",
-        "_review": {"work": "工作成果", "opt": "可选参数"},
+        # _review 原样携带声明富映射（前端按 {key: {label: 文本}} 取标签）
+        "_review": {"work": {"label": "工作成果"}, "opt": {"label": "可选参数"}},
         "work": "done",
         "opt": None,
     }

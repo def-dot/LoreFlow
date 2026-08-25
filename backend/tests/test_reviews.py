@@ -89,6 +89,22 @@ async def test_edits_roundtrip_and_overwrite() -> None:
     assert decision == {"approve": True, "reason": None, "edits": {"merge": "再改一版"}}
 
 
+async def test_payload_snapshot_recorded_with_decision() -> None:
+    """审核时视图随决策入库留档；覆盖提交以新视图为准；认领不回带 payload。"""
+    await reviews.create_decision(1, "n", {"approve": True, "payload": {"title": "原标题"}})
+    rows = await _all_rows()
+    assert rows[0].payload == {"title": "原标题"}
+
+    # 覆盖提交换新视图（后答为准，与 edits 同语义）
+    await reviews.create_decision(1, "n", {"approve": True, "payload": {"title": "次轮视图"}})
+    rows = await _all_rows()
+    assert rows[0].payload == {"title": "次轮视图"}
+
+    # 认领只回引擎消费面（approve/reason/edits），payload 纯留档不回带
+    decision = await reviews.claim_decision(1, "n")
+    assert decision == {"approve": True, "reason": None, "edits": None}
+
+
 async def test_concurrent_claim_exactly_one_consumer() -> None:
     """并发认领下恰好一个消费者拿到决策。"""
     await reviews.create_decision(1, "n", {"approve": True})

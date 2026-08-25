@@ -18,5 +18,6 @@ class ReviewDecision(SQLModel, table=True):
     approve: bool
     reason: str | None = None
     edits: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    payload: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: str | None = None
     consumed_at: str | None = None

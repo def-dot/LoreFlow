@@ -287,7 +287,11 @@ class DAG:
 
         When the DAG reaches this node it pauses and asks a human to
         review the current context. Approving completes the node with
-        the reviewed payload; rejecting raises :exc:`HumanRejected`,
+        the payload as seen at review time — the snapshot is never
+        modified after the fact; decision ``edits`` are archived in
+        ``decision.edits`` and written back to the shared context, so
+        downstream nodes (a second-level review, a publisher, …) read
+        the revised values. Rejecting raises :exc:`HumanRejected`,
         which fails the node and cascades to skip all downstream nodes
         (standard failure semantics). The rejection details are carried
         in the FAILED node result's ``output``.
@@ -345,10 +349,12 @@ class DAG:
             decision = await approver(name, payload)
             if decision.get("approve"):
                 logger.info("[%s] approved by human reviewer", name)
-                
+
                 edits = decision.get("edits")
-                if isinstance(edits, dict) and edits:
-                    payload = {**payload, **{k: v for k, v in edits.items() if k in payload}}
+                if isinstance(edits, dict):
+                    for key, value in edits.items():
+                        if key in payload and not key.startswith("_"):
+                            ctx[key] = value
                 return {
                     "approved": True,
                     "payload": payload,

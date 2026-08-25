@@ -67,6 +67,27 @@ async def _wait_node_reviewing(
     return await asyncio.wait_for(poll(), timeout=timeout)
 
 
+async def _wait_run_status(
+    client: AsyncClient, run_id: int, status: str, timeout: float = 15
+) -> dict[str, Any]:
+    """轮询 run 直到指定的 run 级状态。
+
+    重启恢复后区分旧/新快照的可靠标记：resume 同步置 running，重挂起才
+    回 reviewing —— 观察到 reviewing 必然是重放重建后的快照（node 条目
+    的 reviewing 可能还是旧的，不可作分界）。
+    """
+
+    async def poll() -> dict[str, Any]:
+        while True:
+            resp = await client.get(f"/api/v1/runs/{run_id}")
+            data = resp.json()["data"]
+            if data["status"] == status:
+                return data
+            await asyncio.sleep(0.05)
+
+    return await asyncio.wait_for(poll(), timeout=timeout)
+
+
 async def _create_and_approve(client: AsyncClient, approve: bool = True) -> int:
     """建一个 run 并走完审批流，返回 run_id。"""
     resp = await client.post(
@@ -634,8 +655,8 @@ async def test_loop_pipeline_completes_with_inputs(client: AsyncClient) -> None:
 
 
 async def test_dual_review_with_required_title_content(client: AsyncClient) -> None:
-    """08 两级审核：title/content 为必填输入（无默认值），两级审批通过后
-    发布自定义标题（扁平输入走 cfg_publish 的顶层 title 兜底）。"""
+    """08 两级审核：title/content 为必填输入（无默认值）；初审就地修订标题，
+    终审卡片与发布看到的都是修订版（修订写回上下文，而非只进初审决策记录）。"""
     resp = await client.post(
         "/api/v1/runs",
         json={
@@ -650,26 +671,87 @@ async def test_dual_review_with_required_title_content(client: AsyncClient) -> N
     data = await _wait_node_reviewing(client, run_id, "编辑初审")
     payload = data["nodes"]["编辑初审"]["payload"]
     # 声明式审核视图：payload 只含声明键 + 两个保留键
-    #（_prompt=把关指引、_review=字段标签，均置前）
+    #（_prompt=把关指引、_review=字段标签富映射，均置前）
     assert set(payload) == {"_prompt", "_review", "title", "content"}
-    assert payload["_review"] == {"title": "标题", "content": "正文"}
+    assert payload["_review"] == {"title": {"label": "标题"}, "content": {"label": "正文"}}
     assert payload["_prompt"]
     assert payload["title"] == "自定义标题"
-    resp = await client.post(f"/api/v1/runs/{run_id}/approve/编辑初审", json={"approve": True})
+    # 初审通过并就地修订标题（"改了再通过"）
+    resp = await client.post(
+        f"/api/v1/runs/{run_id}/approve/编辑初审",
+        json={"approve": True, "edits": {"title": "修订后的标题"}},
+    )
     assert resp.status_code == 200
+
+    # 决策行自包含：审核时视图（原始标题）随决策入库，不依赖 run record 留档
+    async with database.AsyncSessionLocal() as session:
+        row = (
+            await session.exec(
+                select(ReviewDecision).where(
+                    ReviewDecision.run_id == run_id, ReviewDecision.node_name == "编辑初审"
+                )
+            )
+        ).one()
+    assert row.payload["title"] == "自定义标题"
+    assert row.edits == {"title": "修订后的标题"}
 
     # 终审
     data = await _wait_node_reviewing(client, run_id, "主编终审")
     assert data["nodes"]["主编终审"]["status"] == "reviewing"
     # 终审视图同样只有 title/content —— 一审的决策记录不进视图
     assert set(data["nodes"]["主编终审"]["payload"]) == {"_prompt", "_review", "title", "content"}
+    # 修订已写回上下文：终审卡片显示初审修订后的标题，而非原始输入
+    assert data["nodes"]["主编终审"]["payload"]["title"] == "修订后的标题"
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/主编终审", json={"approve": True})
     assert resp.status_code == 200
 
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
     assert data["nodes"]["发布"]["status"] == "completed"
-    assert "自定义标题" in data["nodes"]["发布"]["output"]
+    # 发布的也是修订版（cfg_publish 按审核视图键从共享上下文取生效值）
+    assert "修订后的标题" in data["nodes"]["发布"]["output"]
+    # 初审决策记录：payload 是审核时快照保持原样，修订留档 decision.edits
+    first = data["nodes"]["编辑初审"]["output"]
+    assert first["payload"]["title"] == "自定义标题"
+    assert first["decision"]["edits"] == {"title": "修订后的标题"}
+
+
+async def test_dual_review_edits_survive_restart(client: AsyncClient) -> None:
+    """多级审核修订跨进程重启存活：初审改标题 → 崩溃重启（resume_stuck_runs
+    恢复）→ 终审卡片与发布看到的仍是修订版。完成节点的修订写回由恢复路径
+    重放（replay_review_edits），不依赖原进程内存。"""
+    resp = await client.post(
+        "/api/v1/runs",
+        json={
+            "config_file": "08_dual_review.yaml",
+            "inputs": {"title": "重启前标题", "content": "重启前正文。"},
+        },
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["data"]["run_id"]
+
+    # 初审通过并就地修订标题
+    await _wait_node_reviewing(client, run_id, "编辑初审")
+    resp = await client.post(
+        f"/api/v1/runs/{run_id}/approve/编辑初审",
+        json={"approve": True, "edits": {"title": "重启后仍生效的标题"}},
+    )
+    assert resp.status_code == 200
+    await _wait_node_reviewing(client, run_id, "主编终审")
+
+    await orchestrator.resume_stuck_runs()  # 模拟进程重启后的启动恢复
+
+    # run 级 reviewing 必然是重放重建后的快照：修订经恢复重放，终审视图
+    # 仍是修订后的标题（回归：曾退回显示原始输入）
+    data = await _wait_run_status(client, run_id, "reviewing")
+    assert data["nodes"]["主编终审"]["payload"]["title"] == "重启后仍生效的标题"
+
+    resp = await client.post(f"/api/v1/runs/{run_id}/approve/主编终审", json={"approve": True})
+    assert resp.status_code == 200
+
+    data = await _wait_terminal(client, run_id)
+    assert data["status"] == "completed"
+    assert "重启后仍生效的标题" in data["nodes"]["发布"]["output"]
 
 
 async def test_dual_review_missing_required_400(client: AsyncClient) -> None:
