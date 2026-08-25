@@ -225,14 +225,7 @@ async def cancel_run(run_id: int) -> None:
 
 async def resume_record(record: RunRecord) -> None:
     """审批触发或重启后恢复 run：按钉住的定义重放 DAG 续跑。
-
-    恢复本身走 CAS（RUNNING/REVIEWING → RUNNING，覆盖崩溃恢复与审批
-    续跑两条入口）：approve 与取消并发时谁先抢到算谁的，已取消（终态）
-    的 run 不会被复活。存量旧行无 definition（钉住功能上线前）回退读
-    当前文件——历史行为。
     """
-    # CAS（RUNNING/REVIEWING → RUNNING，覆盖崩溃恢复与审批续跑两条入口）：
-    # approve 与取消并发时谁先抢到算谁的，已取消（终态）的 run 不会被复活
     async with database.AsyncSessionLocal() as session:
         result = await session.execute(
             update(RunRecord)
@@ -244,22 +237,17 @@ async def resume_record(record: RunRecord) -> None:
         )
         await session.commit()
     if not result.rowcount:
-        logger.info("[run %s] 恢复放弃：状态已是终态（可能已取消）", record.id)
+        logger.info("[run %s] 恢复运行失败：当前状态已是运行中", record.id)
         return
-    record.status = RunStatus.RUNNING  # 内存对齐 DB（挂起 CAS / 日志读内存）
-
-    if record.definition is not None:
-        dag = load_dag(
-            yaml.safe_load(record.definition),
-            approver=make_approver(record),
-            on_event=make_event_sink(record),
-        )
-    else:
-        dag = load_dag(
-            settings.PIPELINES_DIR / record.config_file,
-            approver=make_approver(record),
-            on_event=make_event_sink(record),
-        )
+    
+    record.status = RunStatus.RUNNING
+   
+    dag = load_dag(
+        yaml.safe_load(record.definition),
+        approver=make_approver(record),
+        on_event=make_event_sink(record),
+    )
+  
     _spawn(record, dag)
 
 
