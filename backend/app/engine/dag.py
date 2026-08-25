@@ -324,39 +324,16 @@ class DAG:
         if not callable(approver):
             raise ValueError(f"人工审核节点 {name!r}: approver 必须是可调用对象")
 
-        # review 声明：支持原始格式 {key: {label: text}} 或简化格式 {key: label} 或键列表
-        if review is None:
-            review_view: dict[str, dict[str, str]] | None = None
-        elif isinstance(review, Mapping):
-            # 检查是否是原始格式 {key: {label: text}}
-            if review and all(isinstance(v, Mapping) for v in review.values()):
-                review_view = dict(review)  # 直接使用原始格式
-            else:
-                # 兼容简化格式 {key: label}
-                review_view = {str(k): {"label": str(v)} for k, v in review.items()}
-        elif isinstance(review, (list, tuple)):
-            review_view = {str(k): {"label": str(k)} for k in review}
-        else:
-            raise ValueError(f"review 必须是 {{key: {label: text}}} 映射、{key: label} 映射或键列表，实际是 {type(review).__name__}")
-
         async def review_func(ctx: dict[str, Any]) -> dict[str, Any]:
-            # "_" 前缀键是引擎保留的展示元数据（消费方按前缀跳过）：
-            # _prompt = 作者给审核者的把关指引，_review = 声明视图的字段标签
-            if review_view is not None:
-                # 声明视图：审核者只看声明的键。运行时缺失的键（可选参数未提供、
-                # 条件跳过的节点）显式置 None —— 卡片显示「未提供」而非静默消失。
+            if review is not None:
                 payload: dict[str, Any] = {}
                 if prompt:
                     payload["_prompt"] = prompt
 
-                # 标签映射 {key: label} —— 注册时已归一化成 {key: {label: text}}
-                label_map = {k: v["label"] for k, v in review_view.items()}
-
-                payload["_review"] = label_map
-                for key in review_view:
+                payload["_review"] = review
+                for key in review:
                     payload[key] = ctx.get(key)
             else:
-                # Snapshot of everything available for review at this point.
                 payload = {k: v for k, v in ctx.items() if k != name}
                 if prompt:
                     payload = {"_prompt": prompt, **payload}
@@ -368,8 +345,7 @@ class DAG:
             decision = await approver(name, payload)
             if decision.get("approve"):
                 logger.info("[%s] approved by human reviewer", name)
-                # 审核修订（"改了再通过"）：只覆盖 payload 已有的键，防注入
-                # 新键；原始上游输出不动，修订痕迹由决策行（edits）留档
+                
                 edits = decision.get("edits")
                 if isinstance(edits, dict) and edits:
                     payload = {**payload, **{k: v for k, v in edits.items() if k in payload}}
@@ -399,8 +375,6 @@ class DAG:
             depends_on=depends_on or [],
             condition=condition,
             retry=retry,
-            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）；
-            # review_view 留档在 metadata，供 DAG.validate 做声明校验
             metadata={"human_review": True, "label": "人工审核", "review_view": review_view},
         )
         self.add_node(node)
