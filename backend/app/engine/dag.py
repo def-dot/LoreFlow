@@ -375,7 +375,7 @@ class DAG:
             depends_on=depends_on or [],
             condition=condition,
             retry=retry,
-            metadata={"human_review": True, "label": "人工审核", "review_view": review_view},
+            metadata={"human_review": True, "label": "人工审核", "review": review},
         )
         self.add_node(node)
         return node
@@ -397,11 +397,11 @@ class DAG:
 
         available = set(self._nodes) | set(self.params)
         for node in self._nodes.values():
-            review_view = node.metadata.get("review_view")
-            if review_view is not None:
+            review = node.metadata.get("review")
+            if review is not None:
                 errors.extend(
                     f"审核节点 {node.name!r}: {msg}"
-                    for msg in validate_review(review_view, available)
+                    for msg in validate_review(review, available)
                 )
 
         edges = {name: node.depends_on for name, node in self._nodes.items()}

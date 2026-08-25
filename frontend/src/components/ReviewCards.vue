@@ -31,9 +31,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// 逐字段渲染：label 优先取引擎插入的 _review（声明式审核视图 {key: label}），
+// 逐字段渲染：label 优先取引擎插入的 _review（声明式审核视图 {key: {label: 文本}}），
 // 未声明视图的 payload 同样按字段展示（label=键名）。_prompt（把关指引）
 // 与 _review 同为引擎保留键，不进字段列表、单独渲染在卡片顶部
+
+// _review 是富映射：键 → {label: 文本}（validate_review 仅放行 label 字段、
+// 允许空串）。形状不符或空 label 时回退键名
+function labelOf(labels: Record<string, unknown>, key: string): string {
+  const spec = labels[key]
+  return isRecord(spec) && typeof spec.label === 'string' && spec.label ? spec.label : key
+}
 const cards = computed<ReviewCardModel[]>(() =>
   props.reviewing.map((item) => {
     const payload = item.payload
@@ -47,7 +54,7 @@ const cards = computed<ReviewCardModel[]>(() =>
       .filter((key) => key !== '_prompt' && key !== '_review')
       .map((key) => ({
         key,
-        label: typeof labels[key] === 'string' && labels[key] ? (labels[key] as string) : key,
+        label: labelOf(labels, key),
         value: payload[key],
       }))
     return {
