@@ -182,7 +182,7 @@ async def create_run(
     await runs.save(record)
     task = asyncio.create_task(run_pipeline(record, dag))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
-    task.add_done_callback(lambda _: watchdog.cancel())  # pipeline 已终态（含挂起），看门狗停转
+    task.add_done_callback(lambda _: watchdog.cancel())
     return record.id
 
 
