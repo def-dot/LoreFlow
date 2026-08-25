@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, Text
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
@@ -40,3 +40,4 @@ class RunRecord(SQLModel, table=True):
     error: str | None = None
     nodes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     inputs: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))  # 运行时输入快照（resume 回放用）
+    definition: str | None = Field(default=None, sa_column=Column(Text))

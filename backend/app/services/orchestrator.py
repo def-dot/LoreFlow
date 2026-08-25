@@ -7,6 +7,8 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
+import yaml
+
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core import database
@@ -20,6 +22,7 @@ from app.engine import (
     SuspendExecution,
     load_dag,
 )
+from app.engine.declarative import read_yaml
 from app.engine.node import ApproverFunc
 from app.engine.types import NodeEventFunc
 from app.engine.validate import validate_inputs
@@ -64,15 +67,11 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
     return on_event
 
 
-async def run_pipeline(
-    record: RunRecord,
-    dag: DAG,
-    resume: dict[str, dict[str, Any]] | None = None,
-) -> None:
+async def run_pipeline(record: RunRecord, dag: DAG) -> None:
     """执行一次 run：dag.run 返回 → completed；
     """
     try:
-        await dag.run(inputs=record.inputs, resume=resume)
+        await dag.run(inputs=record.inputs, resume=record.nodes)
         record.status = RunStatus.COMPLETED
     except asyncio.CancelledError:
         record.status = RunStatus.CANCELLED
@@ -108,11 +107,14 @@ async def create_run(
         created_at=datetime.now().isoformat(timespec="seconds"),
         status=RunStatus.RUNNING,
     )
+    # 读一次文件，同时用于构建 DAG 和钉住定义快照（避免两次读取间的竞态）
+    text, config = read_yaml(path)
     dag = load_dag(
-        path,
+        config,
         approver=make_approver(record),
         on_event=make_event_sink(record),
     )
+    record.definition = text
     
     errors = validate_inputs(inputs, dag.params)
     if errors:
@@ -127,16 +129,33 @@ async def create_run(
     return record.id
 
 
+def _dag_for_resume(record: RunRecord) -> DAG:
+    """恢复用 DAG：优先创建时钉住的 definition（挂起期间文件被改不漂移）。
+
+    存量旧行无快照（NULL）时回退读当前文件（历史行为）。文件缺失或
+    内容与快照不一致只告警不阻断——在途 run 永远按它创建时的版本续跑。
+    """
+    approver, on_event = make_approver(record), make_event_sink(record)
+    if record.definition is None:
+        return load_dag(settings.PIPELINES_DIR / record.config_file, approver=approver, on_event=on_event)
+
+    path = settings.PIPELINES_DIR / record.config_file
+    if path.is_file():
+        current = path.read_text(encoding="utf-8")
+        if current != record.definition:
+            logger.warning(
+                "[run %s] %s 自创建后已变更，按创建时钉住的定义续跑", record.id, record.config_file
+            )
+    # 快照在创建时已经过 read_yaml/load_dag 校验，这里 safe_load 不会失败
+    return load_dag(yaml.safe_load(record.definition), approver=approver, on_event=on_event)
+
+
 async def resume_record(record: RunRecord) -> None:
-    """审批触发或重启后恢复 run：重放 DAG 续跑。"""
-    dag = load_dag(
-        settings.PIPELINES_DIR / record.config_file,
-        approver=make_approver(record),
-        on_event=make_event_sink(record),
-    )
+    """审批触发或重启后恢复 run：按钉住的定义重放 DAG 续跑。"""
+    dag = _dag_for_resume(record)
     record.status = RunStatus.RUNNING
     await runs.save(record)
-    asyncio.create_task(run_pipeline(record, dag, resume=record.nodes))
+    asyncio.create_task(run_pipeline(record, dag))
 
 
 async def _acquire_recovery_lock() -> AsyncConnection | None:

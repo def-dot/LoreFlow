@@ -495,11 +495,6 @@ class DAG:
 
     def to_mermaid(self) -> str:
         """Render the DAG as a Mermaid flowchart (for docs / debugging).
-
-        节点主行是 YAML 里定义的节点名（快照/日志/API 的关联键）；小字行
-        展示节点类型 —— 注册表键 + label（``metadata["type"]``/``["label"]``，
-        见 load_dag），后接 [?]/[Rn] 标记。human/loop 没有 注册表类型，
-        只显示 label。
         """
         lines = ["graph TD"]
         for node in self._nodes.values():

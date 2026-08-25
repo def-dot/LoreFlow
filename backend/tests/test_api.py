@@ -7,6 +7,7 @@ from httpx import AsyncClient
 from sqlmodel import select
 
 from app.core import database
+from app.core.config import settings
 from app.models.review import ReviewDecision
 from app.models.run import RunRecord
 from app.services import orchestrator
@@ -714,6 +715,19 @@ async def test_dual_review_with_required_title_content(client: AsyncClient) -> N
     first = data["nodes"]["编辑初审"]["output"]
     assert first["payload"]["title"] == "自定义标题"
     assert first["decision"]["edits"] == {"title": "修订后的标题"}
+
+
+async def test_run_pins_definition_at_create(client: AsyncClient) -> None:
+    """创建 run 时钉住定义原文：后续 resume 按它续跑，不读当前文件。"""
+    resp = await client.post(
+        "/api/v1/runs",
+        json={"config_file": "05_human_review.yaml", "inputs": {"title": "t", "content": "c"}},
+    )
+    assert resp.status_code == 201
+
+    record = await run_service.get_run(resp.json()["data"]["run_id"])
+    path = settings.PIPELINES_DIR / "05_human_review.yaml"
+    assert record.definition == path.read_text(encoding="utf-8")
 
 
 async def test_dual_review_edits_survive_restart(client: AsyncClient) -> None:

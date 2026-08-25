@@ -65,8 +65,9 @@ class DAGExecutor:
             nodes: All nodes in the DAG (keyed by name).
             inputs: Initial key-value pairs placed into the shared context.
             resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
-                    已完成节点不重跑，其输出作为下游上下文；其余节点正常
-                    重跑（含重新挂起的审批节点）。
+                    已完成/条件跳过的节点作为既成事实不重跑（前者输出进
+                    上下文，后者下游照常恢复）；其余节点正常重跑（含重新
+                    挂起的审批节点）。
 
         Returns:
             Dict mapping each node name to its :class:`NodeResult`.
@@ -79,35 +80,33 @@ class DAGExecutor:
         events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in nodes}
         results: dict[str, NodeResult] = {}
 
-        # ----- resume: 已完成节点直接置为完成，输出进上下文 -----
+        # ----- resume: 已完成/条件跳过的节点作为既成事实直接恢复 -----
         resume = resume or {}
         for name, saved in resume.items():
-            if name not in nodes:
-                # 快照来自旧版配置：当前 DAG 已无此节点（配置改版），跳过
-                logger.warning("[resume] 快照节点 %r 不在当前 DAG 中，跳过", name)
-                continue
-            if saved.get("status") == "completed":
-                output = saved.get("output")
-                ctx[name] = output
-                # 人工审核节点的修订写回是节点对共享上下文的可观察副作用：
-                # 恢复不重跑，须重放，否则 resume 后续节点退回看到修订前的值
-                if nodes[name].metadata.get("human_review"):
-                    replay_review_edits(ctx, output)
+            if saved.get("status") in ["completed", "skipped"]:
                 events[name].set()
-                results[name] = NodeResult(
-                    node_name=name,
-                    status=NodeStatus.COMPLETED,
-                    output=saved.get("output"),
-                    attempts=saved.get("attempts") or 1,
-                    duration_ms=saved.get("duration_ms") or 0.0,
+                results[name] = NodeResult(saved.get("node_name"), saved.get("status"), saved.get("output"),
+                    saved.get("error"), saved.get("attempts"), saved.get("duration_ms"),
                 )
+
+                output = saved.get("output")
+                if output:
+                    ctx[name] = output
+
+                if nodes[name].metadata.get("human_review") and isinstance(output, dict):
+                    decision = output.get("decision")
+                    payload = output.get("payload")
+                    edits = decision.get("edits") if isinstance(decision, dict) else None
+                    for key, value in edits.items():
+                        if key in payload and not key.startswith("_"):
+                            ctx[key] = value
 
         # Task registry — 节点任务表（下游跳过检查也从中读上游终态）
         tasks: dict[str, asyncio.Task[NodeResult]] = {}
 
         # ----- spawn remaining nodes -----
         for node in nodes.values():
-            if node.name in resume and resume[node.name].get("status") == "completed":
+            if node.name in results:
                 continue  # 恢复时已完成，不重跑
             tasks[node.name] = asyncio.create_task(self._run_node(node, ctx, tasks, events))
 
