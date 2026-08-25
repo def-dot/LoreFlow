@@ -107,16 +107,13 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
                 "error": error
             }
 
-            async def _finalize() -> None:
-                async with database.AsyncSessionLocal() as session:
-                    await session.execute(
-                        update(RunRecord)
-                        .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
-                        .values(**values)
-                    )
-                    await session.commit()
-
-            await asyncio.shield(_finalize())
+            async with database.AsyncSessionLocal() as session:
+                await session.execute(
+                    update(RunRecord)
+                    .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
+                    .values(**values)
+                )
+                await session.commit()
 
 
 async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: float = 1.0) -> None:
