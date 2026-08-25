@@ -96,7 +96,14 @@ async def cancel_run(run_id: int) -> dict[str, Any]:
 async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> ApproveResponse:
     record = await run_service.get_run(run_id)
     entry = (record.nodes or {}).get(node_name) if record else None
-    if record is None or not isinstance(entry, dict) or entry.get("status") != NodeStatus.REVIEWING.value:
+    # 双门槛：run 状态必须是 REVIEWING（挂起落库与 approve 的并发窗口内
+    # 节点可能已 reviewing 而 run 仍 running），节点快照也在 reviewing
+    if (
+        record is None
+        or record.status != RunStatus.REVIEWING
+        or not isinstance(entry, dict)
+        or entry.get("status") != NodeStatus.REVIEWING.value
+    ):
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
     await review_service.create_decision(
         run_id,
@@ -105,7 +112,7 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
             "approve": body.approve,
             "reason": body.reason,
             "edits": body.edits,
-            "payload": entry.get("payload"),
+            "payload": (entry.get("output") or {}).get("payload"),
         },
     )
     await orchestrator.resume_record(record)

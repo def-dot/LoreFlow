@@ -382,14 +382,15 @@ async def test_approver_gets_payload_without_self() -> None:
 
 async def test_suspend_propagates_without_terminal_event() -> None:
     """approver 抛 SuspendExecution：dag.run 直接传播（非 DAGExecutionError），
-    挂起节点不产生终态事件，下游不执行。"""
+    挂起节点产生 REVIEWING 事件（审核视图随 output 落快照）而非终态事件，
+    级联节点无任何事件，下游不执行。"""
     collected: list[NodeResult] = []
 
     async def on_event(result: NodeResult) -> None:
         collected.append(result)
 
     async def suspend_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        raise SuspendExecution("waiting")
+        raise SuspendExecution("waiting", {"payload": payload})
 
     called = False
     dag = DAG("suspend", on_event=on_event)
@@ -411,7 +412,7 @@ async def test_suspend_propagates_without_terminal_event() -> None:
 
     assert called is False
     review_statuses = {e.status for e in collected if e.node_name == "review"}
-    assert not (
-        review_statuses
-        & {NodeStatus.COMPLETED, NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED, NodeStatus.SKIPPED, NodeStatus.CANCELLED}
-    )
+    assert review_statuses == {NodeStatus.RUNNING, NodeStatus.REVIEWING}  # RUNNING 预告 + REVIEWING 挂起，无终态
+    review_entry = next(e for e in collected if e.node_name == "review" and e.status is NodeStatus.REVIEWING)
+    assert review_entry.output == {"payload": {"data": 1}}  # 审核视图随挂起结果落 output
+    assert all(e.node_name != "publish" for e in collected)  # 级联节点不产生任何事件

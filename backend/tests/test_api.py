@@ -34,15 +34,20 @@ async def _wait_terminal(client: AsyncClient, run_id: int, timeout: float = 15) 
 
 
 async def _wait_reviewing(client: AsyncClient, run_id: int, timeout: float = 15) -> dict[str, Any]:
-    """轮询 run 直到出现待审批节点。"""
+    """轮询 run 直到挂起落库（run 状态 reviewing）。
+
+    等 run 级状态而非节点级：节点 reviewing 快照先于状态落库（emit →
+    CAS 两步），等节点会拿到 run 仍 running 的中间态。状态翻转时节点
+    快照必然已就位。
+    """
 
     async def poll() -> dict[str, Any]:
         while True:
             resp = await client.get(f"/api/v1/runs/{run_id}")
             data = resp.json()["data"]
-            if any(n.get("status") == "reviewing" for n in data["nodes"].values()):
+            if data["status"] == "reviewing":
                 return data
-            if data["status"] not in ("running", "reviewing"):
+            if data["status"] != "running":
                 raise AssertionError(f"run 在审批前已结束: {data}")
             await asyncio.sleep(0.05)
 
@@ -173,8 +178,8 @@ async def test_run_lifecycle_approve(client: AsyncClient) -> None:
     assert data["finished_at"] is None  # 挂起不算结束
     assert data["error"] is None  # 挂起不算失败
     assert data["nodes"]["review"]["status"] == "reviewing"
-    assert "title" in data["nodes"]["review"]["payload"]  # 审核卡片展示的待审 payload（来自 params）
-    assert "content" in data["nodes"]["review"]["payload"]
+    assert "title" in data["nodes"]["review"]["output"]["payload"]  # 审核卡片展示的待审 payload（来自 params）
+    assert "content" in data["nodes"]["review"]["output"]["payload"]
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
     assert resp.json()["data"] == {"status": "ok", "run_id": run_id, "node": "review", "approve": True}
@@ -576,7 +581,7 @@ async def test_inputs_survive_review_resume(client: AsyncClient, monkeypatch, tm
 
     await _wait_reviewing(client, run_id)
     data = (await client.get(f"/api/v1/runs/{run_id}")).json()["data"]
-    assert data["nodes"]["review"]["payload"]["tick"] == 6  # 输入也进审核卡片 payload
+    assert data["nodes"]["review"]["output"]["payload"]["tick"] == 6  # 输入也进审核卡片 payload
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
     assert resp.status_code == 200
@@ -673,7 +678,7 @@ async def test_dual_review_with_required_title_content(client: AsyncClient) -> N
 
     # 初审
     data = await _wait_node_reviewing(client, run_id, "编辑初审")
-    payload = data["nodes"]["编辑初审"]["payload"]
+    payload = data["nodes"]["编辑初审"]["output"]["payload"]
     # 声明式审核视图：payload 只含声明键 + 两个保留键
     #（_prompt=把关指引、_review=字段标签富映射，均置前）
     assert set(payload) == {"_prompt", "_review", "title", "content"}
@@ -703,9 +708,9 @@ async def test_dual_review_with_required_title_content(client: AsyncClient) -> N
     data = await _wait_node_reviewing(client, run_id, "主编终审")
     assert data["nodes"]["主编终审"]["status"] == "reviewing"
     # 终审视图同样只有 title/content —— 一审的决策记录不进视图
-    assert set(data["nodes"]["主编终审"]["payload"]) == {"_prompt", "_review", "title", "content"}
+    assert set(data["nodes"]["主编终审"]["output"]["payload"]) == {"_prompt", "_review", "title", "content"}
     # 修订已写回上下文：终审卡片显示初审修订后的标题，而非原始输入
-    assert data["nodes"]["主编终审"]["payload"]["title"] == "修订后的标题"
+    assert data["nodes"]["主编终审"]["output"]["payload"]["title"] == "修订后的标题"
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/主编终审", json={"approve": True})
     assert resp.status_code == 200
 
@@ -761,7 +766,7 @@ async def test_dual_review_edits_survive_restart(client: AsyncClient) -> None:
     # run 级 reviewing 必然是重放重建后的快照：修订经恢复重放，终审视图
     # 仍是修订后的标题（回归：曾退回显示原始输入）
     data = await _wait_run_status(client, run_id, "reviewing")
-    assert data["nodes"]["主编终审"]["payload"]["title"] == "重启后仍生效的标题"
+    assert data["nodes"]["主编终审"]["output"]["payload"]["title"] == "重启后仍生效的标题"
 
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/主编终审", json={"approve": True})
     assert resp.status_code == 200

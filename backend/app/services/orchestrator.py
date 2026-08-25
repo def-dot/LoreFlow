@@ -70,7 +70,6 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
     """
     outcome = RunStatus.COMPLETED
     error: str | None = None
-    suspended = False
     try:
         await dag.run(inputs=record.inputs, resume=record.nodes)
     except asyncio.CancelledError:
@@ -82,9 +81,10 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         outcome = RunStatus.FAILED
         error = str(exc)
     finally:
+        values: dict[str, Any]
         values = {
             "status": outcome,
-            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "finished_at": datetime.now().isoformat(timespec="seconds") if outcome is not RunStatus.RUNNING else None,
             "error": error,
         }
 

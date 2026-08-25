@@ -108,9 +108,10 @@ class DAGExecutionError(Exception):
         self.results = results
 
 
-class SuspendExecution(Exception):
+class SuspendExecution(BaseException):
     """内部控制流信号：人工审批节点挂起，run 干净退出等待 /approve。
     """
+
     def __init__(self, message: str, results: dict[str, Any]):
         super().__init__(message)
         self.results = results

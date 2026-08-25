@@ -16,7 +16,6 @@ export interface NodeSnapshot {
   error: string | null
   attempts: number
   duration_ms: number
-  payload?: unknown
 }
 
 export interface RunDetail extends RunListItem {

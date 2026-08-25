@@ -20,13 +20,16 @@ const nodeStatuses = computed(() =>
   Object.fromEntries(Object.entries(props.detail.nodes).map(([name, node]) => [name, node.status])),
 )
 
-// 待审批节点：从节点快照筛出 status == "reviewing" 的，payload 供审核卡片展示
-const reviewing = computed(() =>
-  Object.entries(props.detail.nodes)
+// 待审批节点：run 状态为 reviewing 时，从节点快照筛出 status == "reviewing"
+// 的，payload（挂在 output 下）供审核卡片展示。状态门槛与后端 approve 路由
+// 对齐——挂起落库窗口期（节点已 reviewing、run 仍 running）不出可点卡片
+const reviewing = computed(() => {
+  if (props.detail.status !== 'reviewing') return []
+  return Object.entries(props.detail.nodes)
     .filter(([, node]) => node.status === 'reviewing')
-    .map(([name, node]) => ({ name, payload: node.payload }))
-    .sort((a, b) => a.name.localeCompare(b.name)),
-)
+    .map(([name, node]) => ({ name, payload: (node.output as { payload?: unknown } | null)?.payload }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
 
 // 创建时的运行时输入快照：数量以 chip 展示，点击弹层逐字段查看
 // （后端旧版本无 inputs 字段，?? {} 兜底）

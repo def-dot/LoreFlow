@@ -16,9 +16,9 @@ async def test_print_reviewing_payload(client: AsyncClient) -> None:
 
     while True:
         data = (await client.get(f"/api/v1/runs/{run_id}")).json()["data"]
-        if any(n.get("status") == "reviewing" for n in data["nodes"].values()):
+        if data["status"] == "reviewing":
             break
-        if data["status"] not in ("running", "reviewing"):
+        if data["status"] != "running":
             raise AssertionError(f"run 在审批前已结束: {data}")
         await asyncio.sleep(0.05)
 

@@ -97,10 +97,10 @@ async def test_cancel_reviewing_run_blocks_approve(client: AsyncClient) -> None:
     assert resp.status_code == 200
     assert (await runs.get_run(run_id)).status == RunStatus.CANCELLED
 
-    # 取消不改节点快照（entry 仍是 reviewing），approve 能进路由 —— 但
-    # resume 的 CAS（RUNNING/REVIEWING → RUNNING）必须拦住复活
+    # 取消不改节点快照（entry 仍是 reviewing），但 run 状态已是 CANCELLED，
+    # approve 被路由的 run 状态门槛直接拦下（404）——不写决策也不触发恢复
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
-    assert resp.status_code == 200
+    assert resp.status_code == 404
 
     await asyncio.sleep(0.3)  # 给可能被错误启动的恢复 task 一点作恶时间
     data = await _wait_status(client, run_id, "cancelled")

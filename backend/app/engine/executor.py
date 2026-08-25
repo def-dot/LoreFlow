@@ -150,9 +150,10 @@ class DAGExecutor:
     ) -> NodeResult:
         """Lifecycle of a single node: 等依赖 → 跳过/条件判断 → 带重试执行 → 收尾。
 
-        Task-level safety net: 无论执行如何退出，必返回终态 NodeResult。
-        同步(events)/事件汇报两件事都在 finally 收口——全部从这同一个
-        result 推导。
+        Task-level safety net: 除挂起信号（SuspendExecution 向上穿透、
+        本节点挂起已带 REVIEWING result 供 emit）外，无论执行如何退出，
+        必返回终态 NodeResult。同步(events)/事件汇报两件事都在 finally
+        收口——全部从这同一个 result 推导。
         """
         result: NodeResult | None = None
         try:
@@ -242,6 +243,17 @@ class DAGExecutor:
                     )
                     return result
 
+                except SuspendExecution as exc:
+                    # 本节点审批挂起：REVIEWING + 审核视图（output）随 finally 的
+                    # emit 落快照；重新抛出让 run 走挂起收尾。级联节点在依赖检查
+                    # 处收到同一异常时不带 result、不 emit，快照不被污染
+                    result = NodeResult(
+                        node_name=node.name,
+                        status=NodeStatus.REVIEWING,
+                        output=exc.results,
+                    )
+                    raise
+
                 except Exception as exc:
                     last_error = exc
 
@@ -293,13 +305,6 @@ class DAGExecutor:
                 node_name=node.name,
                 status=NodeStatus.CANCELLED,
             )
-        except SuspendExecution as exc:
-            result = NodeResult(
-                node_name=node.name,
-                status=NodeStatus.REVIEWING,
-                output=exc.results,
-            )
-            raise
         except Exception as exc:
             # Should not happen — the code above is defensive, but guard anyway
             logger.exception("Unexpected error in executor for %s", node.name)
