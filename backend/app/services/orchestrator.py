@@ -132,10 +132,6 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
 
 async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: float = 1.0) -> None:
     """伴随 pipeline 的取消看门狗：周期查 DB，发现 CANCELLED 就中断本进程 task。
-
-    多 worker 下取消发生在别的进程（task.cancel 够不着），本进程靠它感知；
-    单 worker 下它是 cancel_run 直接 cancel 打空时的第二击。查询瞬断只跳过
-    本周期——看门狗不能先于被看守者死亡。
     """
     while not pipeline.done():
         await asyncio.sleep(interval)
@@ -146,13 +142,6 @@ async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: 
         if record is not None and record.status == RunStatus.CANCELLED:
             pipeline.cancel()
             return
-
-
-def _spawn(record: RunRecord, dag: DAG) -> None:
-    """启动 pipeline + 取消看门狗：中断是执行方自治的事，取消方只写 DB。"""
-    task = asyncio.create_task(run_pipeline(record, dag))
-    watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
-    task.add_done_callback(lambda _: watchdog.cancel())  # pipeline 已终态（含挂起），看门狗停转
 
 
 async def create_run(
@@ -191,7 +180,9 @@ async def create_run(
     record.mermaid = dag.to_mermaid()
     
     await runs.save(record)
-    _spawn(record, dag)
+    task = asyncio.create_task(run_pipeline(record, dag))
+    watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
+    task.add_done_callback(lambda _: watchdog.cancel())  # pipeline 已终态（含挂起），看门狗停转
     return record.id
 
 
@@ -248,7 +239,9 @@ async def resume_record(record: RunRecord) -> None:
         on_event=make_event_sink(record),
     )
   
-    _spawn(record, dag)
+    task = asyncio.create_task(run_pipeline(record, dag))
+    watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
+    task.add_done_callback(lambda _: watchdog.cancel())
 
 
 async def _acquire_recovery_lock() -> AsyncConnection | None:

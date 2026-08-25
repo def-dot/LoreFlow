@@ -409,10 +409,11 @@ async def test_create_run_unknown_config_400(client: AsyncClient) -> None:
 
 
 async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
-    """重启恢复也按 config_file 找对应的 YAML（非主演示流水线）。"""
+    """重启恢复按钉住的 definition 续跑（非主演示流水线）。"""
     record = RunRecord(
         name="基础链路",
         config_file="01_basic_chain.yaml",
+        definition=(settings.PIPELINES_DIR / "01_basic_chain.yaml").read_text(encoding="utf-8"),
         mermaid="graph TD\n",
         created_at="2026-01-01T00:00:00",
         status="running",
@@ -430,10 +431,11 @@ async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
 
 
 async def test_resume_stuck_run(client: AsyncClient) -> None:
-    """模拟崩溃重启：running 记录 + 部分节点快照 → resume 续跑。"""
+    """模拟崩溃重启：running 记录（含定义快照）→ 按钉住的定义 resume 续跑。"""
     record = RunRecord(
         name="content_pipeline",
         config_file="05_human_review.yaml",
+        definition=(settings.PIPELINES_DIR / "05_human_review.yaml").read_text(encoding="utf-8"),
         mermaid="graph TD\n",
         created_at="2026-01-01T00:00:00",
         status="running",
@@ -606,6 +608,7 @@ async def test_inputs_restart_resume_replays_inputs(client: AsyncClient, monkeyp
     record = RunRecord(
         name="inputs_review",
         config_file="inputs_review.yaml",
+        definition=pipe.read_text(encoding="utf-8"),
         mermaid="graph TD\n",
         created_at="2026-01-01T00:00:00",
         status="reviewing",
