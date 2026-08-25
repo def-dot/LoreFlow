@@ -86,7 +86,6 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
             "approve": body.approve,
             "reason": body.reason,
             "edits": body.edits,
-            # 审核时视图留档：挂起快照里的 payload（服务端捕获，非客户端提交）
             "payload": entry.get("payload"),
         },
     )

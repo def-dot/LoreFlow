@@ -84,7 +84,7 @@ async def run_pipeline(
         record.error = str(exc)
         record.status = RunStatus.FAILED
     finally:
-        if record.status != RunStatus.REVIEWING:  # 挂起非终态：finished_at 不写
+        if record.status != RunStatus.REVIEWING:
             record.finished_at = datetime.now().isoformat(timespec="seconds")
         await runs.save(record)
 
