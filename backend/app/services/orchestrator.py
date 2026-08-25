@@ -94,7 +94,6 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"
     except SuspendExecution:
-        # 挂起：节点+run 两层状态已由 approver 落库，不走终态 CAS
         suspended = True
     except Exception as exc:
         outcome = RunStatus.FAILED
