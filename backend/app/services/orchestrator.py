@@ -47,11 +47,7 @@ def make_approver(record: RunRecord) -> ApproverFunc:
         if decision is not None:
             return decision
 
-        # 只写内存快照（节点级 reviewing + payload），落库由 run_pipeline 的
-        # SuspendExecution 处理统一做——status 与 nodes 必须同一条 UPDATE 原子写入
-        entry["status"] = NodeStatus.REVIEWING.value
-        entry["payload"] = payload
-        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批")
+        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批", {"payload": payload})
 
     return approver
 
@@ -83,36 +79,26 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"
     except SuspendExecution:
-        # 挂起落库（approver 只写内存快照）：CAS 抢 REVIEWING，与取消并发时谁先到算谁的；
-        # rowcount 为 0 说明取消已抢先写终态，这里什么都不用做
-        suspended = True
-        async with database.AsyncSessionLocal() as session:
-            result = await session.execute(
-                update(RunRecord)
-                .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
-                .values(status=RunStatus.REVIEWING, nodes=record.nodes)
-            )
-            await session.commit()
-        if not result.rowcount:
-            logger.info("[run %s] 挂起失败：状态已被并发修改（如取消）", record.id)
+        outcome = RunStatus.REVIEWING
     except Exception as exc:
         outcome = RunStatus.FAILED
         error = str(exc)
     finally:
-        if not suspended:
-            values: dict[str, Any] = {
-                "status": outcome,
-                "finished_at": datetime.now().isoformat(timespec="seconds"),
-                "error": error
-            }
+        values = {
+            "status": outcome,
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "error": error,
+        }
 
-            async with database.AsyncSessionLocal() as session:
-                await session.execute(
-                    update(RunRecord)
-                    .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
-                    .values(**values)
-                )
-                await session.commit()
+        async with database.AsyncSessionLocal() as session:
+            result = await session.execute(
+                update(RunRecord)
+                .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
+                .values(**values)
+            )
+            await session.commit()
+        if not result.rowcount:
+            logger.info("[run %s] %s 未落库：状态已被并发修改（如取消）", record.id, values["status"].value)
 
 
 async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: float = 1.0) -> None:

@@ -108,9 +108,9 @@ class DAGExecutionError(Exception):
         self.results = results
 
 
-class SuspendExecution(BaseException):
+class SuspendExecution(Exception):
     """内部控制流信号：人工审批节点挂起，run 干净退出等待 /approve。
-
-    BaseException 而非 Exception——穿过 executor 的重试循环与
-    run_pipeline 的失败兜底，只被显式 except SuspendExecution 捕获。
     """
+    def __init__(self, message: str, results: dict[str, Any]):
+        super().__init__(message)
+        self.results = results
