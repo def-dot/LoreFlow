@@ -49,21 +49,19 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
         entry["status"] = NodeStatus.REVIEWING.value
         entry["payload"] = payload
-        # 挂起写入走 CAS（仅 RUNNING 可转 REVIEWING）：与取消毫秒级并发时
-        # 谁先抢到算谁的。抢不到 = 已被取消 —— 照常挂起退出（task 随即
-        # 结束，看门狗已停），DB 留在 CANCELLED，后续 approve 会被
-        # resume 的 CAS 拦住
+
         async with database.AsyncSessionLocal() as session:
             result = await session.execute(
                 update(RunRecord)
                 .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
-                .values(status=RunStatus.REVIEWING)
+                .values(status=RunStatus.REVIEWING, nodes=record.nodes)
             )
             await session.commit()
+
         if not result.rowcount:
-            logger.info("[run %s] 挂起放弃：状态已被并发转移（可能已取消）", record.id)
-            raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批（已被取消）")
-        await runs.save_nodes(record.id, record.nodes)
+            record = runs.get_run(record.id)
+            logger.info("[run %s] 挂起失败：当前状态 %s", record.id, record.status.value if record else '未知')
+            raise SuspendExecution(f"run {record.id} 节点 {node_name} 挂起失败")
         raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批")
 
     return approver
@@ -75,7 +73,9 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
     async def on_event(result: NodeResult) -> None:
         record.nodes[result.node_name] = result.to_dict()
         try:
-            await runs.save_nodes(record.id, record.nodes)
+            async with database.AsyncSessionLocal() as session:
+                await session.execute(update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes))
+                await session.commit()
         except Exception as exc:
             logger.error("Failed to save run snapshot: %s", exc)
 
@@ -84,11 +84,6 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
 
 async def run_pipeline(record: RunRecord, dag: DAG) -> None:
     """执行一次 run。终态走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
-
-    取消统一由 _cancel_watchdog 感知（取消方只写 DB）：看门狗发现 DB 已
-    取消就 task.cancel()，本协程落 CancelledError 分支；resume_stuck_runs
-    不复活 CANCELLED（进程重启后）。节点快照由 on_event/approver 逐节点
-    落库，这里只裁决 run 级状态。
     """
     outcome = RunStatus.COMPLETED
     error: str | None = None
@@ -96,8 +91,6 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
     try:
         await dag.run(inputs=record.inputs, resume=record.nodes)
     except asyncio.CancelledError:
-        # 吞掉而非 re-raise：终态写入在 finally，re-raise 后其中的 await
-        # 有被同一取消再打断的风险；此 task 无下游消费者，正常返回即可
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"
     except SuspendExecution:
@@ -108,15 +101,11 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         error = str(exc)
     finally:
         if not suspended:
-            # 终态 CAS（仅 RUNNING 可转终态）：抢不到说明 cancel 已先行落了
-            # CANCELLED —— 正是要的结果。shield：dag.run 内部的取消请求
-            # 可能仍挂在当前 task 上，终态写入必须完成
             values: dict[str, Any] = {
                 "status": outcome,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "error": error
             }
-            if error is not None:
-                values["error"] = error  # 仅显式提供时写：None 不覆盖已有值
 
             async def _finalize() -> None:
                 async with database.AsyncSessionLocal() as session:
@@ -179,7 +168,7 @@ async def create_run(
     record.name = dag.name
     record.mermaid = dag.to_mermaid()
     
-    await runs.save(record)
+    await runs.create(record)
     task = asyncio.create_task(run_pipeline(record, dag))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
     task.add_done_callback(lambda _: watchdog.cancel())

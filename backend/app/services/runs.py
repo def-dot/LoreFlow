@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from sqlalchemy import delete as sa_delete, update
+from sqlalchemy import delete as sa_delete
 from sqlmodel import func, select
 
 from app.core import database
@@ -17,17 +17,13 @@ from app.models.review import ReviewDecision
 from app.models.run import RunRecord, RunStatus
 
 
-async def save(record: RunRecord) -> None:
-    """把记录同步到库。
+async def create(record: RunRecord) -> None:
+    """插入新 run 记录（id 由 DB 生成回填）。
     """
     async with database.AsyncSessionLocal() as session:
-        if record.id is None:
-            session.add(record)
-            await session.commit()
-            await session.refresh(record)
-            return
-        await session.merge(record)
+        session.add(record)
         await session.commit()
+        await session.refresh(record)
 
 
 async def list_runs(
@@ -86,23 +82,9 @@ async def get_run(run_id: int) -> RunRecord | None:
         return await session.get(RunRecord, run_id)
 
 
-async def save_nodes(run_id: int, nodes: dict[str, Any]) -> None:
-    """只落节点快照（定向 UPDATE，不携带 status/error 等其他字段）。
-
-    status 的写权归各处的 CAS UPDATE 独占：事件回写若整体 merge
-    内存 record，会把执行进程里的旧状态（如 RUNNING）盖掉取消方刚
-    写入的 CANCELLED —— 取消就被"复活"了。
-    """
-    async with database.AsyncSessionLocal() as session:
-        await session.execute(update(RunRecord).where(RunRecord.id == run_id).values(nodes=nodes))
-        await session.commit()
-
-
 async def delete_run(run_id: int) -> bool:
     """删除一条**终态** run 及其审批决策（审计痕迹随 run 一并清理）。
 
-    仅终态可删：运行中/待审核的记录可能正被事件回写 ``save`` 落库——
-    行删掉后 merge 会带着旧 id 把它复活成新行，且会中断审批/恢复流。
     不存在或非终态返回 False（由路由层区分 404/400）。
     """
     async with database.AsyncSessionLocal() as session:

@@ -24,7 +24,7 @@ async def _all_rows() -> list[ReviewDecision]:
 
 async def _persist_run() -> RunRecord:
     record = RunRecord(name="t", config_file="p.yaml")
-    await runs.save(record)
+    await runs.create(record)
     assert record.id is not None
     return record
 

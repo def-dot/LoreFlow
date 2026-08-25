@@ -2,7 +2,7 @@
 
 多 worker 下取消的正确性 = 三层防线：
 - CAS UPDATE：取消/完成/恢复三方竞态谁先抢到算谁的（DB 是唯一裁判）
-- save_nodes 定向回写：事件落库不携带旧 status，取消不会被回写复活
+- 定向 UPDATE nodes：事件落库不携带旧 status，取消不会被回写复活
 - _cancel_watchdog：执行进程轮询 DB 发现取消后中断本进程 task
 """
 
@@ -48,15 +48,17 @@ async def _wait_status(client: AsyncClient, run_id: int, status: str, timeout: f
     return await asyncio.wait_for(poll(), timeout=timeout)
 
 
-async def test_save_nodes_leaves_status_alone() -> None:
+async def test_node_update_leaves_status_alone() -> None:
     """事件回写只动 nodes：取消后的 CANCELLED 不被执行进程的旧内存覆盖（回归）。"""
     record = RunRecord(name="t", config_file="p.yaml", status=RunStatus.RUNNING)
-    await runs.save(record)
+    await runs.create(record)
     await _force_cancel(record)
 
     # 执行进程的内存 record 仍停在 RUNNING，此刻一个节点完成触发事件回写
     record.nodes["work"] = {"status": "completed", "output": 1}
-    await runs.save_nodes(record.id, record.nodes)
+    async with db_mod.AsyncSessionLocal() as session:
+        await session.execute(sa_update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes))
+        await session.commit()
 
     fresh = await runs.get_run(record.id)
     assert fresh is not None
@@ -67,7 +69,7 @@ async def test_save_nodes_leaves_status_alone() -> None:
 async def test_watchdog_cancels_pipeline_task() -> None:
     """看门狗发现 DB 已取消 → 中断本进程 task（跨进程取消的执行侧感知）。"""
     record = RunRecord(name="t", config_file="p.yaml", status=RunStatus.RUNNING)
-    await runs.save(record)
+    await runs.create(record)
     await _force_cancel(record)
 
     victim = asyncio.create_task(asyncio.sleep(30))  # 假装长跑的 pipeline
@@ -112,7 +114,7 @@ async def test_cancel_reviewing_run_blocks_approve(client: AsyncClient) -> None:
 async def test_cancel_terminal_run_rejected(client: AsyncClient) -> None:
     """终态 run 不可取消：400 + 状态原样。"""
     record = RunRecord(name="t", config_file="p.yaml", status=RunStatus.COMPLETED)
-    await runs.save(record)
+    await runs.create(record)
     assert record.id is not None
 
     resp = await client.post(f"/api/v1/runs/{record.id}/cancel")
