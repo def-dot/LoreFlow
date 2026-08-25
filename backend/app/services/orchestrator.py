@@ -81,10 +81,11 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         outcome = RunStatus.FAILED
         error = str(exc)
     finally:
-        values: dict[str, Any]
-        values = {
+        # 挂起非终态：不写 finished_at（outcome 只会是 COMPLETED/CANCELLED/
+        # REVIEWING/FAILED，永不是 RUNNING）
+        values: dict[str, Any] = {
             "status": outcome,
-            "finished_at": datetime.now().isoformat(timespec="seconds") if outcome is not RunStatus.RUNNING else None,
+            "finished_at": datetime.now().isoformat(timespec="seconds") if outcome is not RunStatus.REVIEWING else None,
             "error": error,
         }
 
