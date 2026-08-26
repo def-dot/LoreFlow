@@ -183,6 +183,8 @@ def validate_condition(condition: Any, name: str, kind: str) -> list[str]:
             f"节点 {name!r}（{kind}）: condition 必须是函数名字符串或 {{fn: 键, 参数…}} 映射，"
             f"实际是 {type(condition).__name__}"
         ]
+    if kind == "loop":
+        return [f"节点 {name!r}（loop）: condition 必须是函数名字符串（映射参数形式不支持 loop）"]
     fn_key = condition.get("fn")
     if not isinstance(fn_key, str) or not fn_key:
         return [f"节点 {name!r}（{kind}）: condition 映射需要 'fn'（条件函数键）"]

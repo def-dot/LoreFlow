@@ -15,15 +15,19 @@ from app.registry.core import node
 from app.utils.http import http_client
 
 
-async def _ollama_chat(model: str, messages: list[dict[str, str]]) -> str:
-    """POST /api/chat（非流式）→ 助手回复文本。"""
+async def _ollama_chat(
+    model: str, messages: list[dict[str, str]], fmt: dict[str, Any] | str | None = None
+) -> str:
+    """POST /api/chat（非流式）→ 助手回复文本；fmt 透传 Ollama 的 format
+    约束（``"json"`` 或 JSON Schema，如分类用的 enum）。"""
+    payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    if fmt is not None:
+        payload["format"] = fmt
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
-    resp = await http_client().post(
-        url, json={"model": model, "messages": messages, "stream": False}
-    )
+    resp = await http_client().post(url, json=payload)
     resp.raise_for_status()
     data = resp.json()
-        
+
     content = data["message"]["content"]
     return str(content)
 
@@ -58,30 +62,33 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
 
 @node(
     label="意图识别",
-    description="LLM 判断 ctx['prompt'] 是简单问答（simple）还是复杂诉求（complex），输出 {intent, raw}",
+    description="LLM 判断 ctx['prompt'] 是闲聊（chat）还是知识类问题（rag），输出 {intent, raw}；提示词包含「人工」直接判 human（转人工，无需模型）",
 )
 async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
+    # 关键词短路：用户点名「人工」直接转人工——优先级最高且确定性，不必过模型
+    if "人工" in prompt:
+        return {"intent": "human", "raw": "关键词命中：人工"}
     system = (
-        "你是客服意图分类器，只输出一个小写单词，不要输出任何其他内容：\n"
-        "simple —— 常见问题，凭知识库资料即可直接回答\n"
-        "complex —— 投诉、纠纷、个性化或多步骤等需要人工客服处理的复杂诉求"
+        "你是客服意图分类器，只允许输出 chat 或 rag 两个单词之一，"
+        "禁止输出其他任何内容（包括标点、解释或其他语言）：\n"
+        "chat —— 问候、闲聊、创作、翻译等无需查询资料的请求\n"
+        "rag —— 需要查询知识库/设定资料才能回答的问题"
     )
     raw = await _ollama_chat(
         settings.OLLAMA_MODEL,
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        # 硬约束：服务端按 schema 采样，只会吐出 enum 里的词
+        fmt={"type": "string", "enum": ["chat", "rag"]},
     )
-    # 宽松解析：本地模型不总按指令输出小写英文（实测会把闲聊答成「聊天」），
-    # 按中英关键词识别；识别不出按简单问答（自动回复只依据知识库作答，
-    # 资料不足会明说，不至于把诉求错误升级成人工）
     text = raw.lower()
-    intent = "complex" if any(k in text for k in ("complex", "复杂", "人工", "投诉", "纠纷")) else "simple"
+    intent = "rag" if any(k in text for k in ("rag", "知识", "检索", "问答")) else "chat"
     return {"intent": intent, "raw": raw.strip()}
 
 
-@node(kind="condition", label="意图判定", description="classify 输出的 intent 等于给定值（YAML 里 condition: {fn: intent_is, value: simple|complex}）")
+@node(kind="condition", label="意图判定", description="classify 输出的 intent 等于给定值（condition: {fn: intent_is, value: chat|rag|human}）")
 def intent_is(ctx: dict[str, Any], value: str) -> bool:
     classify = ctx.get("classify")
     return isinstance(classify, dict) and classify.get("intent") == value
