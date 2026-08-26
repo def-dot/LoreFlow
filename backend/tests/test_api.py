@@ -340,7 +340,14 @@ async def test_invalid_pipeline_400_no_run_record(client: AsyncClient, monkeypat
 
 async def test_create_run_with_config_file(client: AsyncClient) -> None:
     """POST /runs 带 config_file：跑指定的 demo 流水线并持久化文件名。"""
-    resp = await client.post("/api/v1/runs", json={"config_file": "01_serial.yaml"})
+    resp = await client.post(
+        "/api/v1/runs",
+        json={
+            "config_file": "01_serial.yaml",
+            # file 参数由前端上传控件合成 {filename, content}（rag_load 解析）
+            "inputs": {"document": {"filename": "北境要塞.md", "content": "第一段设定。\n\n第二段设定。"}},
+        },
+    )
     assert resp.status_code == 201
     run_id = resp.json()["data"]["run_id"]
 
@@ -348,7 +355,7 @@ async def test_create_run_with_config_file(client: AsyncClient) -> None:
     assert data["status"] == "completed"
     assert data["config_file"] == "01_serial.yaml"
     assert all(n["status"] != "reviewing" for n in data["nodes"].values())  # 无人工审核节点
-    assert data["nodes"]["upsert"]["status"] == "completed"
+    assert data["nodes"]["写入向量库"]["status"] == "completed"
 
 
 async def _wait_status(client: AsyncClient, run_id: int, status: str, timeout: float = 15) -> dict[str, Any]:
@@ -423,6 +430,7 @@ async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
         created_at="2026-01-01T00:00:00",
         status="running",
         nodes={},
+        inputs={"document": {"filename": "北境要塞.md", "content": "第一段设定。\n\n第二段设定。"}},
     )
     await run_service.save(record)
     run_id = record.id
