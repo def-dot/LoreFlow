@@ -88,22 +88,34 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"intent": intent, "raw": raw.strip()}
 
 
-@node(kind="condition", label="意图判定", description="classify 输出的 intent 等于给定值（condition: {fn: intent_is, value: chat|rag|human}）")
+def _latest(ctx: dict[str, Any], shape: Any) -> Any:
+    """倒序找最近一个符合形状的上游输出（节点名即 ctx 键，中文命名不影响接线），
+    找不到返回 None。与 rag._find_upstream 同款，条件侧缺上游按 False 处理。"""
+    for value in reversed(list(ctx.values())):
+        if shape(value):
+            return value
+    return None
+
+
+@node(kind="condition", label="意图判定", description="意图识别输出的 intent 等于给定值（condition: {fn: intent_is, value: chat|rag|human}；按 {intent} 形状找上游，节点中英文命名均可）")
 def intent_is(ctx: dict[str, Any], value: str) -> bool:
-    classify = ctx.get("classify")
-    return isinstance(classify, dict) and classify.get("intent") == value
+    classify = _latest(ctx, lambda v: isinstance(v, dict) and "intent" in v)
+    return classify is not None and classify.get("intent") == value
 
 
 @node(
     label="知识库问答",
-    description="结合检索片段回答 ctx['prompt']（片段来自 YAML 命名为 retrieve 的 rag_retrieve 节点输出）",
+    description="结合检索片段回答 ctx['prompt']（按 [{source, text}] 形状找上游检索输出，节点中英文命名均可）",
 )
 async def llm_rag_reply(ctx: dict[str, Any]) -> str:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
-    chunks = ctx.get("retrieve") or []
-    if not isinstance(chunks, list) or not chunks:
+    chunks = _latest(
+        ctx,
+        lambda v: isinstance(v, list) and bool(v) and all(isinstance(c, dict) and "text" in c for c in v),
+    ) or []
+    if not chunks:
         return "知识库中没有检索到相关内容。"
     refs = "\n\n".join(
         f"[{i}] {c.get('source', '')} {c.get('text', '')}"

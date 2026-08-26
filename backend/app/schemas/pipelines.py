@@ -38,7 +38,7 @@ class PipelineNodeOut(BaseModel):
     type_description: str | None = None  # node=注册表描述；human=审核提示；loop=循环体摘要
     depends_on: list[str] = []
     retry: str | None = None         # 中文摘要，如 "重试 3 次，退避 0.05s×2（≤0.5s）"
-    condition: str | None = None     # 条件谓词注册表键
+    condition: str | dict[str, Any] | None = None  # 条件谓词：注册表键（无参）或 {fn: 键, 参数…}（带参）
     condition_label: str | None = None
     review: dict[str, dict[str, str]] | None = None  # (kind=human) 审核视图原文 {key: {label}}；None=全量上下文
 
