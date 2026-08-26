@@ -10,22 +10,25 @@ params:
 
 nodes:
   classify:
-    type: llm_classify            # 意图识别，输出 {intent: simple|complex}
+    type: llm_classify
+    routes:                        # 边级路由：一处声明，未选中支路整条 SKIPPED
+      router: route_intent        # 注册表路由函数：读 classify 输出返回支路标签
+      default: simple             # 标签未命中时回落；不声明则路由失败（run 失败）
+      branches:
+        simple: [retrieve, auto_reply]
+        complex: [takeover]
 
-  retrieve:                       # 支路一：简单问答，检索知识库后自动回复
+  retrieve:                       # 支路成员不用再逐个挂 condition
     type: rag_retrieve
     depends_on: [classify]
-    condition: is_simple
 
   auto_reply:
     type: llm_rag_reply
     depends_on: [retrieve]
-    condition: is_simple          # SKIPPED 不级联，同支路每个节点都要挂条件
 
-  takeover:                       # 支路二：复杂诉求，人工客服接管
+  takeover:
     kind: human
     depends_on: [classify]
-    condition: is_complex
     prompt: "复杂诉求：请人工客服接管处理。"
     review:
       prompt: {label: 用户诉求}

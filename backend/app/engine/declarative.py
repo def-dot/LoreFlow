@@ -13,14 +13,14 @@ from app.registry import REGISTRY, NodeType
 
 from . import validate
 from .dag import DAG
-from .node import ApproverFunc, Node
+from .node import ApproverFunc, ConditionFunc, Node, RouteConfig, route_gate
 from .resolve import parse_retry
 from .types import NodeEventFunc
 
 
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
-    "node": {"type", "depends_on", "retry", "timeout", "condition", "metadata"},
+    "node": {"type", "depends_on", "retry", "timeout", "condition", "metadata", "routes"},
     "human": {"depends_on", "retry", "prompt", "condition", "review"},
     "loop": {"depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
 }
@@ -94,6 +94,7 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                     for msg in validate_nodes({"nodes": body})
                 )
 
+    errors.extend(validate.validate_routes(nodes))
     errors.extend(validate.validate_graph(edges))
     return errors
 
@@ -161,6 +162,24 @@ def load_dag(
         on_event=on_event,
     )
 
+    # 边级路由：源节点声明 routes → RouteConfig 挂源节点；支路成员合成
+    # 门卫作 condition（成员不得再声明 condition，校验已保证互斥）
+    route_configs: dict[str, RouteConfig] = {}
+    route_gates: dict[str, ConditionFunc] = {}
+    for name, spec in config["nodes"].items():
+        routes_spec = spec.get("routes")
+        if not routes_spec:
+            continue
+        route = RouteConfig(
+            router=REGISTRY[routes_spec["router"]].func,
+            branches={label: tuple(members) for label, members in routes_spec["branches"].items()},
+            default=routes_spec.get("default"),
+        )
+        route_configs[name] = route
+        for label, members in route.branches.items():
+            for member in members:
+                route_gates[member] = route_gate(route, label)
+
     for name, spec in config["nodes"].items():
         kind = spec.get("kind", "node")
 
@@ -169,9 +188,8 @@ def load_dag(
 
         if kind == "human":
             condition = spec.get("condition")
-            cond_func = None
-            if condition:
-                cond_func = REGISTRY[condition].func
+            cond_func = REGISTRY[condition].func if condition else None
+            cond_func = route_gates.get(name) or cond_func
             dag.human_node(
                 name,
                 depends_on=deps,
@@ -200,9 +218,8 @@ def load_dag(
 
         else:
             condition = spec.get("condition")
-            cond_func = None
-            if condition:
-                cond_func = REGISTRY[condition].func
+            cond_func = REGISTRY[condition].func if condition else None
+            cond_func = route_gates.get(name) or cond_func
 
             node_type = REGISTRY[spec["type"]]
             dag.add_node(
@@ -213,6 +230,7 @@ def load_dag(
                     retry=retry,
                     timeout=spec.get("timeout"),
                     condition=cond_func,
+                    routes=route_configs.get(name),
                     metadata={
                         "type": node_type.name,
                         "label": node_type.label,
