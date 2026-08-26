@@ -81,16 +81,12 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"intent": intent, "raw": raw.strip()}
 
 
-@node(kind="condition", label="是简单问答", description="意图为 simple：知识库自动回复支路执行")
-def is_simple(ctx: dict[str, Any]) -> bool:
+@node(kind="router", label="意图路由", description="读 ctx['classify'] 的意图输出，返回支路标签 simple|complex（供 classify 的 routes 引用）")
+def route_intent(ctx: dict[str, Any]) -> str:
     classify = ctx.get("classify")
-    return isinstance(classify, dict) and classify.get("intent") == "simple"
-
-
-@node(kind="condition", label="是复杂诉求", description="意图为 complex：人工客服接管支路执行")
-def is_complex(ctx: dict[str, Any]) -> bool:
-    classify = ctx.get("classify")
-    return isinstance(classify, dict) and classify.get("intent") == "complex"
+    if isinstance(classify, dict):
+        return str(classify.get("intent") or "")
+    return ""
 
 
 @node(

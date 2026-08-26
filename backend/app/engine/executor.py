@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from .node import HumanRejected, Node, replay_review_edits
+from .node import HumanRejected, Node, replay_review_edits, resolve_route
 from .types import (
     DAGExecutionError,
     NodeEventFunc,
@@ -216,6 +216,14 @@ class DAGExecutor:
 
                     # success
                     ctx[node.name] = output
+
+                    # 边级路由：源节点成功即解析支路标签。路由失败沿本节点
+                    # 的失败路径显式化（不静默跳过整条支路）；支路门卫在下游
+                    # 各自求值同一确定性函数
+                    if node.routes is not None:
+                        label = resolve_route(node.routes, ctx)
+                        logger.info("[%s] Routed → %s", node.name, label)
+
                     logger.info(
                         "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
                         node.name,

@@ -14,14 +14,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-NodeKind = Literal["function", "condition"]
+NodeKind = Literal["function", "condition", "router"]
 
 
 @dataclass(frozen=True)
 class NodeType:
-    """一个可被 YAML 引用的类型：节点函数或条件谓词。
+    """一个可被 YAML 引用的类型：节点函数、条件谓词或路由函数。
 
-    ``func`` 签名统一为 ``(ctx: dict) -> Any``
+    ``func`` 签名统一为 ``(ctx: dict) -> Any``；router 返回支路标签（str）。
     """
 
     name: str
