@@ -252,8 +252,8 @@ async def test_list_runs_filters(client: AsyncClient) -> None:
     """status/config_file 筛选：total 为筛选后总数；summary 为全局计数，
     不随筛选变化（前端轮询/电流据此判断，筛过的视图不能停摆）。"""
     seeds = [
-        ("completed", "01_basic_chain.yaml"),
-        ("failed", "01_basic_chain.yaml"),
+        ("completed", "01_serial.yaml"),
+        ("failed", "01_serial.yaml"),
         ("running", "02_condition_branching.yaml"),
         ("reviewing", "05_human_review.yaml"),
     ]
@@ -277,14 +277,14 @@ async def test_list_runs_filters(client: AsyncClient) -> None:
     assert data["summary"] == {"running": 1, "active": 2}
 
     # 流水线筛选
-    resp = await client.get("/api/v1/runs", params={"config_file": "01_basic_chain.yaml"})
+    resp = await client.get("/api/v1/runs", params={"config_file": "01_serial.yaml"})
     data = resp.json()["data"]
     assert data["total"] == 2
-    assert all(r["config_file"] == "01_basic_chain.yaml" for r in data["items"])
+    assert all(r["config_file"] == "01_serial.yaml" for r in data["items"])
 
     # 组合筛选
     resp = await client.get(
-        "/api/v1/runs", params={"status": "failed", "config_file": "01_basic_chain.yaml"}
+        "/api/v1/runs", params={"status": "failed", "config_file": "01_serial.yaml"}
     )
     data = resp.json()["data"]
     assert data["total"] == 1 and data["items"][0]["status"] == "failed"
@@ -340,13 +340,13 @@ async def test_invalid_pipeline_400_no_run_record(client: AsyncClient, monkeypat
 
 async def test_create_run_with_config_file(client: AsyncClient) -> None:
     """POST /runs 带 config_file：跑指定的 demo 流水线并持久化文件名。"""
-    resp = await client.post("/api/v1/runs", json={"config_file": "01_basic_chain.yaml"})
+    resp = await client.post("/api/v1/runs", json={"config_file": "01_serial.yaml"})
     assert resp.status_code == 201
     run_id = resp.json()["data"]["run_id"]
 
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
-    assert data["config_file"] == "01_basic_chain.yaml"
+    assert data["config_file"] == "01_serial.yaml"
     assert all(n["status"] != "reviewing" for n in data["nodes"].values())  # 无人工审核节点
     assert data["nodes"]["upsert"]["status"] == "completed"
 
@@ -417,8 +417,8 @@ async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
     """重启恢复按钉住的 definition 续跑（非主演示流水线）。"""
     record = RunRecord(
         name="基础链路",
-        config_file="01_basic_chain.yaml",
-        definition=(settings.PIPELINES_DIR / "01_basic_chain.yaml").read_text(encoding="utf-8"),
+        config_file="01_serial.yaml",
+        definition=(settings.PIPELINES_DIR / "01_serial.yaml").read_text(encoding="utf-8"),
         mermaid="graph TD\n",
         created_at="2026-01-01T00:00:00",
         status="running",
@@ -432,7 +432,7 @@ async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
 
     data = await _wait_terminal(client, run_id)
     assert data["status"] == "completed"
-    assert data["config_file"] == "01_basic_chain.yaml"
+    assert data["config_file"] == "01_serial.yaml"
 
 
 async def test_resume_stuck_run(client: AsyncClient) -> None:

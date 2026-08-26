@@ -141,7 +141,7 @@ def test_plugin_importing_builtin_node(monkeypatch, tmp_path, isolated_registry)
     """插件 import 内置节点复用：不算本插件注册，重载不误删内置。"""
     _write(
         tmp_path / "wrap.py",
-        "from app.registry.nodes import cfg_fetch\n\n"
+        "from app.registry.demo import cfg_fetch\n\n"
         '@node(label="包装", description="复用内置抓取")\n'
         "async def wrap_probe(ctx: dict) -> str:\n"
         '    data = await cfg_fetch(ctx)\n'

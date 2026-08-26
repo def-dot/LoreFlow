@@ -24,6 +24,8 @@ const creating = ref(false)
 const inputsText = ref('')
 // 表单模式的字段值（字符串输入，提交时解析）
 const paramValues = ref<Record<string, string>>({})
+// file 参数已选的文件名（正文文本存 paramValues，提交时合成 {filename, content}）
+const fileNames = ref<Record<string, string>>({})
 // 声明了 params 的流水线默认表单模式；未声明的只有 JSON 文本
 const jsonMode = ref(false)
 
@@ -75,6 +77,7 @@ watch(
         .filter((s) => s.has_default && s.default != null && (typeof s.default === 'string' || !s.multiline))
         .map((s) => [s.name, defaultToText(s.default)]),
     )
+    fileNames.value = {}
     inputsText.value = ''
   },
 )
@@ -104,7 +107,12 @@ const formInputs = computed(() => {
   const value: Record<string, unknown> = {}
   for (const spec of paramSpecs.value) {
     const raw = (paramValues.value[spec.name] ?? '').trim()
-    if (raw !== '') value[spec.name] = parseFieldValue(raw, spec.multiline)
+    if (raw === '') continue
+    // file 字段的值是文件正文：不做 JSON 启发式（正文形似数字/JSON 不该
+    // 被改类型），合成 {filename, content} 供节点取标题
+    value[spec.name] = spec.file
+      ? { filename: fileNames.value[spec.name] || '上传文档', content: paramValues.value[spec.name] }
+      : parseFieldValue(raw, spec.multiline)
   }
   return value
 })
@@ -163,6 +171,27 @@ function paramPlaceholder(spec: ParamSpec): string {
 
 function fillDefaults() {
   inputsText.value = defaultsJson.value
+}
+
+// file 参数选择文件：客户端读纯文本入参（上传即读取，无服务端暂存），
+// 文件名单独记录供提交时合成 {filename, content}
+function onFilePicked(spec: ParamSpec, event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 清掉选择，允许再次选同一文件
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    paramValues.value[spec.name] = String(reader.result ?? '')
+    fileNames.value[spec.name] = file.name
+  }
+  reader.readAsText(file)
+}
+
+// 移除已选文件：回到「未选择」= 该参数不随新建运行提交（用默认值或不传）
+function clearFile(spec: ParamSpec) {
+  delete paramValues.value[spec.name]
+  delete fileNames.value[spec.name]
 }
 
 // ---------------------------------------------------------------------------
@@ -414,7 +443,26 @@ onUnmounted(() => {
                 {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
                 <span v-else class="param-optional">可选</span>
               </div>
+              <!-- file 参数：上传控件 + 文件名（正文不回显，随提交合成 {filename, content}） -->
+              <div v-if="spec.file" class="param-file">
+                <label class="param-file-button">
+                  选择文件
+                  <input
+                    type="file"
+                    accept=".txt,.md,.markdown,text/plain"
+                    @change="onFilePicked(spec, $event)"
+                  />
+                </label>
+                <template v-if="fileNames[spec.name]">
+                  <span class="param-file-name" :title="fileNames[spec.name]">
+                    {{ fileNames[spec.name] }}
+                  </span>
+                  <button class="param-file-clear" title="移除文件" @click="clearFile(spec)">✕</button>
+                </template>
+                <span v-else class="param-file-empty">未选择文件</span>
+              </div>
               <el-input
+                v-else
                 v-model="paramValues[spec.name]"
                 :type="spec.multiline ? 'textarea' : 'text'"
                 :autosize="spec.multiline ? { minRows: 3, maxRows: 8 } : undefined"
@@ -584,6 +632,56 @@ onUnmounted(() => {
   color: var(--ink-3);
   line-height: 1.5;
   margin-top: 2px;
+}
+/* file 参数：选择文件按钮 + 文件名（超长省略）+ 移除 */
+.param-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.param-file-button {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+.param-file-button:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+.param-file-button input {
+  display: none;
+}
+.param-file-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.param-file-clear {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+}
+.param-file-clear:hover {
+  color: #ff8f8a;
+}
+.param-file-empty {
+  font-size: 12px;
+  color: var(--ink-3);
 }
 .inputs-error {
   color: #ff8f8a;

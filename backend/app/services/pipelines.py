@@ -33,6 +33,7 @@ def _param_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
             "has_default": "default" in spec,
             "required": bool(spec.get("required")),
             "multiline": bool(spec.get("multiline", False)),
+            "file": bool(spec.get("file", False)),
         }
         for name, spec in (config.get("params") or {}).items()
     ]

@@ -15,6 +15,7 @@ class PipelineParamOut(BaseModel):
     has_default: bool = False    # 是否声明了默认值（区分 default: null）
     required: bool = False       # 创建运行时必须提供（前端据此判断必填）
     multiline: bool = False      # 多行文本（前端渲染 textarea，如文章正文）
+    file: bool = False           # 文件上传（前端渲染上传控件，值 = {filename, content}）
 
 
 class PipelineListItem(BaseModel):

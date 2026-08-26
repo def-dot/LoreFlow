@@ -28,7 +28,7 @@ async def test_pipelines_list(client: AsyncClient) -> None:
     assert by_file["04_loop_iteration.yaml"]["params"] == [
         {
             "name": "tick", "label": "初始计数", "description": "每轮迭代 +1 的计数器初始值（默认 0）",
-            "default": 0, "has_default": True, "required": False, "multiline": False,
+            "default": 0, "has_default": True, "required": False, "multiline": False, "file": False,
         },
     ]
 

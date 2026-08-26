@@ -1,0 +1,25 @@
+name: 串行
+description: RAG文档入库串行执行：上传文档 → 切块 → 向量化 → 写入向量库。
+
+params:
+  document:
+    required: true
+    file: true
+    label: 上传文档
+    description: 上传 txt/md 等文本文件入库
+
+nodes:
+  文档解析:
+    type: rag_load
+
+  切块:
+    type: rag_chunk
+    depends_on: [文档解析]
+
+  向量化:
+    type: rag_embed
+    depends_on: [切块]
+
+  写入向量库:
+    type: rag_upsert
+    depends_on: [向量化]

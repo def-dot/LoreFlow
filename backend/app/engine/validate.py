@@ -72,7 +72,7 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
 
 
 #: Fields accepted per key in a ``params`` mapping; anything else raises.
-_PARAM_FIELDS = {"label", "description", "default", "required", "multiline"}
+_PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "file"}
 
 
 def validate_review(review: Any, available: Iterable[str]) -> list[str]:
@@ -134,6 +134,9 @@ def validate_params(params: Any, node_names: Iterable[str] = ()) -> list[str]:
         multiline = spec.get("multiline", False)
         if not isinstance(multiline, bool):
             errors.append(f"参数 {name!r}: multiline 必须是布尔值")
+        file_flag = spec.get("file", False)
+        if not isinstance(file_flag, bool):
+            errors.append(f"参数 {name!r}: file 必须是布尔值")
     return errors
 
 
