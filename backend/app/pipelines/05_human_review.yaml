@@ -1,12 +1,5 @@
-# DAG Flow — 人工审核示例。
-#
-# kind: human 节点挂起等待决策。审核结果：
-#   - 通过：输出 {approved, payload, ...}，下游继续
-#   - 拒绝：抛 HumanRejected（拒绝详情记入 output）→ 下游级联跳过
-#
-# 本示例：用户输入标题+正文 → 人工审核 → 通过才发布。
 name: 人工审核
-description: 输入标题和正文，人工审核通过后发布。
+description: 内容发布审批：审批通过才发布。
 
 params:
   title:
