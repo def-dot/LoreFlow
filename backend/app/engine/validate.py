@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -166,118 +167,31 @@ def validate_inputs(
     return errors
 
 
-#: Fields accepted in a ``routes`` mapping; anything else raises.
-_ROUTE_FIELDS = {"router", "branches", "default"}
+def validate_condition(condition: Any, name: str, kind: str) -> list[str]:
+    """condition 声明校验：函数名字符串，或 ``{fn: 键, 其余键: 参数}`` 映射。
 
-
-def validate_routes(nodes: Mapping[str, Any]) -> list[str]:
-    """routes 声明校验（边级路由：router/branches/default 与支路成员约束）。
-
-    由 :func:`validate_nodes` 调用，``nodes`` 为（顶层或 loop body 的）
-    节点声明映射。成员规则：
-    - 必须是已声明节点，且不能是路由源自身或 loop 节点（loop 的
-      condition 是循环谓词，与支路门卫语义不同）
-    - 不能再声明 condition（路由门卫与显式条件互斥）
-    - 一个节点只能属于一条支路（同一源或不同源都不行）
-    - 必须（传递）依赖路由源 —— 门卫在依赖就绪后求值，读的是源输出
-    - 直接依赖不能落在同源的兄弟支路里（跨支路依赖）
+    映射形式的参数与函数签名绑定核对——条件在执行期抛异常会被按
+    「不执行」吞掉（executor 策略），拼错的参数键必须在载入期报出来。
+    loop 的 condition 是循环谓词（多一个 iteration 参数），只接受字符串。
     """
-    errors: list[str] = []
-
-    # 结构规整的 depends_on 才参与可达性/跨支路检查（畸形依赖另有报错）
-    deps_of: dict[str, list[str]] = {
-        name: deps
-        for name, spec in nodes.items()
-        if isinstance(spec, dict)
-        and isinstance((deps := spec.get("depends_on") or []), list)
-        and all(isinstance(d, str) for d in deps)
-    }
-    missing_dep = any(d not in nodes for deps in deps_of.values() for d in deps)
-
-    membership: dict[str, tuple[str, str]] = {}  # 支路成员 -> (路由源, 标签)
-    for name, spec in nodes.items():
-        routes = spec.get("routes") if isinstance(spec, dict) else None
-        if routes is None:
-            continue
-        if not isinstance(routes, dict):
-            errors.append(f"节点 {name!r}: routes 必须是映射(dict)，实际是 {type(routes).__name__}")
-            continue
-        unknown = set(routes) - _ROUTE_FIELDS
-        if unknown:
-            errors.append(f"节点 {name!r}: routes 不支持的字段 {sorted(unknown)}")
-
-        router_key = routes.get("router")
-        if not isinstance(router_key, str) or not router_key:
-            errors.append(f"节点 {name!r}: routes 需要 'router'（路由函数键）")
-            continue
-        router_type = REGISTRY.get(router_key)
-        if router_type is None:
-            errors.append(f"节点 {name!r}: 路由函数 {router_key!r} 未注册")
-        elif router_type.kind != "router":
-            errors.append(
-                f"节点 {name!r}: {router_key!r} 是 {router_type.kind} 类型，routes.router 必须是 router 类型函数"
-            )
-
-        branches = routes.get("branches")
-        if not isinstance(branches, dict) or not branches:
-            errors.append(f"节点 {name!r}: routes 需要非空的 'branches' 映射（{{标签: [成员节点]}}）")
-            continue
-        for label, members in branches.items():
-            if not isinstance(label, str) or not label:
-                errors.append(f"节点 {name!r}: 支路标签必须是非空字符串，实际是 {label!r}")
-                continue
-            if not isinstance(members, list) or not members or not all(isinstance(m, str) for m in members):
-                errors.append(f"节点 {name!r}: 支路 {label!r} 的成员必须是非空字符串列表")
-                continue
-            for member in members:
-                mspec = nodes.get(member)
-                if not isinstance(mspec, dict):
-                    errors.append(f"节点 {name!r}: 支路 {label!r} 的成员 {member!r} 不在节点声明中")
-                    continue
-                if member == name:
-                    errors.append(f"节点 {name!r}: 支路 {label!r} 的成员不能是路由源自身")
-                    continue
-                if mspec.get("kind", "node") == "loop":
-                    errors.append(f"节点 {name!r}: 支路 {label!r} 的成员 {member!r} 是 loop 节点（其 condition 是循环谓词，不能作支路门卫）")
-                    continue
-                if mspec.get("condition") is not None:
-                    errors.append(f"节点 {name!r}: 支路 {label!r} 的成员 {member!r} 已声明 condition（路由门卫与显式条件互斥）")
-                if member in membership:
-                    other_src, other_label = membership[member]
-                    where = f"支路 {other_label!r}" if other_src == name else f"{other_src!r} 的支路 {other_label!r}"
-                    errors.append(f"节点 {name!r}: {member!r} 重复出现在支路中（已属于{where}；一个节点只能属于一条支路）")
-                    continue
-                membership[member] = (name, label)
-
-        default = routes.get("default")
-        if default is not None and default not in branches:
-            errors.append(f"节点 {name!r}: default {default!r} 不是已声明的支路标签")
-
-    if missing_dep or not membership:
-        return errors  # 依赖缺失另有报错；可达性检查等上下文齐全再查
-
-    def reaches(start: str, target: str) -> bool:
-        """沿 depends_on 向上可达（visited 防环；环另有报错）。"""
-        stack, seen = list(deps_of.get(start, [])), {start}
-        while stack:
-            cur = stack.pop()
-            if cur == target:
-                return True
-            if cur in seen or cur not in deps_of:
-                continue
-            seen.add(cur)
-            stack.extend(deps_of[cur])
-        return False
-
-    for member, (src, label) in membership.items():
-        if not reaches(member, src):
-            errors.append(
-                f"节点 {src!r}: 支路 {label!r} 的成员 {member!r} 未（传递）依赖路由源 —— 门卫须在源输出就绪后求值"
-            )
-        for dep in deps_of.get(member, []):
-            other = membership.get(dep)
-            if other and other[0] == src and other[1] != label:
-                errors.append(
-                    f"节点 {src!r}: 支路 {label!r} 的成员 {member!r} 依赖了兄弟支路 {other[1]!r} 的 {dep!r}（跨支路依赖）"
-                )
-    return errors
+    if isinstance(condition, str):
+        if condition not in REGISTRY:
+            return [f"节点 {name!r}（{kind}）: 条件函数 {condition!r} 未注册"]
+        return []
+    if not isinstance(condition, dict):
+        return [
+            f"节点 {name!r}（{kind}）: condition 必须是函数名字符串或 {{fn: 键, 参数…}} 映射，"
+            f"实际是 {type(condition).__name__}"
+        ]
+    fn_key = condition.get("fn")
+    if not isinstance(fn_key, str) or not fn_key:
+        return [f"节点 {name!r}（{kind}）: condition 映射需要 'fn'（条件函数键）"]
+    fn_type = REGISTRY.get(fn_key)
+    if fn_type is None:
+        return [f"节点 {name!r}（{kind}）: 条件函数 {fn_key!r} 未注册"]
+    args = {k: v for k, v in condition.items() if k != "fn"}
+    try:
+        inspect.signature(fn_type.func).bind({}, **args)
+    except TypeError as exc:
+        return [f"节点 {name!r}（{kind}）: 条件参数与 {fn_key!r} 签名不符: {exc}"]
+    return []

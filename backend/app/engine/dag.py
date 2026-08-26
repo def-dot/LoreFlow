@@ -125,10 +125,6 @@ class DAG:
             raise ValueError(
                 f"节点 {node.name!r}: condition 必须是可调用对象，实际是 {type(node.condition).__name__}"
             )
-        if node.routes is not None and not callable(node.routes.router):
-            raise ValueError(
-                f"节点 {node.name!r}: routes.router 必须是可调用对象，实际是 {type(node.routes.router).__name__}"
-            )
         self._nodes[node.name] = node
         return node
 
@@ -499,11 +495,8 @@ class DAG:
 
     def to_mermaid(self) -> str:
         """Render the DAG as a Mermaid flowchart (for docs / debugging).
-
-        边级路由的支路入口边带标签（``src -->|label| member``）。
         """
         lines = ["graph TD"]
-        sources = {n.name: n for n in self._nodes.values() if n.routes is not None}
         for node in self._nodes.values():
             nid = node.name.replace(" ", "_").replace("-", "_")
             small = []
@@ -521,15 +514,7 @@ class DAG:
             lines.append(f'    {nid}["{text}"]')
             for dep in node.depends_on:
                 did = dep.replace(" ", "_").replace("-", "_")
-                src = sources.get(dep)
-                route_label = None
-                if src is not None:
-                    route_label = next(
-                        (l for l, ms in src.routes.branches.items() if node.name in ms),
-                        None,
-                    )
-                arrow = f" -->|{route_label}| " if route_label else " --> "
-                lines.append(f"    {did}{arrow}{nid}")
+                lines.append(f"    {did} --> {nid}")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

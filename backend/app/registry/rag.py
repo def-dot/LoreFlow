@@ -125,12 +125,3 @@ async def rag_retrieve(ctx: dict[str, Any]) -> list[dict[str, str]]:
     ranked = sorted(_MOCK_KB, key=lambda c: -sum(prompt.count(k) for k in c["keywords"]))
     return [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]
 
-
-@node(label="is_simple", description="")
-async def is_simple(ctx: dict[str, Any]) -> list[dict[str, str]]:
-    return ctx["intent"] == "SIMPLE"
-
-
-@node(label="is_simple", description="")
-async def is_simple(ctx: dict[str, Any]) -> list[dict[str, str]]:
-    return ctx["intent"] == "SIMPLE"

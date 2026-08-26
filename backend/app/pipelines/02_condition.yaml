@@ -1,5 +1,5 @@
-name: 条件分支
-description: 客服分流：简单问答检索知识库后 AI 自动回复；复杂诉求转人工客服接管。
+name: 客服分流
+description: 意图识别分流：简单问答检索知识库后 AI 自动回复；复杂诉求转人工客服接管。
 
 params:
   prompt:
@@ -10,25 +10,22 @@ params:
 
 nodes:
   classify:
-    type: llm_classify
-    routes:                        # 边级路由：一处声明，未选中支路整条 SKIPPED
-      router: route_intent        # 注册表路由函数：读 classify 输出返回支路标签
-      default: simple             # 标签未命中时回落；不声明则路由失败（run 失败）
-      branches:
-        simple: [retrieve, auto_reply]
-        complex: [takeover]
+    type: llm_classify            # 意图识别，输出 {intent: simple|complex}
 
-  retrieve:                       # 支路成员不用再逐个挂 condition
+  retrieve:                       # 支路一：简单问答，检索知识库后自动回复
     type: rag_retrieve
     depends_on: [classify]
+    condition: {fn: intent_is, value: simple}
 
   auto_reply:
     type: llm_rag_reply
     depends_on: [retrieve]
+    condition: {fn: intent_is, value: simple}   # SKIPPED 不级联，同支路每个节点都要挂条件
 
-  takeover:
+  takeover:                       # 支路二：复杂诉求，人工客服接管
     kind: human
     depends_on: [classify]
+    condition: {fn: intent_is, value: complex}
     prompt: "复杂诉求：请人工客服接管处理。"
     review:
       prompt: {label: 用户诉求}

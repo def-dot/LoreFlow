@@ -1,28 +1,14 @@
-import asyncio
-from app.engine import DAG
+from typing import Any
 
-dag = DAG(
-    "人工审核",                                  # name:
-    params={                                     # params: 同一形状原样传入
-        "title": {"required": True, "label": "标题"},
-        "content": {"required": True, "label": "正文", "multiline": True},
-    },
-)
+from app.registry.core import node
 
-async def auto_approver(node_name: str, payload: dict) -> dict:   # ← 关键差异，见下
-    return {"approve": True}
+def _intent_cond(expected: str, branch: str) -> None:
+    """按期望意图注册条件谓词 —— 一个实现、多个注册（逻辑同、比较值不同）。"""
+    @node(kind="condition", name=f"is_{expected}",
+          label=f"是{branch}", description=f"意图为 {expected}：{branch}支路执行")
+    def _cond(ctx: dict[str, Any]) -> bool:
+        classify = ctx.get("classify")
+        return isinstance(classify, dict) and classify.get("intent") == expected
 
-dag.human_node(                                 # kind: human → human_node()
-    "review",
-    prompt="请审核文章内容是否可以发布",
-    review={"title": {"label": "标题"}, "content": {"label": "正文"}},
-    approver=auto_approver,
-)
 
-@dag.node("publish", depends_on=["review"])     # type: cfg_publish → 自己的函数
-async def publish(ctx: dict) -> dict:
-    return {"published": True, "title": ctx["title"]}
-
-errors = dag.validate()
-
-results = asyncio.run(dag.run(inputs={"title": "Hello", "content": "World"}))
+_intent_cond("simple", "简单问答")

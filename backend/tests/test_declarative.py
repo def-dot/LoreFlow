@@ -723,3 +723,63 @@ def test_review_param_key_allowed() -> None:
         approver=approver,
     )
     assert dag.human_nodes[0].name == "gate"
+
+
+# ---------------------------------------------------------------------------
+# condition 参数化 — {fn: 键, 参数…} 映射形式
+# ---------------------------------------------------------------------------
+
+
+async def test_condition_with_args_runs_and_skips(registered: Any) -> None:
+    """映射形式条件：比较值在 YAML 声明，同一注册条目按参数分流。"""
+    def t_eq(ctx: dict[str, Any], value: str) -> bool:
+        return ctx.get("pick") == value
+
+    registered("t_eq", t_eq, "condition")
+
+    config = {
+        "params": {"pick": {}},
+        "nodes": {
+            "a": {"type": "cfg_fetch", "condition": {"fn": "t_eq", "value": "a"}},
+            "b": {"type": "cfg_fetch", "condition": {"fn": "t_eq", "value": "b"}},
+        },
+    }
+    results = await load_dag(config).run(inputs={"pick": "a"})
+    assert results["a"].status is NodeStatus.COMPLETED
+    assert results["b"].status is NodeStatus.SKIPPED
+
+    results = await load_dag(config).run(inputs={"pick": "b"})
+    assert results["a"].status is NodeStatus.SKIPPED
+    assert results["b"].status is NodeStatus.COMPLETED
+
+
+def test_condition_with_args_validation(registered: Any) -> None:
+    """带参条件的载入期校验：fn 缺失/未注册、参数与签名不符、loop 不收映射。"""
+    def t_eq(ctx: dict[str, Any], value: str) -> bool:
+        return ctx.get("pick") == value
+
+    registered("t_eq", t_eq, "condition")
+
+    assert validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "condition": {"fn": "nope", "value": "a"}},
+    }}) == ["节点 'a'（node）: 条件函数 'nope' 未注册"]
+
+    assert validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "condition": {"value": "a"}},
+    }}) == ["节点 'a'（node）: condition 映射需要 'fn'（条件函数键）"]
+
+    # 拼错的参数键：执行期会被按「不执行」吞掉，必须在载入期拦截
+    errors = validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "condition": {"fn": "t_eq", "valeu": "a"}},
+    }})
+    assert len(errors) == 1
+    assert errors[0].startswith("节点 'a'（node）: 条件参数与 't_eq' 签名不符")
+
+    assert validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "condition": 123},
+    }}) == ["节点 'a'（node）: condition 必须是函数名字符串或 {fn: 键, 参数…} 映射，实际是 int"]
+
+    assert validate_config({"nodes": {
+        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}},
+              "condition": {"fn": "t_eq", "value": "a"}},
+    }}) == ["节点 'l'（loop）: condition 必须是函数名字符串（映射参数形式不支持 loop）"]

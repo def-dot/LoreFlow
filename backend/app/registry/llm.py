@@ -81,12 +81,10 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"intent": intent, "raw": raw.strip()}
 
 
-@node(kind="router", label="意图路由", description="读 ctx['classify'] 的意图输出，返回支路标签 simple|complex（供 classify 的 routes 引用）")
-def route_intent(ctx: dict[str, Any]) -> str:
+@node(kind="condition", label="意图判定", description="classify 输出的 intent 等于给定值（YAML 里 condition: {fn: intent_is, value: simple|complex}）")
+def intent_is(ctx: dict[str, Any], value: str) -> bool:
     classify = ctx.get("classify")
-    if isinstance(classify, dict):
-        return str(classify.get("intent") or "")
-    return ""
+    return isinstance(classify, dict) and classify.get("intent") == value
 
 
 @node(

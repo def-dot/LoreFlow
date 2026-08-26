@@ -91,6 +91,7 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     分别放审核提示和循环体摘要。
     """
     kind = spec.get("kind", "node")
+    cond_spec = spec.get("condition")
     row: dict[str, Any] = {
         "name": name,
         "kind": kind,
@@ -99,7 +100,7 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "type_description": None,
         "depends_on": list(spec.get("depends_on") or []),
         "retry": _retry_summary(parse_retry(spec.get("retry"))),
-        "condition": spec.get("condition"),
+        "condition": cond_spec,
         "condition_label": None,
         "review": None,
     }
@@ -118,8 +119,13 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         row["type_label"] = "循环"
         body = spec.get("body") or {}
         row["type_description"] = f"循环体 {len(body)} 个节点，上限 {spec.get('max_iterations', 100)} 轮"
-    if row["condition"]:
-        cond = REGISTRY.get(row["condition"])
+    if isinstance(cond_spec, dict):
+        # 带参条件：意图判定（value=simple）
+        fn_type = REGISTRY.get(cond_spec.get("fn") or "")
+        args = ", ".join(f"{k}={v}" for k, v in cond_spec.items() if k != "fn")
+        row["condition_label"] = f"{fn_type.label}（{args}）" if fn_type else None
+    elif cond_spec:
+        cond = REGISTRY.get(cond_spec)
         row["condition_label"] = cond.label
     return row
 

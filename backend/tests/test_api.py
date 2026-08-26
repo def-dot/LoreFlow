@@ -161,11 +161,9 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
         "cfg_needs_report",
         "demo_keep_iterating",
         "demo_needs_review",
+        "intent_is",
         "notify_long_body",
     ]
-
-    # 路由函数单独成类（02 的 routes.router 引用）
-    assert [t["name"] for t in types if t["kind"] == "router"] == ["route_intent"]
 
     notify = {t["name"]: t for t in types}["notify_message"]  # 插件类型随目录自动出现
     assert notify["kind"] == "function" and notify["label"] == "生成通知"
