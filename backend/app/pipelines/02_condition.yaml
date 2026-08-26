@@ -1,5 +1,5 @@
-name: 客服分流
-description: 意图识别分流：简单问答检索知识库后 AI 自动回复；复杂诉求转人工客服接管。
+name: 条件分支
+description: 客服分流：简单问答检索知识库后 AI 自动回复；复杂诉求转人工客服接管。
 
 params:
   prompt:

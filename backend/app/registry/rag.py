@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from app.registry.core import node
+from app.utils import files
 
 
 def _find_upstream(ctx: dict[str, Any], shape: Callable[[Any], bool], what: str) -> Any:
@@ -37,22 +38,29 @@ def _document(ctx: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-@node(label="加载文档", description="解析上传的 document（{filename, content}），输出 {doc_id, title, text}")
+@node(label="加载文档", description="按 document（{id, filename}）引用读取上传文件，输出 {doc_id, title, text}")
 async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
-    """解析 params 声明的 document 输入（前端上传控件读文本后合成
-    {filename, content}）。doc_id/title 取文件名去扩展名，text 为正文。
+    """从上传目录读取 params 声明的 document 文件（前端选文件即 POST
+    /uploads 存盘，document 传 {id, filename} 引用）。UTF-8/GBK 自动
+    解码，doc_id/title 取原始文件名去扩展名，text 为正文。
     """
     document = ctx.get("document")
     if not isinstance(document, dict):
         raise ValueError(
-            "缺少上传文档：document 必须是 {filename, content}（在 YAML params 声明为必填，创建运行时提供）"
+            "缺少上传文档：document 必须是 {id, filename} 引用（在 YAML params 声明为必填，创建运行时提供）"
         )
-    content = document.get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError("上传文档正文为空：document.content 必须是非空文本")
+    upload_id = document.get("id")
+    if not isinstance(upload_id, str) or not upload_id.strip():
+        raise ValueError("上传文档缺少文件引用：document.id 必须是上传接口返回的 id")
+    path = files.stored_upload_path(upload_id)  # 路径穿越/扩展名非法 → 中文 ValueError
+    if not path.is_file():
+        raise ValueError(f"上传文件不存在或已被清理：{upload_id}")
+    text = files.decode_text(path.read_bytes())
+    if not text.strip():
+        raise ValueError("上传文档正文为空：文件内容为空白文本")
     filename = str(document.get("filename") or "上传文档")
     stem = Path(filename).stem or "document"
-    return {"doc_id": stem, "title": stem, "text": content}
+    return {"doc_id": stem, "title": stem, "text": text}
 
 
 @node(label="切块", description="按空行把正文切成语义段（chunk 列表）")
@@ -116,3 +124,13 @@ async def rag_retrieve(ctx: dict[str, Any]) -> list[dict[str, str]]:
     prompt = str(ctx.get("prompt", ""))
     ranked = sorted(_MOCK_KB, key=lambda c: -sum(prompt.count(k) for k in c["keywords"]))
     return [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]
+
+
+@node(label="is_simple", description="")
+async def is_simple(ctx: dict[str, Any]) -> list[dict[str, str]]:
+    return ctx["intent"] == "SIMPLE"
+
+
+@node(label="is_simple", description="")
+async def is_simple(ctx: dict[str, Any]) -> list[dict[str, str]]:
+    return ctx["intent"] == "SIMPLE"

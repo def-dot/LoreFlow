@@ -6,7 +6,9 @@ ASGITransport 不运行 lifespan（应用不会自动建表/恢复 run），所�
 """
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -15,6 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 import app.core.database as db_mod
 import app.services.orchestrator as orchestrator
+from app.core.config import settings
 from app.main import app
 from app.registry.plugins import load_plugins
 
@@ -48,6 +51,12 @@ async def setup_db() -> AsyncGenerator[None, None]:
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.drop_all)
+
+
+@pytest.fixture(autouse=True)
+def redirect_uploads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """上传目录指向临时目录：上传/rag_load 测试落盘不污染 backend/uploads/。"""
+    monkeypatch.setattr(settings, "UPLOADS_DIR", tmp_path / "uploads")
 
 
 @pytest_asyncio.fixture

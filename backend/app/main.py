@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
 from app.registry.plugins import load_plugins, watch_plugins
-from app.routers import health, node_types, pipelines, plugins, runs
+from app.routers import health, node_types, pipelines, plugins, runs, uploads
 from app.services import orchestrator
 
 setup_logging()
@@ -63,6 +63,7 @@ app.include_router(runs.router, prefix=API_V1)
 app.include_router(node_types.router, prefix=API_V1)
 app.include_router(pipelines.router, prefix=API_V1)
 app.include_router(plugins.router, prefix=API_V1)
+app.include_router(uploads.router, prefix=API_V1)
 app.include_router(health.router, prefix=API_V1)
 
 

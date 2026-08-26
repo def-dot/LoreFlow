@@ -1,6 +1,7 @@
 """API 集成测试 — run 生命周期 + 审批流 + 错误信封 + 重启恢复"""
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from httpx import AsyncClient
@@ -12,6 +13,7 @@ from app.models.review import ReviewDecision
 from app.models.run import RunRecord
 from app.services import orchestrator
 from app.services import runs as run_service
+from app.utils.files import save_upload
 
 # ---------------------------------------------------------------------------
 # 轮询辅助
@@ -92,6 +94,11 @@ async def _wait_run_status(
             await asyncio.sleep(0.05)
 
     return await asyncio.wait_for(poll(), timeout=timeout)
+
+
+def _store_upload(filename: str, text: str = "第一段设定。\n\n第二段设定。") -> str:
+    """把文本按上传文件落盘（进 conftest 重定向的临时目录），返回存储 id。"""
+    return save_upload(text.encode(), Path(filename).suffix.lower())
 
 
 async def _create_and_approve(client: AsyncClient, approve: bool = True) -> int:
@@ -341,12 +348,18 @@ async def test_invalid_pipeline_400_no_run_record(client: AsyncClient, monkeypat
 
 async def test_create_run_with_config_file(client: AsyncClient) -> None:
     """POST /runs 带 config_file：跑指定的 demo 流水线并持久化文件名。"""
+    doc = (
+        await client.post(
+            "/api/v1/uploads",
+            files={"file": ("北境要塞.md", "第一段设定。\n\n第二段设定。".encode(), "text/markdown")},
+        )
+    ).json()["data"]
     resp = await client.post(
         "/api/v1/runs",
         json={
             "config_file": "01_serial.yaml",
-            # file 参数由前端上传控件合成 {filename, content}（rag_load 解析）
-            "inputs": {"document": {"filename": "北境要塞.md", "content": "第一段设定。\n\n第二段设定。"}},
+            # file 参数传上传接口返回的 {id, filename} 引用（rag_load 读盘解析）
+            "inputs": {"document": {"id": doc["id"], "filename": doc["filename"]}},
         },
     )
     assert resp.status_code == 201
@@ -431,7 +444,7 @@ async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
         created_at="2026-01-01T00:00:00",
         status="running",
         nodes={},
-        inputs={"document": {"filename": "北境要塞.md", "content": "第一段设定。\n\n第二段设定。"}},
+        inputs={"document": {"id": _store_upload("北境要塞.md"), "filename": "北境要塞.md"}},
     )
     await run_service.save(record)
     run_id = record.id

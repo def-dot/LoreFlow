@@ -23,6 +23,7 @@ frontend/node_modules/
 
 # 运行时产物
 logs/
+backend/uploads/
 postgres/backup/*.sql.gz
 
 # 工具
