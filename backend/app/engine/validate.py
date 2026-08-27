@@ -33,7 +33,7 @@ _KIND_FIELDS = {
 # ------------------------------------------------------------------
 
 
-def find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
+def _find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
     """DFS 环检测：``edges = {节点名: 依赖名列表}``，返回环路径或 ``None``。
 
     由 :func:`validate_graph` 调用：依赖图中指向不存在节点的边直接
@@ -77,7 +77,7 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
     """
     errors: list[str] = []
     for name, deps in edges.items():
-        if deps is None:  # 未声明依赖
+        if not deps:  # 未声明依赖
             continue
         if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
             errors.append(f"节点 {name!r}: depends_on 必须是字符串列表")
@@ -85,7 +85,7 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
         for dep in deps:
             if dep not in edges:
                 errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
-    cycle = find_cycle(  # 指向不存在节点的边跳过（缺失依赖上面已报，缺失不可能成环）
+    cycle = _find_cycle(
         {n: d for n, d in edges.items()
          if isinstance(d, list) and all(isinstance(x, str) for x in d)}
     )
@@ -297,10 +297,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             errors.extend(_validate_wiring(wiring, name, available_ref))
             if isinstance(wiring, dict):
                 wirings[name] = wiring
-
-        # 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键（接线畸形时为空）
-        
-        
 
         condition = spec.get("condition")
         if condition:
