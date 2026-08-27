@@ -30,7 +30,7 @@ async def test_loop_until_condition() -> None:
             Node(name="advance", func=advance, depends_on=["process_one"]),
         ],
         depends_on=["prepare"],
-        condition=lambda ctx, i: ctx["advance"]["idx"] < len(ctx["prepare"]),
+        condition=lambda view: view["advance"]["idx"] < len(view["prepare"]),
         max_iterations=10,
     )
 
@@ -50,7 +50,7 @@ async def test_loop_max_iterations_cap() -> None:
     dag.loop_node(
         "loop",
         body_nodes=[Node(name="tick", func=tick)],
-        condition=lambda ctx, i: True,  # 永不满足 → 依赖 max_iterations 封顶
+        condition=lambda view: True,  # 永不满足 → 依赖 max_iterations 封顶
         max_iterations=3,
     )
 
@@ -75,7 +75,7 @@ async def test_loop_body_failure_continues() -> None:
             Node(name="count", func=count),
             Node(name="boom", func=boom, depends_on=["count"]),
         ],
-        condition=lambda ctx, i: ctx.get("count", 0) < 2,
+        condition=lambda view: view.get("count", 0) < 2,
         max_iterations=10,
     )
 
@@ -87,7 +87,7 @@ async def test_loop_body_failure_continues() -> None:
 async def test_loop_node_requires_body() -> None:
     dag = DAG("loop_empty")
     with pytest.raises(ValueError):
-        dag.loop_node("loop", body_nodes=[], condition=lambda ctx, i: False)
+        dag.loop_node("loop", body_nodes=[], condition=lambda view: False)
 
 
 def test_loop_node_requires_callable_condition() -> None:
@@ -111,7 +111,7 @@ def test_loop_body_missing_dep_fails_at_registration() -> None:
         dag.loop_node(
             "loop",
             body_nodes=[Node(name="step", func=step, depends_on=["missing"])],
-            condition=lambda ctx, i: False,
+            condition=lambda view: False,
         )
 
 
@@ -132,7 +132,7 @@ def test_loop_body_cycle_fails_at_registration() -> None:
                 Node(name="a", func=a, depends_on=["b"]),
                 Node(name="b", func=b, depends_on=["a"]),
             ],
-            condition=lambda ctx, i: False,
+            condition=lambda view: False,
         )
 
 
@@ -148,7 +148,7 @@ async def test_loop_output_snapshot_no_self_reference() -> None:
     dag.loop_node(
         "batch",
         body_nodes=[Node(name="tick", func=tick)],
-        condition=lambda ctx, i: ctx.get("tick", 0) < 3,
+        condition=lambda view: view.get("tick", 0) < 3,
         max_iterations=5,
     )
 

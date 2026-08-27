@@ -1,8 +1,8 @@
 """
 LLM 节点 — 调用本地 Ollama 服务（默认 http://localhost:11434）。
 
-输入约定：节点函数从共享上下文取值（YAML ``params`` 声明 + 创建运行时
-提供），模型名可被 ``ctx["model"]`` 覆盖，缺省取 ``settings.OLLAMA_MODEL``。
+输入约定：节点函数从共享上下文取值（YAML 顶层 ``inputs`` 声明 + 创建
+运行时提供），模型名可被 ``ctx["model"]`` 覆盖，缺省取 ``settings.OLLAMA_MODEL``。
 连接/超时/模型不存在统一转成中文 ValueError，节点结果里直接可读。
 """
 
@@ -41,7 +41,7 @@ async def _ollama_chat(
 async def llm_chat(ctx: dict[str, Any]) -> str:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
+        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
     content = prompt
     pages = ctx.get("pages")  # 上游 web_fetch 节点（YAML 里命名为 pages）的输出
     if isinstance(pages, list) and pages:
@@ -67,7 +67,7 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
 async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
+        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
     # 关键词短路：用户点名「人工」直接转人工——优先级最高且确定性，不必过模型
     if "人工" in prompt:
         return {"intent": "human", "raw": "关键词命中：人工"}
@@ -88,25 +88,15 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"intent": intent, "raw": raw.strip()}
 
 
-@node(kind="condition", label="意图判定", description="意图识别输出的 intent 等于给定值（condition: {fn: intent_is, value: chat|rag|human}；按 {intent} 形状找上游，节点中英文命名均可）")
-def intent_is(ctx: dict[str, Any], value: str) -> bool:
-    return any(isinstance(v, dict) and v.get("intent") == value for v in ctx.values())
-
-
 @node(
     label="知识库问答",
-    description="结合检索片段回答 ctx['prompt']（按 [{source, text}] 形状找上游检索输出，节点中英文命名均可）",
+    description="结合检索片段回答 ctx['prompt']；检索结果 chunks ← rag_retrieve 类节点（YAML inputs 接线，未接线或上游被跳过视为未检索到）",
 )
 async def llm_rag_reply(ctx: dict[str, Any]) -> str:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML params 声明为必填，创建运行时提供）")
-    # 检索输出 = 形如 [{source, text}] 的列表（按形状找上游，节点中英文命名均可）
-    chunks = next(
-        (v for v in ctx.values()
-         if isinstance(v, list) and v and all(isinstance(c, dict) and "text" in c for c in v)),
-        [],
-    )
+        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
+    chunks = ctx.get("chunks") or []
     if not chunks:
         return "知识库中没有检索到相关内容。"
     refs = "\n\n".join(

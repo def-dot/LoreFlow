@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import yaml
 from collections.abc import Callable
-from functools import partial
 from pathlib import Path
 from typing import Any
 
-from app.registry import REGISTRY, NodeType
+from app.registry import REGISTRY
 
 from . import validate
+from .condition import compile_condition, lookup
 from .dag import DAG
 from .node import ApproverFunc, ConditionFunc, Node
 from .resolve import parse_retry
@@ -21,19 +21,63 @@ from .types import NodeEventFunc
 
 #: Fields each kind accepts; anything else in a node spec raises.
 _KIND_FIELDS = {
-    "node": {"type", "depends_on", "retry", "timeout", "condition", "metadata"},
-    "human": {"depends_on", "retry", "prompt", "condition", "review"},
-    "loop": {"depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
+    "node": {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition", "metadata"},
+    "human": {"label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
+    "loop": {"label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
 }
 
 
-def _condition_func(condition: str | dict[str, Any]) -> ConditionFunc:
-    """condition 声明 → 可调用谓词：字符串 = 注册表键；映射 = ``{fn: 键, 其余键: 参数}``（参数绑定后仍是 ``(ctx) -> bool``）。"""
-    if isinstance(condition, dict):
-        fn = REGISTRY[condition["fn"]].func
-        args = {k: v for k, v in condition.items() if k != "fn"}
-        return partial(fn, **args)
-    return REGISTRY[condition].func
+def _wired_view(ctx: dict[str, Any], wiring: dict[str, Any]) -> dict[str, Any]:
+    """接线 → 节点视图 ``{**ctx, **{本地键: 视图值}}``。
+
+    值的语义："$" 前缀字符串 = 引用，去前缀按键（可带 ``.field`` 点
+    路径下钻字段）取 ctx 值（上游输出/参数；缺失或被条件跳过时为
+    None，由节点守卫转中文报错、条件按 False）；其余 = 字面量原样
+    注入。视图不写回共享 ctx —— 各节点同名本地键互不串扰。
+    """
+    def resolve(v: Any) -> Any:
+        if isinstance(v, str) and v.startswith("$"):
+            return lookup(ctx, v[1:])
+        return v
+
+    return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
+
+
+def _condition_func(expr: str, wiring: dict[str, Any] | None = None) -> ConditionFunc:
+    """条件表达式（+ 可选接线）→ 可调用谓词（语法见 app.engine.condition）。
+
+    wiring 非空时在数据流接线的节点视图上求值 —— 引用键缺失/被条件
+    跳过时取到 None，比较类表达式自然为 False。
+    """
+    cond = compile_condition(expr)
+
+    if not wiring:
+        return cond
+
+    def wired(ctx: dict[str, Any]) -> bool:
+        return cond(_wired_view(ctx, wiring))
+
+    return wired
+
+
+def _wired_func(func: Callable[..., Any], wiring: dict[str, Any]) -> Callable[..., Any]:
+    """数据流接线视图套在节点函数外（视图语义见 _wired_view；工厂按参捕获，
+    循环内多次调用无闭包晚绑定）。"""
+    async def wired(ctx: dict[str, Any]) -> Any:
+        return await func(_wired_view(ctx, wiring))
+    return wired
+
+
+def _ancestors(name: str, edges: dict[str, Any]) -> set[str]:
+    """depends_on 闭包（直接上游及其全部祖先）。"""
+    seen: set[str] = set()
+    stack = [name]
+    while stack:
+        for dep in edges.get(stack.pop()) or []:
+            if dep not in seen:
+                seen.add(dep)
+                stack.append(dep)
+    return seen
 
 
 def validate_nodes(config: dict[str, Any]) -> list[str]:
@@ -46,11 +90,12 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
 
     errors: list[str] = []
-    params = config.get("params")
-    # 可用键集合 = 参数键 + 节点名（params 类型错误已在 validate.validate_params 报告）
-    available = set(nodes) | (set(params) if isinstance(params, dict) else set())
+    params = config.get("inputs")
+    
+    available_ref = set(nodes) | (set(params) if isinstance(params, dict) else set())
 
     edges: dict[str, Any] = {}
+    wirings: dict[str, dict[str, Any]] = {}  # 校验通过的接线，供上游链检查复用
     for name, spec in nodes.items():
         if not isinstance(spec, dict):
             errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
@@ -70,9 +115,31 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
 
         edges[name] = spec.get("depends_on")
 
+        # 数据流接线（node/human）：{本地键: 来源键或字面量}。先于 condition
+        # 校验 —— 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键
+        wiring = spec.get("inputs") if kind in ("node", "human") else None
+        if wiring:
+            if not isinstance(wiring, dict):
+                errors.append(f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射")
+                wiring = {}
+            for local, source in wiring.items():
+                if not (isinstance(source, str) and source.startswith("$")):
+                    continue  # 字面量不校验来源
+                root = source[1:].partition(".")[0]  # $node.field → node
+                if root not in available_ref:
+                    errors.append(f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键")
+
+        if wiring:
+            wirings[name] = wiring
+
         condition_key = spec.get("condition")
         if condition_key is not None:
-            errors.extend(validate.validate_condition(condition_key, name, kind))
+            cond_available = available_ref | set(wiring or {})
+            if kind == "loop":
+                cond_available |= {"iteration"}  # 循环谓词视图每轮注入 iteration
+            errors.extend(
+                validate.validate_condition(condition_key, name, kind, cond_available)
+            )
 
         # kind 特定必需字段校验
         if kind == "node":
@@ -85,14 +152,14 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             review_spec = spec.get("review")
             if review_spec is not None:
                 errors.extend(
-                    f"审核节点 {name!r}: {msg}" for msg in validate.validate_review(review_spec, available)
+                    f"审核节点 {name!r}: {msg}" for msg in validate.validate_review(review_spec, available_ref)
                 )
         elif kind == "loop":
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
                 errors.append(f"循环节点 {name!r}: 需要非空的 'body' 映射")
             if not condition_key:
-                errors.append(f"循环节点 {name!r}: 需要 'condition' 函数键")
+                errors.append(f"循环节点 {name!r}: 需要 'condition' 表达式")
             elif isinstance(body, dict) and body:
                 errors.extend(
                     f"循环节点 {name!r}: {msg}"
@@ -100,6 +167,17 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 )
 
     errors.extend(validate.validate_graph(edges))
+
+    # 接线来源若是节点，其根键必须在 depends_on 上游链中 —— 否则执行到
+    # 本节点时该来源可能尚未运行（数据只能来自已声明的上游或参数）
+    for name, wiring in wirings.items():
+        ancestors = _ancestors(name, edges)
+        for local, source in wiring.items():
+            if not (isinstance(source, str) and source.startswith("$")):
+                continue  # 字面量不校验来源
+            root = source[1:].partition(".")[0]  # $node.field → node
+            if root in nodes and root not in ancestors:
+                errors.append(f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不在 depends_on 上游链中")
     return errors
 
 
@@ -131,13 +209,13 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     避免"修复 → 重跑 → 发现下一个错"的多轮循环。
 
     校验项：
-    - params 声明（字段合法性、与节点名无冲突）
+    - inputs 声明（字段合法性、与节点名无冲突）
     - nodes 声明（必须声明且非空、字段合法性、引用校验、依赖存在性、环；
       loop body 递归同查）
-    - review 声明格式和键引用（必须在参数键或节点名中）
+    - review 声明格式和键引用（必须在 inputs 键或节点名中）
     """
     return (
-        validate.validate_params(config.get("params"), config.get("nodes") or {})
+        validate.validate_params(config.get("inputs"), config.get("nodes") or {})
         + validate_nodes(config)
     )
 
@@ -162,7 +240,8 @@ def load_dag(
 
     dag = DAG(
         config.get("name", "dag"),
-        params=config.get("params") or {},
+        # YAML 顶层 ``inputs``（调用方表单声明）→ 引擎内统一叫 params（声明）
+        params=config.get("inputs") or {},
         on_event=on_event,
     )
 
@@ -174,8 +253,8 @@ def load_dag(
 
         if kind == "human":
             condition = spec.get("condition")
-            cond_func = _condition_func(condition) if condition else None
-            dag.human_node(
+            cond_func = _condition_func(condition, spec.get("inputs")) if condition else None
+            human = dag.human_node(
                 name,
                 depends_on=deps,
                 prompt=spec.get("prompt"),
@@ -184,39 +263,47 @@ def load_dag(
                 approver=approver,
                 review=spec.get("review"),
             )
+            if spec.get("label"):
+                human.metadata["label"] = spec["label"]
 
         elif kind == "loop":
             body = spec.get("body")
 
             # Body nodes go through the same parsing path as top-level nodes.
             body_dag = load_dag({"nodes": body}, approver=approver)
-            cond_type = REGISTRY[spec["condition"]]
-            dag.loop_node(
+            loop = dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
-                condition=cond_type.func,
+                condition=compile_condition(spec["condition"]),
                 depends_on=deps,
                 max_iterations=int(spec.get("max_iterations", 100)),
                 retry=retry,
                 timeout=spec.get("timeout"),
             )
+            if spec.get("label"):
+                loop.metadata["label"] = spec["label"]
 
         else:
             condition = spec.get("condition")
-            cond_func = _condition_func(condition) if condition else None
+            wiring = spec.get("inputs")
+            cond_func = _condition_func(condition, wiring) if condition else None
 
             node_type = REGISTRY[spec["type"]]
+            func = node_type.func
+            if wiring:
+                func = _wired_func(func, wiring)
             dag.add_node(
                 Node(
                     name=name,
-                    func=node_type.func,
+                    func=func,
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
                     condition=cond_func,
                     metadata={
                         "type": node_type.name,
-                        "label": node_type.label,
+                        # YAML label（中文展示名）优先，缺省用注册表 label
+                        "label": spec.get("label") or node_type.label,
                         **(spec.get("metadata") or {}),
                     },
                 )

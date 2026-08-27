@@ -1,7 +1,7 @@
 name: 条件分支
 description: 客服分流：闲聊 LLM 直接回答；知识类问题先检索知识库再作答；提示词包含「人工」转人工客服。
 
-params:
+inputs:
   prompt:
     required: true
     multiline: true
@@ -9,27 +9,36 @@ params:
     description: 任意问题或闲聊；包含「人工」直接转人工客服
 
 nodes:
-  意图识别:
-    type: llm_classify 
+  intent_recognition:
+    type: llm_classify
+    label: 意图识别
 
-  LLM回答:
+  llm_chat:
     type: llm_chat
-    depends_on: [意图识别]
-    condition: {fn: intent_is, value: chat}
+    label: LLM回答
+    depends_on: [intent_recognition]
+    condition: intent == chat
+    inputs: {intent: $intent_recognition.intent}
 
-  知识库检索:
+  rag_retrieve:
     type: rag_retrieve
-    depends_on: [意图识别]
-    condition: {fn: intent_is, value: rag}
+    label: 知识库检索
+    depends_on: [intent_recognition]
+    condition: intent == rag
+    inputs: {intent: $intent_recognition.intent}
 
-  LLM检索回答:
+  llm_rag_reply:
     type: llm_rag_reply
-    depends_on: [知识库检索]
+    label: LLM检索回答
+    depends_on: [rag_retrieve]
+    inputs: {chunks: $rag_retrieve}
 
-  人工客服:
+  human_service:
     kind: human
-    depends_on: [意图识别]
-    condition: {fn: intent_is, value: human}
+    label: 人工客服
+    depends_on: [intent_recognition]
+    condition: intent == human
+    inputs: {intent: $intent_recognition.intent}
     prompt: "用户点名转人工：请人工客服接管处理。"
     review:
       prompt: {label: 用户诉求}

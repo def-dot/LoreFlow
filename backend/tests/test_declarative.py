@@ -19,7 +19,7 @@ def registered() -> Any:
     """临时注册测试用的节点函数，测试结束后自动撤销（直接读写 REGISTRY）。"""
     added: list[str] = []
 
-    def _reg(name: str, func: Any, kind: Literal["function", "condition"]) -> None:
+    def _reg(name: str, func: Any, kind: str = "function") -> None:
         REGISTRY[name] = NodeType(name=name, func=func, kind=kind, label=name, description=name)
         added.append(name)
 
@@ -57,23 +57,19 @@ async def test_load_dag_with_human_node() -> None:
     assert results["review"].status == NodeStatus.COMPLETED
 
 
-async def test_load_dag_human_with_condition(registered: Any) -> None:
-    """human 节点支持 condition —— False 时跳过审核，approver 不被调用。"""
+async def test_load_dag_human_with_condition() -> None:
+    """human 节点支持 condition 表达式 —— False 时跳过审核，approver 不被调用。"""
     calls: list[tuple[str, dict[str, Any]]] = []
-
-    def needs_review(ctx: dict[str, Any]) -> bool:
-        return False
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append((node_name, payload))
         return {"approve": True}
 
-    registered("needs_review", needs_review, "condition")
-
     config = {
+        "inputs": {"approved": {"default": False}},
         "nodes": {
             "data": {"type": "cfg_fetch"},
-            "review": {"kind": "human", "depends_on": ["data"], "condition": "needs_review"},
+            "review": {"kind": "human", "depends_on": ["data"], "condition": "approved == true"},
         },
     }
     dag = load_dag(config, approver=approver)
@@ -83,21 +79,17 @@ async def test_load_dag_human_with_condition(registered: Any) -> None:
 
 
 async def test_load_dag_loop(registered: Any) -> None:
-    def keep_looping(ctx: dict[str, Any], iteration: int) -> bool:
-        return iteration < 1
-
     async def tick(ctx: dict[str, Any]) -> int:
         return ctx.get("tick", 0) + 1
 
-    registered("tick", tick, "function")
-    registered("keep_looping", keep_looping, "condition")
+    registered("tick", tick)
 
     config = {
         "nodes": {
             "batch": {
                 "kind": "loop",
                 "body": {"tick": {"type": "tick"}},
-                "condition": "keep_looping",
+                "condition": "iteration < 1",
                 "max_iterations": 2,
             },
         },
@@ -108,7 +100,7 @@ async def test_load_dag_loop(registered: Any) -> None:
 
 
 def test_registry_only_lookup() -> None:
-    # type/condition 只能引用注册表中的名字，没有 functions 参数可传
+    # type 只能引用注册表中的名字，没有 functions 参数可传
     dag = load_dag({"nodes": {"a": {"type": "cfg_fetch"}}})
     assert "a" in dag.nodes
 
@@ -204,7 +196,7 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
         return ctx["query"]
 
     registered("t_only", only, "function")
-    dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "params": {"query": {"required": True}}})
+    dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "inputs": {"query": {"required": True}}})
 
     assert dag.validate() == []
     assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
@@ -229,7 +221,7 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
     registered("t_required_default", only, "function")
     dag = load_dag(
         {"nodes": {"only": {"type": "t_required_default"}},
-         "params": {"query": {"required": True, "default": "建议值"}}}
+         "inputs": {"query": {"required": True, "default": "建议值"}}}
     )
     assert dag.required_inputs == ["query"]
     assert dag.default_inputs == {"query": "建议值"}  # 必填键的 default 也进回填视图
@@ -261,7 +253,7 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
     registered("t_echo_count", only, "function")
     dag = load_dag(
         {"nodes": {"echo": {"type": "t_echo_count"}},
-         "params": {"count": {"required": True}}}
+         "inputs": {"count": {"required": True}}}
     )
 
     for bad in (None, "", "   "):
@@ -285,7 +277,7 @@ async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
     # 声明了 params 契约：extra 未声明 → 拒
     declared = load_dag(
         {"nodes": {"echo": {"type": "t_echo_extra"}},
-         "params": {"q": {"required": True}}}
+         "inputs": {"q": {"required": True}}}
     )
     inputs = {"q": "ok", "extra": 1}
     assert validate_inputs(inputs, declared.params) == ["未声明的参数键: extra"]
@@ -305,7 +297,7 @@ def test_input_keys_clash_node_names_rejected() -> None:
         load_dag(
             {
                 "nodes": {"only": {"type": "cfg_fetch"}},
-                "params": {"only": {"required": True}},
+                "inputs": {"only": {"required": True}},
             }
         )
 
@@ -324,7 +316,7 @@ def test_params_rich_form() -> None:
         "limit": {"default": 5},  # 可选、无 label → 展示层 label 退化为键名
         "body": {"required": True, "multiline": True},  # 多行文本（前端 textarea）
     }
-    dag = load_dag({"nodes": {"only": {"type": "cfg_fetch"}}, "params": params})
+    dag = load_dag({"nodes": {"only": {"type": "cfg_fetch"}}, "inputs": params})
     assert dag.params == params  # 声明原样保留
     assert dag.default_inputs == {"topic": "默认主题", "limit": 5}
     assert dag.required_inputs == ["query", "body"]
@@ -345,7 +337,7 @@ async def test_params_rich_form_runs(registered: Any) -> None:
     dag = load_dag(
         {
             "nodes": {"search": {"type": "t_search"}},
-            "params": {
+            "inputs": {
                 "query": {"required": True, "label": "查询词"},
                 "topic": {"default": "默认主题"},
             },
@@ -442,18 +434,14 @@ def test_validate_nodes_accepts() -> None:
     # human 节点 review - 键必须在 params 或 nodes 中
     assert validate_nodes({
         "nodes": {"a": {"kind": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}},
-        "params": {"title": {}},
+        "inputs": {"title": {}},
     }) == []
 
 
-def test_validate_nodes_accepts_loop(registered: Any) -> None:
-    """loop 节点的 condition 必须是已注册的条件函数"""
-    def keep(ctx: dict[str, Any], iteration: int) -> bool:
-        return False
-
-    registered("t_keep", keep, "condition")
+def test_validate_nodes_accepts_loop() -> None:
+    """loop 节点的 condition 是表达式（iteration 在循环谓词视图可用）"""
     assert validate_nodes({
-        "nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "t_keep"}}
+        "nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "iteration < 3"}}
     }) == []
 
 
@@ -505,19 +493,19 @@ def test_validate_nodes_rejects() -> None:
         "b": {"type": "cfg_fetch", "depends_on": ["a"]},
     }}) == ["检测到循环依赖: a → b"]
 
-    # loop 类型缺少 body / condition、condition 未注册（condition 注册检查先于 body 检查）
+    # loop 类型缺少 body / condition、condition 引用未知键（condition 校验先于 body 检查）
     assert validate_nodes({"nodes": {"a": {"kind": "loop", "condition": "x"}}}) == [
-        "节点 'a'（loop）: 条件函数 'x' 未注册",
+        "节点 'a'（loop）: condition 引用的 'x' 不是参数键、节点名或 inputs 本地键",
         "循环节点 'a': 需要非空的 'body' 映射",
     ]
     assert validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}}}) == [
-        "循环节点 'a': 需要 'condition' 函数键"
+        "循环节点 'a': 需要 'condition' 表达式"
     ]
 
     # human 节点 review 校验失败（带节点名前缀）
     assert validate_nodes({
         "nodes": {"a": {"kind": "human", "review": {"a": {"label": None}}}},
-        "params": {"a": {}},
+        "inputs": {"a": {}},
     }) == ["审核节点 'a': review 字段 'a': label 必须是字符串"]
 
 
@@ -547,16 +535,16 @@ def test_validate_config_accepts() -> None:
 
     # 完整配置
     assert validate_config({
-        "params": {"query": {"required": True}},
+        "inputs": {"query": {"required": True}},
         "nodes": {"fetch": {"type": "cfg_fetch"}},
     }) == []
 
 
-def test_validate_config_rejects_bad_structure(registered: Any) -> None:
+def test_validate_config_rejects_bad_structure() -> None:
     """图结构错误：空流水线 / 依赖缺失 / 循环依赖（loop body 递归同查）"""
     # nodes 是必填键：未声明（含只声明 params）与空映射都报错
     assert validate_config({}) == ["流水线至少需要一个节点"]
-    assert validate_config({"params": {"q": {"required": True}}}) == [
+    assert validate_config({"inputs": {"q": {"required": True}}}) == [
         "流水线至少需要一个节点"
     ]
     assert validate_config({"nodes": {}}) == ["流水线至少需要一个节点"]
@@ -573,14 +561,10 @@ def test_validate_config_rejects_bad_structure(registered: Any) -> None:
     }}) == ["检测到循环依赖: a → b"]
 
     # loop body 是独立命名空间：body 内依赖缺失带循环节点名前缀
-    def keep(ctx: dict[str, Any], iteration: int) -> bool:
-        return False
-
-    registered("t_keep", keep, "condition")
     assert validate_config({"nodes": {
         "l": {
             "kind": "loop",
-            "condition": "t_keep",
+            "condition": "iteration < 3",
             "body": {"b": {"type": "cfg_fetch", "depends_on": ["ghost"]}},
         },
     }}) == ["循环节点 'l': 节点 'b' 依赖的 'ghost' 不在 DAG 中"]
@@ -589,7 +573,7 @@ def test_validate_config_rejects_bad_structure(registered: Any) -> None:
 def test_validate_config_rejects_param_node_clash() -> None:
     """validate_config 拒绝参数键与节点名冲突"""
     config = {
-        "params": {"query": {"required": True}},
+        "inputs": {"query": {"required": True}},
         "nodes": {"query": {"type": "cfg_fetch"}},
     }
     assert validate_config(config) == ["输入参数键与节点名冲突: query"]
@@ -622,7 +606,7 @@ def test_param_spec_shape_checked_at_engine() -> None:
 def test_validate_config_collects_all_errors() -> None:
     """params 与 nodes 的错误一次性全部返回（load_dag 抛出时含全部信息）"""
     config = {
-        "params": {
+        "inputs": {
             "q": {"bogus": 1},          # 不支持的字段
             "r": {"required": "yes"},   # required 类型错误
         },
@@ -659,7 +643,7 @@ async def test_human_review_view_payload(registered: Any) -> None:
     dag = load_dag(
         {
             # opt：可选参数、无默认值 → 本次运行不提供，审核视图里应为 None 而非消失
-            "params": {"opt": {}},
+            "inputs": {"opt": {}},
             "nodes": {
                 "work": {"type": "t_work"},
                 "gate": {
@@ -692,7 +676,7 @@ def test_review_unknown_key_rejected() -> None:
     with pytest.raises(ValueError, match="review 引用了未声明的键 ttile"):
         load_dag(
             {
-                "params": {},
+                "inputs": {},
                 "nodes": {
                     "work": {"type": "cfg_fetch"},
                     "gate": {
@@ -712,7 +696,7 @@ def test_review_param_key_allowed() -> None:
 
     dag = load_dag(
         {
-            "params": {"q": {"required": True}, "opt": {}},
+            "inputs": {"q": {"required": True}, "opt": {}},
             "nodes": {
                 "gate": {
                     "kind": "human", "depends_on": [],
@@ -726,22 +710,17 @@ def test_review_param_key_allowed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# condition 参数化 — {fn: 键, 参数…} 映射形式
+# condition 表达式 — 声明层分流与载入期校验
 # ---------------------------------------------------------------------------
 
 
-async def test_condition_with_args_runs_and_skips(registered: Any) -> None:
-    """映射形式条件：比较值在 YAML 声明，同一注册条目按参数分流。"""
-    def t_eq(ctx: dict[str, Any], value: str) -> bool:
-        return ctx.get("pick") == value
-
-    registered("t_eq", t_eq, "condition")
-
+async def test_condition_expression_runs_and_skips() -> None:
+    """等值表达式按 inputs 值分流：pick == a / pick == b 各自命中。"""
     config = {
-        "params": {"pick": {}},
+        "inputs": {"pick": {}},
         "nodes": {
-            "a": {"type": "cfg_fetch", "condition": {"fn": "t_eq", "value": "a"}},
-            "b": {"type": "cfg_fetch", "condition": {"fn": "t_eq", "value": "b"}},
+            "a": {"type": "cfg_fetch", "condition": "pick == a"},
+            "b": {"type": "cfg_fetch", "condition": "pick == b"},
         },
     }
     results = await load_dag(config).run(inputs={"pick": "a"})
@@ -753,33 +732,50 @@ async def test_condition_with_args_runs_and_skips(registered: Any) -> None:
     assert results["b"].status is NodeStatus.COMPLETED
 
 
-def test_condition_with_args_validation(registered: Any) -> None:
-    """带参条件的载入期校验：fn 缺失/未注册、参数与签名不符、loop 不收映射。"""
-    def t_eq(ctx: dict[str, Any], value: str) -> bool:
-        return ctx.get("pick") == value
+async def test_condition_expression_on_wired_key() -> None:
+    """条件在接线视图上求值：$node.field 点路径取字段后直接比较。"""
+    config = {
+        "nodes": {
+            "data": {"type": "cfg_fetch"},
+            "gold": {
+                "type": "cfg_fetch",
+                "depends_on": ["data"],
+                "condition": "tier == gold",
+                "inputs": {"tier": "$data.title"},  # title = "DAG Flow v0.1" ≠ gold
+            },
+        },
+    }
+    results = await load_dag(config).run()
+    assert results["gold"].status is NodeStatus.SKIPPED
 
-    registered("t_eq", t_eq, "condition")
 
+def test_condition_expression_validation() -> None:
+    """表达式的载入期校验：类型、语法、引用键存在性、loop 的 iteration。"""
+    # 旧的单键映射形式（函数调用）不再支持
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": {"fn": "nope", "value": "a"}},
-    }}) == ["节点 'a'（node）: 条件函数 'nope' 未注册"]
+        "a": {"type": "cfg_fetch", "condition": {"t_eq": "a"}},
+    }}) == [
+        "节点 'a'（node）: condition 必须是非空表达式字符串"
+        "（如 intent == chat / merge / not flag），实际是 {'t_eq': 'a'}"
+    ]
 
+    # 语法错误：缺键
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": {"value": "a"}},
-    }}) == ["节点 'a'（node）: condition 映射需要 'fn'（条件函数键）"]
+        "a": {"type": "cfg_fetch", "condition": "== chat"},
+    }}) == [
+        "节点 'a'（node）: 条件表达式 '== chat' 无法解析"
+        "（写法如 ``intent == chat``、``merge``、``not flag``）"
+    ]
 
-    # 拼错的参数键：执行期会被按「不执行」吞掉，必须在载入期拦截
-    errors = validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": {"fn": "t_eq", "valeu": "a"}},
-    }})
-    assert len(errors) == 1
-    assert errors[0].startswith("节点 'a'（node）: 条件参数与 't_eq' 签名不符")
-
+    # 引用键不存在（拼错）—— 运行期只会静默取 None（恒 False 跳过），必须载入期报出
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": 123},
-    }}) == ["节点 'a'（node）: condition 必须是函数名字符串或 {fn: 键, 参数…} 映射，实际是 int"]
+        "a": {"type": "cfg_fetch", "condition": "pick2 == a"},
+    }}) == ["节点 'a'（node）: condition 引用的 'pick2' 不是参数键、节点名或 inputs 本地键"]
 
+    # loop 的条件里 iteration 可用，其余键同样核对
     assert validate_config({"nodes": {
-        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}},
-              "condition": {"fn": "t_eq", "value": "a"}},
-    }}) == ["节点 'l'（loop）: condition 必须是函数名字符串（映射参数形式不支持 loop）"]
+        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "iteration < 3"},
+    }}) == []
+    assert validate_config({"nodes": {
+        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "rounds < 3"},
+    }}) == ["节点 'l'（loop）: condition 引用的 'rounds' 不是参数键、节点名或 inputs 本地键"]

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class PipelineParamOut(BaseModel):
-    """一个运行时输入参数的声明行（YAML ``params`` 声明归一化后）。"""
+    """一个运行时输入参数的声明行（YAML 顶层 ``inputs`` 声明归一化后）。"""
 
     name: str                    # ctx 里的键
     label: str                   # 展示名（未声明 label 时退化为键名）
@@ -38,7 +38,7 @@ class PipelineNodeOut(BaseModel):
     type_description: str | None = None  # node=注册表描述；human=审核提示；loop=循环体摘要
     depends_on: list[str] = []
     retry: str | None = None         # 中文摘要，如 "重试 3 次，退避 0.05s×2（≤0.5s）"
-    condition: str | dict[str, Any] | None = None  # 条件谓词：注册表键（无参）或 {fn: 键, 参数…}（带参）
+    condition: str | dict[str, Any] | None = None  # 条件谓词：注册表键（无参）或 {函数名: 实参}（带参）
     condition_label: str | None = None
     review: dict[str, dict[str, str]] | None = None  # (kind=human) 审核视图原文 {key: {label}}；None=全量上下文
 

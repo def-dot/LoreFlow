@@ -1,7 +1,7 @@
 name: LLM 对话 - 支持链接
 description: 用户输入提示词；如果包含链接会先抓取网页正文，再一起交给 Ollama 生成回答。
 
-params:
+inputs:
   prompt:
     required: true
     multiline: true

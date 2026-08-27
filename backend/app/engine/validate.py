@@ -3,11 +3,10 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from app.registry.core import REGISTRY
+from .condition import condition_keys
 
 
 def find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
@@ -167,33 +166,29 @@ def validate_inputs(
     return errors
 
 
-def validate_condition(condition: Any, name: str, kind: str) -> list[str]:
-    """condition 声明校验：函数名字符串，或 ``{fn: 键, 其余键: 参数}`` 映射。
+def validate_condition(
+    condition: Any, name: str, kind: str, available: set[str] | None = None
+) -> list[str]:
+    """condition 声明校验：必须是表达式字符串（``intent == chat`` / ``merge``）。
 
-    映射形式的参数与函数签名绑定核对——条件在执行期抛异常会被按
-    「不执行」吞掉（executor 策略），拼错的参数键必须在载入期报出来。
-    loop 的 condition 是循环谓词（多一个 iteration 参数），只接受字符串。
+    表达式语法与引用键都在载入期核对 —— 键 = params ∪ 节点名 ∪ 本节点
+    ``inputs`` 本地键（loop 另有 ``iteration``）。拼错的键在运行期只会
+    静默取 None（比较类表达式恒 False，节点被跳过），必须提前报出来。
     """
-    if isinstance(condition, str):
-        if condition not in REGISTRY:
-            return [f"节点 {name!r}（{kind}）: 条件函数 {condition!r} 未注册"]
-        return []
-    if not isinstance(condition, dict):
+    if not isinstance(condition, str) or not condition.strip():
         return [
-            f"节点 {name!r}（{kind}）: condition 必须是函数名字符串或 {{fn: 键, 参数…}} 映射，"
-            f"实际是 {type(condition).__name__}"
+            f"节点 {name!r}（{kind}）: condition 必须是非空表达式字符串"
+            f"（如 intent == chat / merge / not flag），实际是 {condition!r}"
         ]
-    if kind == "loop":
-        return [f"节点 {name!r}（loop）: condition 必须是函数名字符串（映射参数形式不支持 loop）"]
-    fn_key = condition.get("fn")
-    if not isinstance(fn_key, str) or not fn_key:
-        return [f"节点 {name!r}（{kind}）: condition 映射需要 'fn'（条件函数键）"]
-    fn_type = REGISTRY.get(fn_key)
-    if fn_type is None:
-        return [f"节点 {name!r}（{kind}）: 条件函数 {fn_key!r} 未注册"]
-    args = {k: v for k, v in condition.items() if k != "fn"}
     try:
-        inspect.signature(fn_type.func).bind({}, **args)
-    except TypeError as exc:
-        return [f"节点 {name!r}（{kind}）: 条件参数与 {fn_key!r} 签名不符: {exc}"]
+        keys = condition_keys(condition)
+    except ValueError as exc:
+        return [f"节点 {name!r}（{kind}）: {exc}"]
+    if available is not None:
+        missing = [k for k in keys if k not in available]
+        if missing:
+            return [
+                f"节点 {name!r}（{kind}）: condition 引用的 {', '.join(repr(k) for k in missing)}"
+                f" 不是参数键、节点名或 inputs 本地键"
+            ]
     return []

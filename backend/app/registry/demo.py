@@ -1,9 +1,10 @@
 """
 演示节点 — app/pipelines 下 YAML 示例引用的函数实现。
 
-编排结构在 YAML 声明；这些函数是 YAML 里 type:/condition: 引用的
-实现。cfg_* 是主链演示（抓取→清洗→富化→合并→发布→报告），demo_*
-是引擎特性示例（重试/循环/按需审核）的辅助节点。
+编排结构（依赖/接线/条件）在 YAML 声明；这些函数是 YAML 里 type:
+引用的实现。cfg_* 是主链演示（抓取→清洗→富化→合并→发布→报告），
+demo_* 是引擎特性示例（重试/循环）的辅助节点。条件一律用表达式
+（``condition: merge`` / ``iteration < 3``），不再是注册函数。
 """
 
 from __future__ import annotations
@@ -61,17 +62,12 @@ async def cfg_publish(ctx: dict[str, Any]) -> str:
     return f"Published: {title or '(untitled)'}"
 
 
-@node(kind="condition", label="是否需要报告", description="条件谓词：merge 有输出才执行下游")
-def cfg_needs_report(ctx: dict[str, Any]) -> bool:
-    return bool(ctx.get("merge"))
-
-
 @node(label="生成报告", description="基于 merge 输出生成报告文本")
 async def cfg_report(ctx: dict[str, Any]) -> str:
     return f"Report generated for {ctx['merge']['title']}"
 
 
-# ---- 特性示例辅助 — 重试/循环/按需审核示例引用的函数 ----
+# ---- 特性示例辅助 — 重试/循环示例引用的函数 ----
 
 
 _flaky_calls = 0
@@ -94,19 +90,3 @@ async def demo_flaky(ctx: dict[str, Any]) -> str:
 async def demo_tick(ctx: dict[str, Any]) -> int:
     """循环体：每轮迭代把 tick 计数 +1（结果累积在共享上下文）。"""
     return int(ctx.get("tick", 0)) + 1
-
-
-@node(kind="condition", label="演示循环条件", description="循环谓词：iteration < 3 继续（多一个 iteration 参数）")
-def demo_keep_iterating(ctx: dict[str, Any], iteration: int) -> bool:
-    """循环条件：iteration < 3 时继续（loop 谓词多一个 iteration 参数）。"""
-    return iteration < 3
-
-
-@node(kind="condition", label="演示按需审核", description="条件谓词：正文超过 30 字符才需要人工审核")
-def demo_needs_review(ctx: dict[str, Any]) -> bool:
-    """条件谓词：合并正文超过 30 字符才需要人工审核。
-
-    演示数据正文只有 26 字符 → 审核被跳过；调低阈值即可触发审核。
-    """
-    merge = ctx.get("merge")
-    return bool(merge) and len(str(merge.get("body", ""))) > 30

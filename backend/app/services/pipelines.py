@@ -23,7 +23,10 @@ logger = get_logger(__name__)
 
 
 def _param_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """已校验的 ``params`` 声明 → 前端参数行（必填/默认值由行内字段判断）。"""
+    """已校验的顶层 ``inputs`` 声明 → 前端参数行（必填/默认值由行内字段判断）。
+
+    对外响应字段沿用 ``params``（前端契约不变），数据源是 YAML 的 ``inputs``。
+    """
     return [
         {
             "name": name,
@@ -35,7 +38,7 @@ def _param_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
             "multiline": bool(spec.get("multiline", False)),
             "file": bool(spec.get("file", False)),
         }
-        for name, spec in (config.get("params") or {}).items()
+        for name, spec in (config.get("inputs") or {}).items()
     ]
 
 
@@ -120,9 +123,10 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         body = spec.get("body") or {}
         row["type_description"] = f"循环体 {len(body)} 个节点，上限 {spec.get('max_iterations', 100)} 轮"
     if isinstance(cond_spec, dict):
-        # 带参条件：意图判定（value=simple）
-        fn_type = REGISTRY.get(cond_spec.get("fn") or "")
-        args = ", ".join(f"{k}={v}" for k, v in cond_spec.items() if k != "fn")
+        # 带参条件（{函数名: 实参} 单键）：意图判定（chat）
+        fn_key, arg = next(iter(cond_spec.items()))
+        fn_type = REGISTRY.get(fn_key)
+        args = ", ".join(f"{k}={v}" for k, v in arg.items()) if isinstance(arg, dict) else str(arg)
         row["condition_label"] = f"{fn_type.label}（{args}）" if fn_type else None
     elif cond_spec:
         cond = REGISTRY.get(cond_spec)

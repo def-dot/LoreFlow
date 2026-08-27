@@ -38,8 +38,8 @@ def save_upload(data: bytes, suffix: str) -> str:
     return stored
 
 
-def stored_upload_path(upload_id: str) -> Path:
-    """引用 id → 磁盘路径。防路径穿越与白名单外扩展名（JSON 模式可手输任意 id）。"""
+def read_upload(upload_id: str) -> str:
+    """按存储名读全文文本（JSON 模式可手输任意 id，先防路径穿越与白名单外扩展名）。"""
     if (
         not upload_id
         or "/" in upload_id
@@ -48,4 +48,7 @@ def stored_upload_path(upload_id: str) -> Path:
         or Path(upload_id).suffix.lower() not in ALLOWED_SUFFIXES
     ):
         raise ValueError("无效的文件引用：document.id 必须是上传接口返回的文件标识")
-    return settings.UPLOADS_DIR / upload_id
+    path = settings.UPLOADS_DIR / upload_id
+    if not path.is_file():
+        raise ValueError(f"上传文件不存在或已被清理：{upload_id}")
+    return decode_text(path.read_bytes())

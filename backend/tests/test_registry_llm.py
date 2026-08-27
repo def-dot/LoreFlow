@@ -9,12 +9,12 @@ async def test_classify_human_keyword_short_circuits() -> None:
     assert out == {"intent": "human", "raw": "关键词命中：人工"}
 
 
-def test_intent_is_finds_upstream_by_shape() -> None:
-    """意图识别节点中英文命名均可 —— 按输出形状找上游，不依赖 ctx 键名。"""
-    ctx = {"prompt": "你好", "意图识别": {"intent": "chat", "raw": "chat"}}
+def test_intent_is_reads_wired_output() -> None:
+    """意图判定读接线键 intent（YAML inputs: intent ← llm_classify 节点）。"""
+    ctx = {"prompt": "你好", "intent": {"intent": "chat", "raw": "chat"}}
     assert intent_is(ctx, value="chat") is True
     assert intent_is(ctx, value="rag") is False
-    assert intent_is({"prompt": "你好"}, value="chat") is False  # 无上游输出 → False
+    assert intent_is({"prompt": "你好"}, value="chat") is False  # 未接线/上游被跳过 → False
 
 
 async def test_rag_reply_without_chunks_message() -> None:

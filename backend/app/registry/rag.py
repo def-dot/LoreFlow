@@ -1,19 +1,10 @@
 """
 RAG 演示节点 — 文档入库与知识库检索。
-
-入库链（01_serial.yaml）：rag_load → rag_chunk → rag_embed → rag_upsert；
-检索（02_condition.yaml）：rag_retrieve。向量与知识库均为确定性模拟，
-不依赖真实模型与向量库。
-
-接线约定：参数键（如 document/prompt）是稳定契约，直接按 ctx 键取；
-上游节点输出则按形状识别（节点名 = ctx 键，中文命名随时可改），
-与 cfg_publish 扫描 "title" 的做法同款。
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,41 +12,19 @@ from app.registry.core import node
 from app.utils import files
 
 
-def _find_upstream(ctx: dict[str, Any], shape: Callable[[Any], bool], what: str) -> Any:
-    """倒序找最近一个符合形状的上游输出（找不到即中文 ValueError）。"""
-    for value in reversed(list(ctx.values())):
-        if shape(value):
-            return value
-    raise ValueError(f"上游缺少{what}")
-
-
-def _document(ctx: dict[str, Any]) -> dict[str, Any]:
-    """取 rag_load 的输出（形如 {doc_id, title, text}）。"""
-    return _find_upstream(
-        ctx,
-        lambda v: isinstance(v, dict) and "doc_id" in v and "text" in v,
-        "文档输出（rag_load 的 {doc_id, title, text}）",
-    )
-
-
 @node(label="加载文档", description="按 document（{id, filename}）引用读取上传文件，输出 {doc_id, title, text}")
 async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
-    """从上传目录读取 params 声明的 document 文件（前端选文件即 POST
-    /uploads 存盘，document 传 {id, filename} 引用）。UTF-8/GBK 自动
-    解码，doc_id/title 取原始文件名去扩展名，text 为正文。
+    """从上传目录读取 params 声明的 document 文件
     """
     document = ctx.get("document")
     if not isinstance(document, dict):
         raise ValueError(
-            "缺少上传文档：document 必须是 {id, filename} 引用（在 YAML params 声明为必填，创建运行时提供）"
+            "缺少上传文档：document 必须是 {id, filename} 引用（在 YAML inputs 声明为必填，创建运行时提供）"
         )
     upload_id = document.get("id")
     if not isinstance(upload_id, str) or not upload_id.strip():
         raise ValueError("上传文档缺少文件引用：document.id 必须是上传接口返回的 id")
-    path = files.stored_upload_path(upload_id)  # 路径穿越/扩展名非法 → 中文 ValueError
-    if not path.is_file():
-        raise ValueError(f"上传文件不存在或已被清理：{upload_id}")
-    text = files.decode_text(path.read_bytes())
+    text = files.read_upload(upload_id)  # 路径穿越/扩展名非法/文件缺失 → 中文 ValueError
     if not text.strip():
         raise ValueError("上传文档正文为空：文件内容为空白文本")
     filename = str(document.get("filename") or "上传文档")
@@ -63,22 +32,25 @@ async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"doc_id": stem, "title": stem, "text": text}
 
 
-@node(label="切块", description="按空行把正文切成语义段（chunk 列表）")
+@node(label="切块", description="按空行把正文切成语义段；输入 document ← rag_load 节点（YAML inputs 接线）")
 async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
-    return [p.strip() for p in _document(ctx)["text"].split("\n\n") if p.strip()]
+    document = ctx.get("document")
+    if not isinstance(document, dict):
+        raise ValueError("上游缺少文档输出：inputs 需接线 document ← rag_load 节点（或该上游被条件跳过）")
+    return [p.strip() for p in document["text"].split("\n\n") if p.strip()]
 
 
-@node(label="向量化", description="为每个 chunk 生成 8 维确定性向量（内容哈希模拟，不依赖模型）")
+@node(label="向量化", description="为每个 chunk 生成 8 维确定性向量；输入 document、chunks ← rag_load/rag_chunk 节点（YAML inputs 接线）")
 async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
-    doc = _document(ctx)
-    chunks = _find_upstream(
-        ctx,
-        lambda v: isinstance(v, list) and all(isinstance(c, str) for c in v),
-        "切块输出（rag_chunk 的字符串列表）",
-    )
+    document = ctx.get("document")
+    if not isinstance(document, dict):
+        raise ValueError("上游缺少文档输出：inputs 需接线 document ← rag_load 节点（或该上游被条件跳过）")
+    chunks = ctx.get("chunks")
+    if not isinstance(chunks, list):
+        raise ValueError("上游缺少切块输出：inputs 需接线 chunks ← rag_chunk 节点（或该上游被条件跳过）")
     return [
         {
-            "chunk_id": f"{doc['doc_id']}-c{i}",
+            "chunk_id": f"{document['doc_id']}-c{i}",
             "text": chunk,
             "vector": [float(sum(ord(c) * (d + 1) for c in chunk) % 997) for d in range(8)],
         }
@@ -86,16 +58,16 @@ async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-@node(label="写入向量库", description="批量 upsert 向量，返回写入统计")
+@node(label="写入向量库", description="批量 upsert 向量，返回写入统计；输入 document、embeds ← rag_load/rag_embed 节点（YAML inputs 接线）")
 async def rag_upsert(ctx: dict[str, Any]) -> str:
     await asyncio.sleep(0.05)
-    doc = _document(ctx)
-    embeds = _find_upstream(
-        ctx,
-        lambda v: isinstance(v, list) and all(isinstance(e, dict) and "vector" in e for e in v),
-        "向量输出（rag_embed 的 [{chunk_id, text, vector}]）",
-    )
-    return f"upserted {len(embeds)} chunks from {doc['doc_id']}"
+    document = ctx.get("document")
+    if not isinstance(document, dict):
+        raise ValueError("上游缺少文档输出：inputs 需接线 document ← rag_load 节点（或该上游被条件跳过）")
+    embeds = ctx.get("embeds")
+    if not isinstance(embeds, list):
+        raise ValueError("上游缺少向量输出：inputs 需接线 embeds ← rag_embed 节点（或该上游被条件跳过）")
+    return f"upserted {len(embeds)} chunks from {document['doc_id']}"
 
 
 # 模拟知识库：与 rag_retrieve 的演示数据同源（真实实现应为向量库检索，见 rag_embed/rag_upsert）

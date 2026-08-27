@@ -1,17 +1,16 @@
 # DAG Flow — 循环示例。
 #
 # loop 的 body 是每轮迭代重跑的子 DAG，各轮输出累积在共享上下文；
-# condition 引用注册表谓词（两个参数：ctx, iteration），返回 True 继续。
-# max_iterations 是安全上限，防止条件写错导致死循环。
+# condition 是表达式，在「累积上下文 + iteration（从 1 起）」视图上求值，
+# 为 True 继续下一轮。max_iterations 是安全上限，防止条件写错导致死循环。
 #
-# 本例：tick 每轮 +1，demo_keep_iterating 在 iteration < 3 时继续
-# → 共跑 3 轮，ctx["tick"] == 3；
+# 本例：tick 每轮 +1，iteration < 3 时继续 → 共跑 3 轮，ctx["tick"] == 3；
 # loop 节点的输出即累积后的整个上下文。
 
 name: 循环迭代
-description: 循环示例：loop 按条件重复执行 body 子流水线，带 max_iterations 安全上限。
+description: 循环示例：loop 按条件表达式重复执行 body 子流水线，带 max_iterations 安全上限。
 
-params:
+inputs:
   tick:
     label: 初始计数
     description: 每轮迭代 +1 的计数器初始值（默认 0）
@@ -20,8 +19,9 @@ params:
 nodes:
   batch:
     kind: loop
+    label: 循环计数
     body:
       tick:
         type: demo_tick
-    condition: demo_keep_iterating
+    condition: iteration < 3
     max_iterations: 5

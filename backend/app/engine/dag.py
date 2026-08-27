@@ -64,7 +64,7 @@ class DAG:
     Parameters:
         name: A human-readable label for this workflow (used in logs & diagrams).
         params: 运行时输入参数声明 ``{name: {default, required, ...}}``
-                （load_dag 传入 YAML ``params`` 原文）。默认值/必填键不
+                （load_dag 传入 YAML 顶层 ``inputs`` 原文）。默认值/必填键不
                 单独拆开传，由 :attr:`default_inputs` / :attr:`required_inputs`
                 按需派生。
         on_event: Optional async callback invoked on every node state change
@@ -170,7 +170,7 @@ class DAG:
         self,
         name: str,
         body_nodes: list[Node],
-        condition: Callable[[dict[str, Any], int], bool],
+        condition: ConditionFunc,
         depends_on: list[str] | None = None,
         max_iterations: int = 100,
         retry: RetryPolicy | None = None,
@@ -185,8 +185,10 @@ class DAG:
         Args:
             name: Unique node name for the loop.
             body_nodes: Nodes that make up the loop body (a sub-DAG).
-            condition: ``(ctx, iteration) -> bool``.
-                       Return ``True`` to **continue** looping.
+            condition: 与节点条件同一形态 ``(视图) -> bool``；视图 = 累积
+                       上下文 + 每轮注入的 ``iteration``（从 1 起）。
+                       Return ``True`` to **continue** looping（YAML 声明
+                       层写 ``condition: iteration < 3`` 即可）。
             depends_on: Upstream nodes the loop waits on before its first iteration.
             max_iterations: Safety cap on iterations.
             retry: Retry policy applied to each iteration of the whole sub-DAG.
@@ -235,9 +237,9 @@ class DAG:
                     if nr.status == NodeStatus.COMPLETED:
                         ctx[nname] = nr.output
 
-                # Evaluate loop condition
+                # Evaluate loop condition on a view with ``iteration`` injected
                 try:
-                    should_continue = condition(ctx, iteration)
+                    should_continue = condition({**ctx, "iteration": iteration})
                 except Exception as exc:
                     logger.error(
                         "[%s] Loop condition raised %s — exiting loop",
