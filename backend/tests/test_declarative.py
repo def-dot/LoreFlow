@@ -325,7 +325,7 @@ def test_params_rich_form() -> None:
 
 
 def test_params_multiline_bad_type_rejected() -> None:
-    errors = validate_params({"b": {"multiline": "yes"}})
+    errors = validate_params({"inputs": {"b": {"multiline": "yes"}}})
     assert errors == ["参数 'b': multiline 必须是布尔值"]
 
 
@@ -355,17 +355,17 @@ async def test_params_rich_form_runs(registered: Any) -> None:
 
 
 def test_params_unknown_field_rejected() -> None:
-    errors = validate_params({"q": {"type": "string"}})
+    errors = validate_params({"inputs": {"q": {"type": "string"}}})
     assert errors == ["参数 'q': 不支持的字段 ['type']"]
 
 
 def test_params_collects_all_errors() -> None:
     """多个参数错误一次性全部返回，而非遇错即抛。"""
-    errors = validate_params({
+    errors = validate_params({"inputs": {
         "q": {"bogus": 1},
         "r": {"required": "yes"},
         "s": "not-a-mapping",
-    })
+    }})
     assert len(errors) == 3
     assert any("不支持的字段" in e for e in errors)
     assert any("required 必须是布尔值" in e for e in errors)
@@ -374,14 +374,16 @@ def test_params_collects_all_errors() -> None:
 
 def test_params_node_name_clash_rejected() -> None:
     """参数键与节点名冲突应被拒绝"""
-    assert validate_params({"query": {"required": True}}, {"query"}) == [
-        "输入参数键与节点名冲突: query"
-    ]
+    assert validate_params(
+        {"inputs": {"query": {"required": True}}, "nodes": {"query": {}}}
+    ) == ["输入参数键与节点名冲突: query"]
 
 
 def test_params_no_clash_accepted() -> None:
     """参数键与节点名无冲突时通过"""
-    assert validate_params({"query": {"required": True}}, {"fetch"}) == []
+    assert validate_params(
+        {"inputs": {"query": {"required": True}}, "nodes": {"fetch": {}}}
+    ) == []
 
 
 # ---------------------------------------------------------------------------

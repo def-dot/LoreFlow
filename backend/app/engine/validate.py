@@ -1,4 +1,6 @@
 """共享校验实现 —— 一项检查一个实现、多层调用。
+
+布局：字段白名单 → 图结构 → 数据流接线 → 单项校验 → 汇总（validate_config）。
 """
 
 from __future__ import annotations
@@ -8,7 +10,27 @@ from typing import Any
 
 from app.registry import REGISTRY
 
-from .condition import condition_keys
+from .condition import condition_key
+
+
+# ------------------------------------------------------------------
+# 字段白名单（多余字段报「不支持的字段」）
+# ------------------------------------------------------------------
+
+#: 每个参数键接受的字段。
+_PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "file"}
+
+#: 每种节点类型接受的字段。
+_KIND_FIELDS = {
+    "node": {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition", "metadata"},
+    "human": {"label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
+    "loop": {"label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
+}
+
+
+# ------------------------------------------------------------------
+# 图结构（依赖存在 / 环 / 上游闭包）
+# ------------------------------------------------------------------
 
 
 def find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
@@ -54,7 +76,6 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
     """图结构校验（depends_on 类型 + 依赖存在性 + 环）
     """
     errors: list[str] = []
-    deps_missing = False
     for name, deps in edges.items():
         if deps is None:  # 未声明依赖
             continue
@@ -64,37 +85,13 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
         for dep in deps:
             if dep not in edges:
                 errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
-                deps_missing = True
-    if not deps_missing:
-        cycle = find_cycle(
-            {n: d for n, d in edges.items()
-             if isinstance(d, list) and all(isinstance(x, str) for x in d)}
-        )
-        if cycle:
-            errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
+    cycle = find_cycle(  # 指向不存在节点的边跳过（缺失依赖上面已报，缺失不可能成环）
+        {n: d for n, d in edges.items()
+         if isinstance(d, list) and all(isinstance(x, str) for x in d)}
+    )
+    if cycle:
+        errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
     return errors
-
-
-def _ref_roots(wiring: Mapping[str, Any]) -> Iterator[tuple[str, str]]:
-    """接线里的 ``$`` 引用项，产出 ``(本地键, 根键)``；字面量跳过。"""
-    for local, source in wiring.items():
-        if isinstance(source, str) and source.startswith("$"):
-            yield local, source[1:].partition(".")[0]  # $node.field → node
-
-
-def validate_wiring(wiring: Any, name: str, available: set[str]) -> list[str]:
-    """节点 inputs 接线声明校验（映射类型 + 引用根键 ∈ 节点名 ∪ 参数键）
-
-    ``{本地键: $来源键或字面量}``；``$`` 前缀字符串按根键（``$node.field``
-    取 ``node``）查 ``available``，字面量不校验来源。
-    """
-    if not isinstance(wiring, dict):
-        return [f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射"]
-    return [
-        f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键"
-        for local, root in _ref_roots(wiring)
-        if root not in available
-    ]
 
 
 def _ancestors(name: str, edges: Mapping[str, Any]) -> set[str]:
@@ -109,14 +106,34 @@ def _ancestors(name: str, edges: Mapping[str, Any]) -> set[str]:
     return seen
 
 
+# ------------------------------------------------------------------
+# 数据流接线（inputs：$引用 或字面量）
+# ------------------------------------------------------------------
+
+
+def _ref_roots(wiring: Mapping[str, Any]) -> Iterator[tuple[str, str]]:
+    """接线里的 ``$`` 引用项，产出 ``(本地键, 根键)``；字面量跳过。"""
+    for local, source in wiring.items():
+        if isinstance(source, str) and source.startswith("$"):
+            yield local, source[1:].partition(".")[0]  # $node.field → node
+
+
+def validate_wiring(wiring: Any, name: str, available: set[str]) -> list[str]:
+    """节点 inputs 接线校验：必须是映射，``$`` 引用根键 ∈ 节点名 ∪ 参数键。"""
+    if not isinstance(wiring, dict):
+        return [f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射"]
+    return [
+        f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键"
+        for local, root in _ref_roots(wiring)
+        if root not in available
+    ]
+
+
 def validate_wiring_upstream(
     wirings: Mapping[str, Mapping[str, Any]], edges: Mapping[str, Any]
 ) -> list[str]:
-    """接线来源节点校验：根键若是节点，必须在声明者的 depends_on 上游链中。
-
-    否则执行到本节点时该来源可能尚未运行 —— 数据只能来自已声明的上游
-    或参数（``edges`` 键集 = 节点名集，根键是参数的引用不受此限）。
-    """
+    """接线来源若是节点，必须在声明者的 depends_on 上游链中
+    （数据只能来自已声明的上游或参数；根键是参数的引用不受此限）。"""
     errors: list[str] = []
     for name, wiring in wirings.items():
         ancestors = _ancestors(name, edges)
@@ -128,8 +145,9 @@ def validate_wiring_upstream(
     return errors
 
 
-#: Fields accepted per key in a ``params`` mapping; anything else raises.
-_PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "file"}
+# ------------------------------------------------------------------
+# 单项校验（review / condition / 运行输入）
+# ------------------------------------------------------------------
 
 
 def validate_review(review: Any, available: Iterable[str]) -> list[str]:
@@ -162,39 +180,30 @@ def validate_review(review: Any, available: Iterable[str]) -> list[str]:
     return errors
 
 
-def validate_params(params: Any, node_names: Iterable[str] = ()) -> list[str]:
-    """params 声明校验（顶层类型 + 键与节点名冲突 + 每键形状）
+def validate_condition(
+    condition: Any, name: str, kind: str, available: set[str] | None = None
+) -> list[str]:
+    """condition 声明校验：必须是表达式字符串（``intent == chat`` / ``merge``）。
+
+    表达式语法与引用键都在载入期核对 —— 键 = params ∪ 节点名 ∪ 本节点
+    ``inputs`` 本地键（loop 另有 ``iteration``）。拼错的键在运行期只会
+    静默取 None（比较类表达式恒 False，节点被跳过），必须提前报出来。
     """
-    if params is None:
-        return []
-    if not isinstance(params, dict):
-        return [f"params 必须是映射(dict)，实际是 {type(params).__name__}"]
-
-    errors: list[str] = []
-    clash = sorted(set(params) & set(node_names))
-    if clash:
-        errors.append(f"输入参数键与节点名冲突: {', '.join(clash)}")
-
-    for name, spec in params.items():
-        if not isinstance(spec, dict):
-            errors.append(f"参数 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
-            continue
-        unknown = set(spec) - _PARAM_FIELDS
-        if unknown:
-            errors.append(f"参数 {name!r}: 不支持的字段 {sorted(unknown)}")
-        for text_field in ("label", "description"):
-            if spec.get(text_field) is not None and not isinstance(spec[text_field], str):
-                errors.append(f"参数 {name!r}: {text_field} 必须是字符串")
-        required_value = spec.get("required")
-        if required_value is not None and not isinstance(required_value, bool):
-            errors.append(f"参数 {name!r}: required 必须是布尔值")
-        multiline = spec.get("multiline", False)
-        if not isinstance(multiline, bool):
-            errors.append(f"参数 {name!r}: multiline 必须是布尔值")
-        file_flag = spec.get("file", False)
-        if not isinstance(file_flag, bool):
-            errors.append(f"参数 {name!r}: file 必须是布尔值")
-    return errors
+    if not isinstance(condition, str) or not condition.strip():
+        return [
+            f"节点 {name!r}（{kind}）: condition 必须是非空表达式字符串"
+            f"（如 intent == chat / merge / not flag），实际是 {condition!r}"
+        ]
+    try:
+        root = condition_key(condition)
+    except ValueError as exc:
+        return [f"节点 {name!r}（{kind}）: {exc}"]
+    if available is not None and root not in available:
+        return [
+            f"节点 {name!r}（{kind}）: condition 引用的 {root!r}"
+            f" 不是参数键、节点名或 inputs 本地键"
+        ]
+    return []
 
 
 def validate_inputs(
@@ -221,40 +230,37 @@ def validate_inputs(
     return errors
 
 
-def validate_condition(
-    condition: Any, name: str, kind: str, available: set[str] | None = None
-) -> list[str]:
-    """condition 声明校验：必须是表达式字符串（``intent == chat`` / ``merge``）。
+# ------------------------------------------------------------------
+# 汇总（config 级）
+# ------------------------------------------------------------------
 
-    表达式语法与引用键都在载入期核对 —— 键 = params ∪ 节点名 ∪ 本节点
-    ``inputs`` 本地键（loop 另有 ``iteration``）。拼错的键在运行期只会
-    静默取 None（比较类表达式恒 False，节点被跳过），必须提前报出来。
+
+def validate_params(config: dict[str, Any]) -> list[str]:
+    """inputs 声明校验（顶层类型 + 键与节点名冲突 + 每键形状）
     """
-    if not isinstance(condition, str) or not condition.strip():
-        return [
-            f"节点 {name!r}（{kind}）: condition 必须是非空表达式字符串"
-            f"（如 intent == chat / merge / not flag），实际是 {condition!r}"
-        ]
-    try:
-        keys = condition_keys(condition)
-    except ValueError as exc:
-        return [f"节点 {name!r}（{kind}）: {exc}"]
-    if available is not None:
-        missing = [k for k in keys if k not in available]
-        if missing:
-            return [
-                f"节点 {name!r}（{kind}）: condition 引用的 {', '.join(repr(k) for k in missing)}"
-                f" 不是参数键、节点名或 inputs 本地键"
-            ]
-    return []
+    params = config.get("inputs")
+    if params is None:
+        return []
+    if not isinstance(params, dict):
+        return [f"params 必须是映射(dict)，实际是 {type(params).__name__}"]
 
+    errors: list[str] = []
+    clash = sorted(set(params) & set(config.get("nodes") or {}))
+    if clash:
+        errors.append(f"输入参数键与节点名冲突: {', '.join(clash)}")
 
-#: Fields each kind accepts; anything else in a node spec raises.
-_KIND_FIELDS = {
-    "node": {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition", "metadata"},
-    "human": {"label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
-    "loop": {"label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
-}
+    for name, spec in params.items():
+        if not isinstance(spec, dict):
+            errors.append(f"参数 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
+            continue
+        unknown = set(spec) - _PARAM_FIELDS
+        if unknown:
+            errors.append(f"参数 {name!r}: 不支持的字段 {sorted(unknown)}")
+        for bool_field in ("required", "multiline", "file"):  # None = 未设置，跳过
+            value = spec.get(bool_field)
+            if value is not None and not isinstance(value, bool):
+                errors.append(f"参数 {name!r}: {bool_field} 必须是布尔值")
+    return errors
 
 
 def validate_nodes(config: dict[str, Any]) -> list[str]:
@@ -291,17 +297,17 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
 
         edges[name] = spec.get("depends_on")
 
-        # 数据流接线（node/human）：{本地键: 来源键或字面量}。先于 condition
-        # 校验 —— 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键
-        wiring = spec.get("inputs") if kind in ("node", "human") else None
+        # 数据流接线：{本地键: $来源键或字面量}，先于 condition 校验（哪些 kind 有 inputs 由白名单决定）
+        wiring = spec.get("inputs") if "inputs" in allowed else None
         if wiring:
             errors.extend(validate_wiring(wiring, name, available_ref))
-            wiring = wiring if isinstance(wiring, dict) else {}  # 类型已报错，置空防派生校验出错
-            wirings[name] = wiring
+            if isinstance(wiring, dict):
+                wirings[name] = wiring
 
         condition_key = spec.get("condition")
         if condition_key is not None:
-            cond_available = available_ref | set(wiring or {})
+            # 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键（接线畸形时为空）
+            cond_available = available_ref | (set(wiring) if isinstance(wiring, dict) else set())
             if kind == "loop":
                 cond_available |= {"iteration"}  # 循环谓词视图每轮注入 iteration
             errors.extend(validate_condition(condition_key, name, kind, cond_available))
@@ -337,18 +343,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
 
 
 def validate_config(config: dict[str, Any]) -> list[str]:
-    """校验完整的 DAG 配置，返回全部错误（空列表 = 合法）；不解析/构建。
-
-    收集所有错误而非遇错即抛：人工编辑 YAML 时一次看到全部问题，
-    避免"修复 → 重跑 → 发现下一个错"的多轮循环。
-
-    校验项：
-    - inputs 声明（字段合法性、与节点名无冲突）
-    - nodes 声明（必须声明且非空、字段合法性、inputs 接线引用与上游链、
-      依赖存在性、环；loop body 递归同查）
-    - review 声明格式和键引用（必须在 inputs 键或节点名中）
+    """校验完整 DAG 配置（params + nodes 及其接线/condition/review/图），返回全部错误。
     """
-    return (
-        validate_params(config.get("inputs"), config.get("nodes") or {})
-        + validate_nodes(config)
-    )
+    return validate_params(config) + validate_nodes(config)

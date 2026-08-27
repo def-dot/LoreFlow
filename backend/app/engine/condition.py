@@ -120,7 +120,6 @@ def compile_condition(expr: str) -> ConditionFunc:
     return cond
 
 
-def condition_keys(expr: str) -> list[str]:
+def condition_key(expr: str) -> str:
     """表达式引用的根键（点路径取首段）—— 加载期核对键存在的依据。"""
-    _, key, _, _ = _parse(expr)
-    return [key.split(".")[0]]
+    return _parse(expr)[1].split(".")[0]

@@ -401,7 +401,8 @@ class DAG:
             errors.append("DAG 没有节点")
             return errors
 
-        errors.extend(validate_params(self.params, self._nodes.keys()))
+        # 程序化 DAG 无 config —— 按函数入参形状合成（只用到 inputs/nodes 键）
+        errors.extend(validate_params({"inputs": self.params, "nodes": self._nodes}))
 
         available = set(self._nodes) | set(self.params)
         for node in self._nodes.values():
