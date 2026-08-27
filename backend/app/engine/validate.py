@@ -225,7 +225,7 @@ def validate_inputs(
         if not spec.get("required"):
             continue
         value = (inputs or {}).get(name)
-        if value is None or (isinstance(value, str) and not value.strip()):
+        if not value:
             missing.append(name)
     if missing:
         errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
