@@ -120,11 +120,10 @@ def _validate_wiring(wiring: Any, name: str, available: set[str]) -> list[str]:
     return errors
 
 
-def validate_wiring_upstream(
+def _validate_wiring_upstream(
     wirings: Mapping[str, Mapping[str, Any]], edges: Mapping[str, Any]
 ) -> list[str]:
-    """接线来源若是节点，必须在声明者的 depends_on 上游链中
-    （数据只能来自已声明的上游或参数；根键是参数的引用不受此限）。"""
+    """接线来源若是节点，必须在声明者的 depends_on 上游链中"""
     errors: list[str] = []
     for name, wiring in wirings.items():
         ancestors = _ancestors(name, edges)
@@ -198,6 +197,17 @@ def _validate_condition(
     return []
 
 
+def _validate_condition_upstream(
+    cond_roots: Mapping[str, str], edges: Mapping[str, Any]
+) -> list[str]:
+    """condition 的 $节点 引用必须在声明者的 depends_on 上游链中。"""
+    errors: list[str] = []
+    for name, root in cond_roots.items():
+        if root in edges and root not in _ancestors(name, edges):
+            errors.append(f"节点 {name!r}: condition 引用的 {root!r} 不在 depends_on 上游链中")
+    return errors
+
+
 def validate_inputs(
     inputs: Any, params: Mapping[str, Mapping[str, Any]]
 ) -> list[str]:
@@ -220,11 +230,6 @@ def validate_inputs(
     if missing:
         errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
     return errors
-
-
-# ------------------------------------------------------------------
-# 汇总（config 级）
-# ------------------------------------------------------------------
 
 
 def validate_params(config: dict[str, Any]) -> list[str]:
@@ -308,7 +313,7 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 try:
                     cond_roots[name] = _parse(condition)[1].split(".")[0]
                 except ValueError:
-                    pass  # 语法错误已由 _validate_condition 报
+                    pass
 
         # kind 特定必需字段校验
         if kind == "node":
@@ -336,12 +341,8 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 )
 
     errors.extend(validate_graph(edges))
-    errors.extend(validate_wiring_upstream(wirings, edges))
-    # condition 的 $节点 引用受同一上游链规则约束：否则来源可能尚未运行，
-    # 运行期静默取 None（比较恒 False，节点被跳过）
-    for name, root in cond_roots.items():
-        if root in edges and root not in _ancestors(name, edges):
-            errors.append(f"节点 {name!r}: condition 引用的 {root!r} 不在 depends_on 上游链中")
+    errors.extend(_validate_wiring_upstream(wirings, edges))
+    errors.extend(_validate_condition_upstream(cond_roots, edges))
     return errors
 
 
