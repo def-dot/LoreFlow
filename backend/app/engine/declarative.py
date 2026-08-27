@@ -68,18 +68,6 @@ def _wired_func(func: Callable[..., Any], wiring: dict[str, Any]) -> Callable[..
     return wired
 
 
-def _ancestors(name: str, edges: dict[str, Any]) -> set[str]:
-    """depends_on 闭包（直接上游及其全部祖先）。"""
-    seen: set[str] = set()
-    stack = [name]
-    while stack:
-        for dep in edges.get(stack.pop()) or []:
-            if dep not in seen:
-                seen.add(dep)
-                stack.append(dep)
-    return seen
-
-
 def validate_nodes(config: dict[str, Any]) -> list[str]:
     """校验顶层 nodes 声明，返回全部错误（空列表 = 合法）。
     """
@@ -95,7 +83,7 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
     available_ref = set(nodes) | (set(params) if isinstance(params, dict) else set())
 
     edges: dict[str, Any] = {}
-    wirings: dict[str, dict[str, Any]] = {}  # 校验通过的接线，供上游链检查复用
+    wirings: dict[str, dict[str, Any]] = {}  # 各节点接线，供 validate_wiring_upstream 查上游链
     for name, spec in nodes.items():
         if not isinstance(spec, dict):
             errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
@@ -119,17 +107,8 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         # 校验 —— 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键
         wiring = spec.get("inputs") if kind in ("node", "human") else None
         if wiring:
-            if not isinstance(wiring, dict):
-                errors.append(f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射")
-                wiring = {}
-            for local, source in wiring.items():
-                if not (isinstance(source, str) and source.startswith("$")):
-                    continue  # 字面量不校验来源
-                root = source[1:].partition(".")[0]  # $node.field → node
-                if root not in available_ref:
-                    errors.append(f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键")
-
-        if wiring:
+            errors.extend(validate.validate_wiring(wiring, name, available_ref))
+            wiring = wiring if isinstance(wiring, dict) else {}  # 类型已报错，置空防派生校验出错
             wirings[name] = wiring
 
         condition_key = spec.get("condition")
@@ -167,17 +146,7 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 )
 
     errors.extend(validate.validate_graph(edges))
-
-    # 接线来源若是节点，其根键必须在 depends_on 上游链中 —— 否则执行到
-    # 本节点时该来源可能尚未运行（数据只能来自已声明的上游或参数）
-    for name, wiring in wirings.items():
-        ancestors = _ancestors(name, edges)
-        for local, source in wiring.items():
-            if not (isinstance(source, str) and source.startswith("$")):
-                continue  # 字面量不校验来源
-            root = source[1:].partition(".")[0]  # $node.field → node
-            if root in nodes and root not in ancestors:
-                errors.append(f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不在 depends_on 上游链中")
+    errors.extend(validate.validate_wiring_upstream(wirings, edges))
     return errors
 
 
@@ -210,8 +179,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
 
     校验项：
     - inputs 声明（字段合法性、与节点名无冲突）
-    - nodes 声明（必须声明且非空、字段合法性、引用校验、依赖存在性、环；
-      loop body 递归同查）
+    - nodes 声明（必须声明且非空、字段合法性、inputs 接线引用与上游链、
+      依赖存在性、环；loop body 递归同查）
     - review 声明格式和键引用（必须在 inputs 键或节点名中）
     """
     return (

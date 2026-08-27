@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 from .condition import condition_keys
@@ -70,6 +70,59 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
         )
         if cycle:
             errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
+    return errors
+
+
+def _ref_roots(wiring: Mapping[str, Any]) -> Iterator[tuple[str, str]]:
+    """接线里的 ``$`` 引用项，产出 ``(本地键, 根键)``；字面量跳过。"""
+    for local, source in wiring.items():
+        if isinstance(source, str) and source.startswith("$"):
+            yield local, source[1:].partition(".")[0]  # $node.field → node
+
+
+def validate_wiring(wiring: Any, name: str, available: set[str]) -> list[str]:
+    """节点 inputs 接线声明校验（映射类型 + 引用根键 ∈ 节点名 ∪ 参数键）
+
+    ``{本地键: $来源键或字面量}``；``$`` 前缀字符串按根键（``$node.field``
+    取 ``node``）查 ``available``，字面量不校验来源。
+    """
+    if not isinstance(wiring, dict):
+        return [f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射"]
+    return [
+        f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键"
+        for local, root in _ref_roots(wiring)
+        if root not in available
+    ]
+
+
+def _ancestors(name: str, edges: Mapping[str, Any]) -> set[str]:
+    """depends_on 闭包（直接上游及其全部祖先）。"""
+    seen: set[str] = set()
+    stack = [name]
+    while stack:
+        for dep in edges.get(stack.pop()) or []:
+            if dep not in seen:
+                seen.add(dep)
+                stack.append(dep)
+    return seen
+
+
+def validate_wiring_upstream(
+    wirings: Mapping[str, Mapping[str, Any]], edges: Mapping[str, Any]
+) -> list[str]:
+    """接线来源节点校验：根键若是节点，必须在声明者的 depends_on 上游链中。
+
+    否则执行到本节点时该来源可能尚未运行 —— 数据只能来自已声明的上游
+    或参数（``edges`` 键集 = 节点名集，根键是参数的引用不受此限）。
+    """
+    errors: list[str] = []
+    for name, wiring in wirings.items():
+        ancestors = _ancestors(name, edges)
+        for local, root in _ref_roots(wiring):
+            if root in edges and root not in ancestors:
+                errors.append(
+                    f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不在 depends_on 上游链中"
+                )
     return errors
 
 
