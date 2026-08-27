@@ -242,7 +242,7 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
 
 def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
-    errors = validate_params({"query": {"required": "yes"}})
+    errors = validate_params({"inputs": {"query": {"required": "yes"}}})
     assert errors == ["参数 'query': required 必须是布尔值"]
 
 
@@ -499,7 +499,7 @@ def test_validate_nodes_rejects() -> None:
 
     # loop 类型缺少 body / condition、condition 引用未知键（condition 校验先于 body 检查）
     assert validate_nodes({"nodes": {"a": {"kind": "loop", "condition": "x"}}}) == [
-        "节点 'a'（loop）: condition 引用的 'x' 不是参数键、节点名或 inputs 本地键",
+        "节点 'a': condition 引用的 'x' 不是参数键、节点名或 inputs 本地键",
         "循环节点 'a': 需要非空的 'body' 映射",
     ]
     assert validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}}}) == [
@@ -773,13 +773,53 @@ async def test_condition_expression_dollar_reference() -> None:
     assert results["gold"].status is NodeStatus.SKIPPED
 
 
+async def test_condition_boolean_constants() -> None:
+    """condition: true/false 布尔常量 —— false 当开关恒跳过，true 恒执行。"""
+    config = {
+        "nodes": {
+            "off": {"type": "cfg_fetch", "condition": False},
+            "on": {"type": "cfg_fetch", "condition": True},
+        },
+    }
+    assert validate_config(config) == []
+    results = await load_dag(config).run()
+    assert results["off"].status is NodeStatus.SKIPPED
+    assert results["on"].status is NodeStatus.COMPLETED
+
+    # loop 的 condition: false 合法（body 一轮不跑）；condition: null 等同未声明
+    assert validate_config({"nodes": {
+        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": False},
+    }}) == []
+    assert validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "condition": None},
+    }}) == []
+
+
+def test_condition_ref_must_be_upstream() -> None:
+    """condition 的 $节点 引用与 inputs 接线受同一上游链规则约束。"""
+    assert validate_config({"nodes": {
+        "甲": {"type": "cfg_fetch"},
+        "乙": {"type": "cfg_fetch", "condition": "$甲.title == x"},  # 未声明依赖
+    }}) == ["节点 '乙': condition 引用的 '甲' 不在 depends_on 上游链中"]
+
+    # 隔代上游可以；参数引用不受此限
+    assert validate_config({"nodes": {
+        "甲": {"type": "cfg_fetch"},
+        "乙": {"type": "cfg_fetch", "depends_on": ["甲"]},
+        "丙": {"type": "cfg_fetch", "depends_on": ["乙"], "condition": "$甲.title == x"},
+    }}) == []
+    assert validate_config({"nodes": {
+        "甲": {"type": "cfg_fetch", "condition": "$query == x"},
+    }, "inputs": {"query": {}}}) == []
+
+
 def test_condition_expression_validation() -> None:
     """表达式的载入期校验：类型、语法、引用键存在性、loop 的 iteration。"""
     # 旧的单键映射形式（函数调用）不再支持
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": {"t_eq": "a"}},
     }}) == [
-        "节点 'a'（node）: condition 必须是非空表达式字符串"
+        "节点 'a': condition 必须是非空表达式字符串"
         "（如 intent == chat / merge / not flag），实际是 {'t_eq': 'a'}"
     ]
 
@@ -787,19 +827,19 @@ def test_condition_expression_validation() -> None:
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": "== chat"},
     }}) == [
-        "节点 'a'（node）: 条件表达式 '== chat' 无法解析"
+        "节点 'a': 条件表达式 '== chat' 无法解析"
         "（写法如 ``intent == chat``、``merge``、``not flag``）"
     ]
 
     # 引用键不存在（拼错）—— 运行期只会静默取 None（恒 False 跳过），必须载入期报出
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": "pick2 == a"},
-    }}) == ["节点 'a'（node）: condition 引用的 'pick2' 不是参数键、节点名或 inputs 本地键"]
+    }}) == ["节点 'a': condition 引用的 'pick2' 不是参数键、节点名或 inputs 本地键"]
 
     # $ 引用前缀：剥掉后核对根键（报 typo 不报 $typo）；根键存在即合法
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": "$typo.field == x"},
-    }}) == ["节点 'a'（node）: condition 引用的 'typo' 不是参数键、节点名或 inputs 本地键"]
+    }}) == ["节点 'a': condition 引用的 'typo' 不是参数键、节点名或 inputs 本地键"]
     assert validate_config({"nodes": {
         "data": {"type": "cfg_fetch"},
         "gold": {"type": "cfg_fetch", "depends_on": ["data"], "condition": "$data.title == gold"},
@@ -811,4 +851,4 @@ def test_condition_expression_validation() -> None:
     }}) == []
     assert validate_config({"nodes": {
         "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "rounds < 3"},
-    }}) == ["节点 'l'（loop）: condition 引用的 'rounds' 不是参数键、节点名或 inputs 本地键"]
+    }}) == ["节点 'l': condition 引用的 'rounds' 不是参数键、节点名或 inputs 本地键"]

@@ -35,9 +35,12 @@ def _wired_view(ctx: dict[str, Any], wiring: dict[str, Any]) -> dict[str, Any]:
     return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
 
 
-def _condition_func(expr: str, wiring: dict[str, Any] | None = None) -> ConditionFunc:
-    """条件表达式（+ 可选接线）→ 可调用谓词（语法见 app.engine.condition）。
+def _condition_func(expr: str | bool, wiring: dict[str, Any] | None = None) -> ConditionFunc:
+    """条件（表达式字符串或 true/false 常量，+ 可选接线）→ 可调用谓词。
     """
+    if isinstance(expr, bool):
+        return lambda ctx: expr  # 常量开关：true = 恒执行 / false = 恒跳过
+
     cond = compile_condition(expr)
 
     if not wiring:
@@ -114,7 +117,7 @@ def load_dag(
 
         condition = spec.get("condition")
         wiring = spec.get("inputs")
-        cond_func = _condition_func(condition, wiring) if condition else None
+        cond_func = _condition_func(condition, wiring) if condition is not None else None
 
         if kind == "human":
             human = dag.human_node(

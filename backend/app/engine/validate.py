@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from app.registry import REGISTRY
 
-from .condition import condition_key
+from .condition import _parse
 
 
 # ------------------------------------------------------------------
@@ -106,27 +106,18 @@ def _ancestors(name: str, edges: Mapping[str, Any]) -> set[str]:
     return seen
 
 
-# ------------------------------------------------------------------
-# 数据流接线（inputs：$引用 或字面量）
-# ------------------------------------------------------------------
-
-
-def _ref_roots(wiring: Mapping[str, Any]) -> Iterator[tuple[str, str]]:
-    """接线里的 ``$`` 引用项，产出 ``(本地键, 根键)``；字面量跳过。"""
-    for local, source in wiring.items():
-        if isinstance(source, str) and source.startswith("$"):
-            yield local, source[1:].partition(".")[0]  # $node.field → node
-
-
-def validate_wiring(wiring: Any, name: str, available: set[str]) -> list[str]:
+def _validate_wiring(wiring: Any, name: str, available: set[str]) -> list[str]:
     """节点 inputs 接线校验：必须是映射，``$`` 引用根键 ∈ 节点名 ∪ 参数键。"""
     if not isinstance(wiring, dict):
         return [f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射"]
-    return [
-        f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键"
-        for local, root in _ref_roots(wiring)
-        if root not in available
-    ]
+    errors: list[str] = []
+    for local, source in wiring.items():
+        if not (isinstance(source, str) and source.startswith("$")):
+            continue  # 字面量不校验来源
+        root = source[1:].partition(".")[0]  # $node.field → node
+        if root not in available:
+            errors.append(f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键")
+    return errors
 
 
 def validate_wiring_upstream(
@@ -137,7 +128,10 @@ def validate_wiring_upstream(
     errors: list[str] = []
     for name, wiring in wirings.items():
         ancestors = _ancestors(name, edges)
-        for local, root in _ref_roots(wiring):
+        for local, source in wiring.items():
+            if not (isinstance(source, str) and source.startswith("$")):
+                continue  # 字面量不校验来源
+            root = source[1:].partition(".")[0]  # $node.field → node
             if root in edges and root not in ancestors:
                 errors.append(
                     f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不在 depends_on 上游链中"
@@ -180,28 +174,26 @@ def validate_review(review: Any, available: Iterable[str]) -> list[str]:
     return errors
 
 
-def validate_condition(
-    condition: Any, name: str, kind: str, available: set[str] | None = None
+def _validate_condition(
+    condition: Any, name: str, available: set[str] | None = None
 ) -> list[str]:
-    """condition 声明校验：必须是表达式字符串（``intent == chat`` / ``merge``）。
-
-    表达式语法与引用键都在载入期核对 —— 键 = params ∪ 节点名 ∪ 本节点
-    ``inputs`` 本地键（loop 另有 ``iteration``）。拼错的键在运行期只会
-    静默取 None（比较类表达式恒 False，节点被跳过），必须提前报出来。
+    """condition 声明校验：布尔常量（``true``/``false`` 开关）或表达式字符串。
     """
+    if isinstance(condition, bool):
+        return []  # 未声明（YAML ``condition:`` 空值）/ true-false 常量开关
+    
     if not isinstance(condition, str) or not condition.strip():
         return [
-            f"节点 {name!r}（{kind}）: condition 必须是非空表达式字符串"
+            f"节点 {name!r}: condition 必须是非空表达式字符串"
             f"（如 intent == chat / merge / not flag），实际是 {condition!r}"
         ]
     try:
-        root = condition_key(condition)
+        root = _parse(condition)[1].split(".")[0]  # 根键 = 引用键的点路径首段
     except ValueError as exc:
-        return [f"节点 {name!r}（{kind}）: {exc}"]
-    if available is not None and root not in available:
+        return [f"节点 {name!r}: {exc}"]
+    if root not in available:
         return [
-            f"节点 {name!r}（{kind}）: condition 引用的 {root!r}"
-            f" 不是参数键、节点名或 inputs 本地键"
+            f"节点 {name!r}: condition 引用的 {root!r} 不是参数键、节点名或 inputs 本地键"
         ]
     return []
 
@@ -269,15 +261,18 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
     nodes = config.get("nodes")
     if not nodes:
         return ["流水线至少需要一个节点"]
+    
     if not isinstance(nodes, dict):
         return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
 
     errors: list[str] = []
-    params = config.get("inputs")
-    available_ref = set(nodes) | (set(params) if isinstance(params, dict) else set())
+    params = config.get("inputs") or {}  # YAML ``inputs:`` 空值 → None
+    available_ref = set(params) | set(nodes)  # 接线/条件/review 可引用的键
 
     edges: dict[str, Any] = {}
-    wirings: dict[str, dict[str, Any]] = {}  # 各节点接线，供 validate_wiring_upstream 查上游链
+    wirings: dict[str, dict[str, Any]] = {}
+    cond_roots: dict[str, str] = {}  # 节点名 → condition 根键，上游链检查与接线同规则
+
     for name, spec in nodes.items():
         if not isinstance(spec, dict):
             errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
@@ -297,20 +292,27 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
 
         edges[name] = spec.get("depends_on")
 
-        # 数据流接线：{本地键: $来源键或字面量}，先于 condition 校验（哪些 kind 有 inputs 由白名单决定）
-        wiring = spec.get("inputs") if "inputs" in allowed else None
+        wiring = spec.get("inputs")
         if wiring:
-            errors.extend(validate_wiring(wiring, name, available_ref))
+            errors.extend(_validate_wiring(wiring, name, available_ref))
             if isinstance(wiring, dict):
                 wirings[name] = wiring
 
-        condition_key = spec.get("condition")
-        if condition_key is not None:
-            # 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键（接线畸形时为空）
+        # 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键（接线畸形时为空）
+        
+        
+
+        condition = spec.get("condition")
+        if condition:
             cond_available = available_ref | (set(wiring) if isinstance(wiring, dict) else set())
             if kind == "loop":
                 cond_available |= {"iteration"}  # 循环谓词视图每轮注入 iteration
-            errors.extend(validate_condition(condition_key, name, kind, cond_available))
+            errors.extend(_validate_condition(condition, name, cond_available))
+            if isinstance(condition, str):
+                try:
+                    cond_roots[name] = _parse(condition)[1].split(".")[0]
+                except ValueError:
+                    pass  # 语法错误已由 _validate_condition 报
 
         # kind 特定必需字段校验
         if kind == "node":
@@ -329,7 +331,7 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             body = spec.get("body")
             if not isinstance(body, dict) or not body:
                 errors.append(f"循环节点 {name!r}: 需要非空的 'body' 映射")
-            if not condition_key:
+            if condition is None:  # condition: false 是合法的循环条件（body 一轮不跑）
                 errors.append(f"循环节点 {name!r}: 需要 'condition' 表达式")
             elif isinstance(body, dict) and body:
                 errors.extend(
@@ -339,6 +341,11 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
 
     errors.extend(validate_graph(edges))
     errors.extend(validate_wiring_upstream(wirings, edges))
+    # condition 的 $节点 引用受同一上游链规则约束：否则来源可能尚未运行，
+    # 运行期静默取 None（比较恒 False，节点被跳过）
+    for name, root in cond_roots.items():
+        if root in edges and root not in _ancestors(name, edges):
+            errors.append(f"节点 {name!r}: condition 引用的 {root!r} 不在 depends_on 上游链中")
     return errors
 
 
