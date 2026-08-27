@@ -1,43 +1,35 @@
 """
-Declarative configuration layer for DAG Flow.
+Declarative config → DAG 构建（校验全部在 app.engine.validate）。
 """
 
 from __future__ import annotations
 
 import yaml
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from app.registry import REGISTRY
 
 from . import validate
-from .condition import compile_condition, lookup
+from .condition import compile_condition
 from .dag import DAG
 from .node import ApproverFunc, ConditionFunc, Node
 from .resolve import parse_retry
 from .types import NodeEventFunc
 
 
-#: Fields each kind accepts; anything else in a node spec raises.
-_KIND_FIELDS = {
-    "node": {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition", "metadata"},
-    "human": {"label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
-    "loop": {"label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
-}
-
-
 def _wired_view(ctx: dict[str, Any], wiring: dict[str, Any]) -> dict[str, Any]:
     """接线 → 节点视图 ``{**ctx, **{本地键: 视图值}}``。
-
-    值的语义："$" 前缀字符串 = 引用，去前缀按键（可带 ``.field`` 点
-    路径下钻字段）取 ctx 值（上游输出/参数；缺失或被条件跳过时为
-    None，由节点守卫转中文报错、条件按 False）；其余 = 字面量原样
-    注入。视图不写回共享 ctx —— 各节点同名本地键互不串扰。
     """
     def resolve(v: Any) -> Any:
         if isinstance(v, str) and v.startswith("$"):
-            return lookup(ctx, v[1:])
+            value = ctx
+            for part in v[1:].split("."):
+                if not isinstance(value, Mapping) or part not in value:
+                    return None
+                value = value[part]
+            return value
         return v
 
     return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
@@ -45,9 +37,6 @@ def _wired_view(ctx: dict[str, Any], wiring: dict[str, Any]) -> dict[str, Any]:
 
 def _condition_func(expr: str, wiring: dict[str, Any] | None = None) -> ConditionFunc:
     """条件表达式（+ 可选接线）→ 可调用谓词（语法见 app.engine.condition）。
-
-    wiring 非空时在数据流接线的节点视图上求值 —— 引用键缺失/被条件
-    跳过时取到 None，比较类表达式自然为 False。
     """
     cond = compile_condition(expr)
 
@@ -60,94 +49,15 @@ def _condition_func(expr: str, wiring: dict[str, Any] | None = None) -> Conditio
     return wired
 
 
-def _wired_func(func: Callable[..., Any], wiring: dict[str, Any]) -> Callable[..., Any]:
+def _wired_func(func: Callable[..., Any], wiring: dict[str, Any] | None = None) -> Callable[..., Any]:
     """数据流接线视图套在节点函数外（视图语义见 _wired_view；工厂按参捕获，
     循环内多次调用无闭包晚绑定）。"""
+    if not wiring:
+        return func
+    
     async def wired(ctx: dict[str, Any]) -> Any:
         return await func(_wired_view(ctx, wiring))
     return wired
-
-
-def validate_nodes(config: dict[str, Any]) -> list[str]:
-    """校验顶层 nodes 声明，返回全部错误（空列表 = 合法）。
-    """
-    nodes = config.get("nodes")
-    if not nodes:
-        return ["流水线至少需要一个节点"]
-    if not isinstance(nodes, dict):
-        return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
-
-    errors: list[str] = []
-    params = config.get("inputs")
-    
-    available_ref = set(nodes) | (set(params) if isinstance(params, dict) else set())
-
-    edges: dict[str, Any] = {}
-    wirings: dict[str, dict[str, Any]] = {}  # 各节点接线，供 validate_wiring_upstream 查上游链
-    for name, spec in nodes.items():
-        if not isinstance(spec, dict):
-            errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
-            edges[name] = []
-            continue
-
-        kind = spec.get("kind", "node")
-        allowed = _KIND_FIELDS.get(kind)
-        if allowed is None:
-            errors.append(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
-            edges[name] = []
-            continue
-
-        unknown = set(spec) - {"kind"} - allowed
-        if unknown:
-            errors.append(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
-
-        edges[name] = spec.get("depends_on")
-
-        # 数据流接线（node/human）：{本地键: 来源键或字面量}。先于 condition
-        # 校验 —— 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键
-        wiring = spec.get("inputs") if kind in ("node", "human") else None
-        if wiring:
-            errors.extend(validate.validate_wiring(wiring, name, available_ref))
-            wiring = wiring if isinstance(wiring, dict) else {}  # 类型已报错，置空防派生校验出错
-            wirings[name] = wiring
-
-        condition_key = spec.get("condition")
-        if condition_key is not None:
-            cond_available = available_ref | set(wiring or {})
-            if kind == "loop":
-                cond_available |= {"iteration"}  # 循环谓词视图每轮注入 iteration
-            errors.extend(
-                validate.validate_condition(condition_key, name, kind, cond_available)
-            )
-
-        # kind 特定必需字段校验
-        if kind == "node":
-            type_key = spec.get("type")
-            if not type_key:
-                errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
-            elif type_key not in REGISTRY:
-                errors.append(f"节点 {name!r}（node）: 类型函数 {type_key!r} 未注册")
-        elif kind == "human":
-            review_spec = spec.get("review")
-            if review_spec is not None:
-                errors.extend(
-                    f"审核节点 {name!r}: {msg}" for msg in validate.validate_review(review_spec, available_ref)
-                )
-        elif kind == "loop":
-            body = spec.get("body")
-            if not isinstance(body, dict) or not body:
-                errors.append(f"循环节点 {name!r}: 需要非空的 'body' 映射")
-            if not condition_key:
-                errors.append(f"循环节点 {name!r}: 需要 'condition' 表达式")
-            elif isinstance(body, dict) and body:
-                errors.extend(
-                    f"循环节点 {name!r}: {msg}"
-                    for msg in validate_nodes({"nodes": body})
-                )
-
-    errors.extend(validate.validate_graph(edges))
-    errors.extend(validate.validate_wiring_upstream(wirings, edges))
-    return errors
 
 
 def read_yaml(path: str | Path) -> tuple[str, Any]:
@@ -171,24 +81,6 @@ def read_yaml(path: str | Path) -> tuple[str, Any]:
     return raw, config
 
 
-def validate_config(config: dict[str, Any]) -> list[str]:
-    """校验完整的 DAG 配置，返回全部错误（空列表 = 合法）；不解析/构建。
-
-    收集所有错误而非遇错即抛：人工编辑 YAML 时一次看到全部问题，
-    避免"修复 → 重跑 → 发现下一个错"的多轮循环。
-
-    校验项：
-    - inputs 声明（字段合法性、与节点名无冲突）
-    - nodes 声明（必须声明且非空、字段合法性、inputs 接线引用与上游链、
-      依赖存在性、环；loop body 递归同查）
-    - review 声明格式和键引用（必须在 inputs 键或节点名中）
-    """
-    return (
-        validate.validate_params(config.get("inputs"), config.get("nodes") or {})
-        + validate_nodes(config)
-    )
-
-
 def load_dag(
     source: str | Path | dict[str, Any],
     approver: ApproverFunc | None = None,
@@ -203,7 +95,7 @@ def load_dag(
     else:
         raise ValueError(f"配置必须是 dict 或文件路径，实际是 {type(source).__name__}")
 
-    errors = validate_config(config)
+    errors = validate.validate_config(config)
     if errors:
         raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
 
@@ -220,9 +112,11 @@ def load_dag(
         deps = spec.get("depends_on") or []
         retry = parse_retry(spec.get("retry"))
 
+        condition = spec.get("condition")
+        wiring = spec.get("inputs")
+        cond_func = _condition_func(condition, wiring) if condition else None
+
         if kind == "human":
-            condition = spec.get("condition")
-            cond_func = _condition_func(condition, spec.get("inputs")) if condition else None
             human = dag.human_node(
                 name,
                 depends_on=deps,
@@ -243,7 +137,7 @@ def load_dag(
             loop = dag.loop_node(
                 name,
                 body_nodes=list(body_dag.nodes.values()),
-                condition=compile_condition(spec["condition"]),
+                condition=cond_func,
                 depends_on=deps,
                 max_iterations=int(spec.get("max_iterations", 100)),
                 retry=retry,
@@ -253,14 +147,8 @@ def load_dag(
                 loop.metadata["label"] = spec["label"]
 
         else:
-            condition = spec.get("condition")
-            wiring = spec.get("inputs")
-            cond_func = _condition_func(condition, wiring) if condition else None
-
             node_type = REGISTRY[spec["type"]]
-            func = node_type.func
-            if wiring:
-                func = _wired_func(func, wiring)
+            func = _wired_func(node_type.func, wiring)
             dag.add_node(
                 Node(
                     name=name,

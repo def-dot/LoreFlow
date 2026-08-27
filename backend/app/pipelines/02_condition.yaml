@@ -24,8 +24,7 @@ nodes:
     type: rag_retrieve
     label: 知识库检索
     depends_on: [intent_recognition]
-    condition: intent == rag
-    inputs: {intent: $intent_recognition.intent}
+    condition: $intent_recognition.intent == rag
 
   llm_rag_reply:
     type: llm_rag_reply

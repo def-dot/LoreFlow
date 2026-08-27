@@ -15,8 +15,9 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
-from app.engine.declarative import read_yaml, validate_config
+from app.engine.declarative import read_yaml
 from app.engine.resolve import parse_retry
+from app.engine.validate import validate_config
 from app.registry import REGISTRY
 
 logger = get_logger(__name__)

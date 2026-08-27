@@ -5,12 +5,14 @@ from typing import Any, Literal
 import pytest
 
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
-from app.engine.declarative import (
-    validate_config,
-    validate_nodes,
-)
 from app.engine.resolve import parse_retry
-from app.engine.validate import validate_inputs, validate_params, validate_review
+from app.engine.validate import (
+    validate_config,
+    validate_inputs,
+    validate_nodes,
+    validate_params,
+    validate_review,
+)
 from app.registry import REGISTRY, NodeType
 
 
@@ -749,6 +751,26 @@ async def test_condition_expression_on_wired_key() -> None:
     assert results["gold"].status is NodeStatus.SKIPPED
 
 
+async def test_condition_expression_dollar_reference() -> None:
+    """$ 引用前缀：condition 直接引用上游输出字段，无需 inputs 接线中转。"""
+    config = {
+        "nodes": {
+            "data": {"type": "cfg_fetch"},
+            "gold": {
+                "type": "cfg_fetch",
+                "depends_on": ["data"],
+                "condition": "$data.title == 'DAG Flow v0.1'",
+            },
+        },
+    }
+    results = await load_dag(config).run()
+    assert results["gold"].status is NodeStatus.COMPLETED
+
+    config["nodes"]["gold"]["condition"] = "$data.title == nope"
+    results = await load_dag(config).run()
+    assert results["gold"].status is NodeStatus.SKIPPED
+
+
 def test_condition_expression_validation() -> None:
     """表达式的载入期校验：类型、语法、引用键存在性、loop 的 iteration。"""
     # 旧的单键映射形式（函数调用）不再支持
@@ -771,6 +793,15 @@ def test_condition_expression_validation() -> None:
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": "pick2 == a"},
     }}) == ["节点 'a'（node）: condition 引用的 'pick2' 不是参数键、节点名或 inputs 本地键"]
+
+    # $ 引用前缀：剥掉后核对根键（报 typo 不报 $typo）；根键存在即合法
+    assert validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "condition": "$typo.field == x"},
+    }}) == ["节点 'a'（node）: condition 引用的 'typo' 不是参数键、节点名或 inputs 本地键"]
+    assert validate_config({"nodes": {
+        "data": {"type": "cfg_fetch"},
+        "gold": {"type": "cfg_fetch", "depends_on": ["data"], "condition": "$data.title == gold"},
+    }}) == []
 
     # loop 的条件里 iteration 可用，其余键同样核对
     assert validate_config({"nodes": {

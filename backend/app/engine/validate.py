@@ -6,6 +6,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
+from app.registry import REGISTRY
+
 from .condition import condition_keys
 
 
@@ -245,3 +247,108 @@ def validate_condition(
                 f" 不是参数键、节点名或 inputs 本地键"
             ]
     return []
+
+
+#: Fields each kind accepts; anything else in a node spec raises.
+_KIND_FIELDS = {
+    "node": {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition", "metadata"},
+    "human": {"label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
+    "loop": {"label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
+}
+
+
+def validate_nodes(config: dict[str, Any]) -> list[str]:
+    """校验顶层 nodes 声明，返回全部错误（空列表 = 合法）。
+    """
+    nodes = config.get("nodes")
+    if not nodes:
+        return ["流水线至少需要一个节点"]
+    if not isinstance(nodes, dict):
+        return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
+
+    errors: list[str] = []
+    params = config.get("inputs")
+    available_ref = set(nodes) | (set(params) if isinstance(params, dict) else set())
+
+    edges: dict[str, Any] = {}
+    wirings: dict[str, dict[str, Any]] = {}  # 各节点接线，供 validate_wiring_upstream 查上游链
+    for name, spec in nodes.items():
+        if not isinstance(spec, dict):
+            errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
+            edges[name] = []
+            continue
+
+        kind = spec.get("kind", "node")
+        allowed = _KIND_FIELDS.get(kind)
+        if allowed is None:
+            errors.append(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
+            edges[name] = []
+            continue
+
+        unknown = set(spec) - {"kind"} - allowed
+        if unknown:
+            errors.append(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
+
+        edges[name] = spec.get("depends_on")
+
+        # 数据流接线（node/human）：{本地键: 来源键或字面量}。先于 condition
+        # 校验 —— 条件可引用的键 = params ∪ 节点名 ∪ 本节点 inputs 本地键
+        wiring = spec.get("inputs") if kind in ("node", "human") else None
+        if wiring:
+            errors.extend(validate_wiring(wiring, name, available_ref))
+            wiring = wiring if isinstance(wiring, dict) else {}  # 类型已报错，置空防派生校验出错
+            wirings[name] = wiring
+
+        condition_key = spec.get("condition")
+        if condition_key is not None:
+            cond_available = available_ref | set(wiring or {})
+            if kind == "loop":
+                cond_available |= {"iteration"}  # 循环谓词视图每轮注入 iteration
+            errors.extend(validate_condition(condition_key, name, kind, cond_available))
+
+        # kind 特定必需字段校验
+        if kind == "node":
+            type_key = spec.get("type")
+            if not type_key:
+                errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
+            elif type_key not in REGISTRY:
+                errors.append(f"节点 {name!r}（node）: 类型函数 {type_key!r} 未注册")
+        elif kind == "human":
+            review_spec = spec.get("review")
+            if review_spec is not None:
+                errors.extend(
+                    f"审核节点 {name!r}: {msg}" for msg in validate_review(review_spec, available_ref)
+                )
+        elif kind == "loop":
+            body = spec.get("body")
+            if not isinstance(body, dict) or not body:
+                errors.append(f"循环节点 {name!r}: 需要非空的 'body' 映射")
+            if not condition_key:
+                errors.append(f"循环节点 {name!r}: 需要 'condition' 表达式")
+            elif isinstance(body, dict) and body:
+                errors.extend(
+                    f"循环节点 {name!r}: {msg}"
+                    for msg in validate_nodes({"nodes": body})
+                )
+
+    errors.extend(validate_graph(edges))
+    errors.extend(validate_wiring_upstream(wirings, edges))
+    return errors
+
+
+def validate_config(config: dict[str, Any]) -> list[str]:
+    """校验完整的 DAG 配置，返回全部错误（空列表 = 合法）；不解析/构建。
+
+    收集所有错误而非遇错即抛：人工编辑 YAML 时一次看到全部问题，
+    避免"修复 → 重跑 → 发现下一个错"的多轮循环。
+
+    校验项：
+    - inputs 声明（字段合法性、与节点名无冲突）
+    - nodes 声明（必须声明且非空、字段合法性、inputs 接线引用与上游链、
+      依赖存在性、环；loop body 递归同查）
+    - review 声明格式和键引用（必须在 inputs 键或节点名中）
+    """
+    return (
+        validate_params(config.get("inputs"), config.get("nodes") or {})
+        + validate_nodes(config)
+    )

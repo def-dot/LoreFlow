@@ -8,6 +8,7 @@
     condition: intent in [chat, rag]   # 成员（in / not in，值为列表）
     condition: merge                   # 裸键真值（视图值非空即真）
     condition: not flag                # 取反
+    condition: $router.intent == rag   # $ 引用前缀（与 inputs 接线同拼法，等价于省略 $）
 
 - 键在节点视图上取值（共享 ctx + ``inputs`` 接线本地键；loop 额外注入
   ``iteration``），支持 ``a.b.c`` 点路径下钻 dict 字段。加载期按
@@ -74,23 +75,10 @@ def _parse(expr: str) -> tuple[bool, str, str | None, Any]:
     value_raw = m.group("value")
     return (
         m.group("neg") is not None,
-        m.group("key"),
+        m.group("key").removeprefix("$"),  # $ 引用前缀（与 inputs 接线同拼法），等价于省略
         m.group("op"),
         _parse_value(value_raw) if value_raw is not None else None,
     )
-
-
-def lookup(view: Mapping[str, Any], key: str) -> Any:
-    """键取值：``a.b.c`` 逐段下钻 dict，任一段缺失/非 dict → None。
-
-    条件表达式与 ``inputs`` 接线（``$node.field`` 点路径）共用。
-    """
-    value: Any = view
-    for part in key.split("."):
-        if not isinstance(value, Mapping) or part not in value:
-            return None
-        value = value[part]
-    return value
 
 
 def _compare(actual: Any, op: str, expected: Any) -> bool:
@@ -119,8 +107,13 @@ def compile_condition(expr: str) -> ConditionFunc:
     """表达式字符串 → ``(视图) -> bool`` 谓词（解析一次，循环内重复求值）。"""
     neg, key, op, expected = _parse(expr)
 
-    def cond(view: dict[str, Any]) -> bool:
-        actual = lookup(view, key)
+    def cond(ctx: dict[str, Any]) -> bool:
+        actual = ctx
+        for part in key.split("."):  # a.b.c 逐段下钻 dict，缺段/非 dict → None
+            if not isinstance(actual, Mapping) or part not in actual:
+                actual = None
+                break
+            actual = actual[part]
         result = _compare(actual, op, expected) if op else bool(actual)
         return not result if neg else result
 
