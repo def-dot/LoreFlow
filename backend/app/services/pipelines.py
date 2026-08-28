@@ -123,15 +123,10 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         row["type_label"] = "循环"
         body = spec.get("body") or {}
         row["type_description"] = f"循环体 {len(body)} 个节点，上限 {spec.get('max_iterations', 100)} 轮"
-    if isinstance(cond_spec, dict):
-        # 带参条件（{函数名: 实参} 单键）：意图判定（chat）
-        fn_key, arg = next(iter(cond_spec.items()))
-        fn_type = REGISTRY.get(fn_key)
-        args = ", ".join(f"{k}={v}" for k, v in arg.items()) if isinstance(arg, dict) else str(arg)
-        row["condition_label"] = f"{fn_type.label}（{args}）" if fn_type else None
+    if isinstance(cond_spec, bool):
+        row["condition_label"] = "恒执行" if cond_spec else "恒跳过"
     elif cond_spec:
-        cond = REGISTRY.get(cond_spec)
-        row["condition_label"] = cond.label
+        row["condition_label"] = cond_spec  # 表达式原文即展示标签
     return row
 
 
