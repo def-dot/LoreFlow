@@ -12,9 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
-
-NodeKind = Literal["function", "condition"]
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -26,7 +24,6 @@ class NodeType:
 
     name: str
     func: Callable[..., Any]
-    kind: NodeKind
     label: str
     description: str
 
@@ -39,7 +36,6 @@ REGISTRY: dict[str, NodeType] = {}
 def node(
     label: str,
     description: str,
-    kind: NodeKind = "function",
     name: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """节点函数注册装饰器：在函数定义处声明元信息并自动注册。
@@ -53,7 +49,6 @@ def node(
         node_type = NodeType(
             name=node_name,
             func=func,
-            kind=kind,
             label=label,
             description=description,
         )

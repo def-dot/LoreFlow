@@ -13,7 +13,7 @@ router = APIRouter(prefix="/node-types", route_class=UnifiedResponseRoute, tags=
 async def list_node_types() -> NodeTypeListResponse:
     return NodeTypeListResponse(
         node_types=[
-            NodeTypeOut(name=t.name, kind=t.kind, label=t.label, description=t.description)
+            NodeTypeOut(name=t.name, label=t.label, description=t.description)
             for t in REGISTRY.values()
         ]
     )

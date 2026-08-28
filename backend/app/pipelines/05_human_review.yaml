@@ -14,7 +14,7 @@ inputs:
 
 nodes:
   review:
-    kind: human
+    type: human
     prompt: "请审核文章内容是否可以发布"
     review:
       title: {label: 标题}

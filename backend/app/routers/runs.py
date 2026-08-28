@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.core.response import UnifiedResponseRoute
 from app.engine import NodeStatus
 from app.models.run import RunStatus
+from app.schemas.pipelines import PipelineDetail
 from app.schemas.runs import (
     ApproveRequest,
     ApproveResponse,
@@ -17,6 +18,7 @@ from app.schemas.runs import (
     RunListSummary,
 )
 from app.services import orchestrator
+from app.services import pipelines as pipeline_service
 from app.services import reviews as review_service
 from app.services import runs as run_service
 
@@ -57,7 +59,24 @@ async def get_run(run_id: int) -> RunDetail:
     record = await run_service.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
-    return RunDetail(**record.model_dump())
+    data = record.model_dump()
+    # mermaid 读取时从钉住的 definition 现渲染：渲染格式改进能追上存量
+    # run（record.mermaid 只是创建时刻的快照，失败时回退它）
+    fresh = pipeline_service.mermaid_from_definition(record)
+    if fresh is not None:
+        data["mermaid"] = fresh
+    return RunDetail(**data)
+
+
+@router.get("/{run_id}/config", response_model=PipelineDetail)
+async def get_run_config(run_id: int) -> PipelineDetail:
+    """查看配置：run 创建时钉住的 definition 快照，与当前文件解耦。"""
+    record = await run_service.get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
+    if not record.definition:
+        raise HTTPException(status_code=404, detail="该运行没有配置快照（创建于旧版本，无 definition）")
+    return PipelineDetail(**pipeline_service.get_run_definition_detail(record))
 
 
 @router.delete("/{run_id}")

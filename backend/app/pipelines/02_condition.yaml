@@ -31,9 +31,6 @@ nodes:
     depends_on: [rag_retrieve]
     inputs: {chunks: $rag_retrieve}
 
-  # 汇合节点（any-success 语义）：互斥支路必有一条跑成，按 depends_on 声明
-  # 顺序自动取第一个非空支路输出作为最终结果（无需 inputs 接线）；
-  # 全跳过（如 intent=human）时本节点级联跳过
   final_answer:
     type: final_answer
     label: 最终答复

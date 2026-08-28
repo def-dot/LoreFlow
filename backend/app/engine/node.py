@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.registry import NodeType
 from .types import RetryPolicy
 
 #: Signature for a node's async function: receives the shared context dict, returns anything.
@@ -55,7 +56,10 @@ class Node:
 
     Attributes:
         name: Unique identifier for this node within the DAG.
-        func: Async callable that receives the shared context dict.
+        func: Async callable that receives the shared context dict (may be wrapped with input wiring).
+        node_type: Optional NodeType containing the original function and metadata for this node.
+        label: Human-readable label for this node.
+        inputs: Optional input wiring mapping from parameter names to node outputs or values.
         depends_on: Names of upstream nodes that must complete first.
         condition: Optional predicate; if it returns False the node is skipped.
         retry: Retry policy, or ``None`` for no retries.
@@ -65,6 +69,9 @@ class Node:
 
     name: str
     func: NodeFunc
+    node_type: NodeType | None = None
+    label: str = ""
+    inputs: dict[str, Any] | None = None
     depends_on: list[str] = field(default_factory=list)
     condition: ConditionFunc | None = None
     retry: RetryPolicy | None = None
@@ -81,4 +88,4 @@ class Node:
         if self.timeout:
             extras.append(f"timeout={self.timeout}s")
         tag = f", {', '.join(extras)}" if extras else ""
-        return f"Node({self.name!r}, deps=[{deps}]{tag})"
+        return f"Node({self.name!r}, label={self.label!r}, deps=[{deps}]{tag})"

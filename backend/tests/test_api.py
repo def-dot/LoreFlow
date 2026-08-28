@@ -154,19 +154,19 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
         "demo_needs_review",
     }
     assert expected <= names
-    assert set(types[0]) == {"name", "kind", "label", "description"}
+    assert set(types[0]) == {"name", "label", "description"}
 
-    conditions = [t["name"] for t in types if t["kind"] == "condition"]
-    assert conditions == [
-        "cfg_needs_report",
-        "demo_keep_iterating",
-        "demo_needs_review",
-        "intent_is",
-        "notify_long_body",
-    ]
+    # Verify specific node types exist
+    node_names = [t["name"] for t in types]
+    assert "cfg_needs_report" in node_names
+    assert "demo_keep_iterating" in node_names
+    assert "demo_needs_review" in node_names
+    assert "intent_is" in node_names
+    assert "notify_long_body" in node_names
+    assert "notify_message" in node_names
 
     notify = {t["name"]: t for t in types}["notify_message"]  # 插件类型随目录自动出现
-    assert notify["kind"] == "function" and notify["label"] == "生成通知"
+    assert notify["label"] == "生成通知"
 
 
 async def test_run_lifecycle_approve(client: AsyncClient) -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import yaml
 from fastapi import HTTPException
 
 from app.core.config import settings
@@ -18,6 +19,7 @@ from app.engine import RetryPolicy, load_dag
 from app.engine.declarative import read_yaml
 from app.engine.resolve import parse_retry
 from app.engine.validate import validate_config
+from app.models.run import RunRecord
 from app.registry import REGISTRY
 
 logger = get_logger(__name__)
@@ -136,11 +138,47 @@ def get_pipeline_detail(filename: str) -> dict[str, Any]:
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"流水线 {filename!r} 不存在")
     raw, config = read_yaml(path)
+    return _detail_from_config(path.name, raw, config)
+
+
+def get_run_definition_detail(record: RunRecord) -> dict[str, Any]:
+    """run 钉住的 definition 快照 → 展示数据（与 get_pipeline_detail 同构）。
+
+    run 的「查看配置」必须看创建时快照：当前文件在 run 创建后可能已被
+    修改甚至删除，按文件名查看到的不是这次运行实际执行的定义。
+    """
+    config = yaml.safe_load(record.definition)
+    if not isinstance(config, dict):
+        raise HTTPException(status_code=500, detail="run 配置快照解析失败：顶层不是映射")
+    return _detail_from_config(record.config_file, record.definition, config)
+
+
+def mermaid_from_definition(record: RunRecord) -> str | None:
+    """definition 快照 → 当前渲染格式的 mermaid；解析/构建失败返回 None。
+
+    存储的 record.mermaid 是创建时刻的渲染快照——渲染格式改进后存量
+    run 不会跟上；definition 本身钉住不变，读取时现渲染既忠实又始终
+    是最新格式。失败（旧记录无快照、注册表缺类型等）由调用方回退存储值。
+    """
+    if not record.definition:
+        return None
+    try:
+        config = yaml.safe_load(record.definition)
+        if not isinstance(config, dict):
+            return None
+        return load_dag(config, approver=_noop_approver).to_mermaid()
+    except Exception as exc:
+        logger.warning("[run %s] definition 现渲染 mermaid 失败，回退存储快照: %s", record.id, exc)
+        return None
+
+
+def _detail_from_config(filename: str, raw: str, config: dict[str, Any]) -> dict[str, Any]:
+    """已解析的 YAML 配置 → 详情展示数据（图、节点行、YAML 原文）。"""
     dag = load_dag(config, approver=_noop_approver)
     nodes_cfg = config.get("nodes") or {}
     rows = [_node_row(name, nodes_cfg.get(name) or {}) for name in dag.topological_order()]
     return {
-        "filename": path.name,
+        "filename": filename,
         "name": dag.name,
         "description": str(config.get("description") or ""),
         "node_count": len(dag.node_names),

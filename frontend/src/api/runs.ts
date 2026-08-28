@@ -1,4 +1,5 @@
 import { api } from './request'
+import type { PipelineDetail } from './pipelines'
 
 export interface RunListItem {
   id: number
@@ -55,6 +56,11 @@ export function listRuns(offset = 0, limit = 50, filters?: RunFilters): Promise<
 
 export function getRun(runId: number): Promise<RunDetail> {
   return api.get(`/runs/${runId}`)
+}
+
+/** run 创建时钉住的配置快照（与当前文件解耦：文件后来改了也不受影响） */
+export function getRunConfig(runId: number): Promise<PipelineDetail> {
+  return api.get(`/runs/${runId}/config`)
 }
 
 /** 删除终态 run（后端拒绝非终态：运行中/待审核不可删） */

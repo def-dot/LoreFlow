@@ -115,7 +115,7 @@ def load_dag(
     )
 
     for name, spec in config["nodes"].items():
-        kind = spec.get("kind", "node")
+        node_type = spec.get("type")
 
         deps = spec.get("depends_on") or []
         retry = parse_retry(spec.get("retry"))
@@ -124,7 +124,7 @@ def load_dag(
         wiring = spec.get("inputs")
         cond_func = _condition_func(condition, wiring) if condition is not None else None
 
-        if kind == "human":
+        if node_type == "human":
             human = dag.human_node(
                 name,
                 depends_on=deps,
@@ -137,7 +137,7 @@ def load_dag(
             if spec.get("label"):
                 human.metadata["label"] = spec["label"]
 
-        elif kind == "loop":
+        elif node_type == "loop":
             body = spec.get("body")
 
             # Body nodes go through the same parsing path as top-level nodes.
@@ -157,18 +157,20 @@ def load_dag(
         else:
             node_type = REGISTRY[spec["type"]]
             func = _wired_func(node_type.func, wiring, deps)
+            node_label = spec.get("label") or node_type.label
             dag.add_node(
                 Node(
                     name=name,
                     func=func,
+                    node_type=node_type,
+                    label=node_label,
+                    inputs=spec.get("inputs"),
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
                     condition=cond_func,
                     metadata={
                         "type": node_type.name,
-                        # YAML label（中文展示名）优先，缺省用注册表 label
-                        "label": spec.get("label") or node_type.label,
                         **(spec.get("metadata") or {}),
                     },
                 )

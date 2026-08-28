@@ -3,10 +3,9 @@
 """
 
 from . import demo, llm, rag, web  # noqa: F401  # 导入即触发 @node 注册
-from .core import REGISTRY, NodeKind, NodeType, node, unregister
+from .core import REGISTRY, NodeType, node, unregister
 
 __all__ = [
-    "NodeKind",
     "NodeType",
     "REGISTRY",
     "node",
