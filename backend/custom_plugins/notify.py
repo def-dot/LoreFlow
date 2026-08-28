@@ -14,7 +14,7 @@ async def notify_message(ctx: dict) -> str:
     return f"[通知] {merge['title']}（正文 {len(merge['body'])} 字符）已就绪"
 
 
-@node(kind="condition", label="长文通知", description="插件条件：正文超过 20 字符才生成通知")
+@node(label="长文通知", description="插件条件：正文超过 20 字符才生成通知")
 def notify_long_body(ctx: dict) -> bool:
     merge = ctx.get("merge")
     return bool(merge) and len(str(merge.get("body", ""))) > 20

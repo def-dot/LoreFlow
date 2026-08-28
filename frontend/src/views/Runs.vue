@@ -4,7 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
-import type { ParamSpec } from '@/api/pipelines'
+import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
+import { getRunConfig } from '@/api/runs'
 import { useRunsStore } from '@/stores/runs'
 import { usePipelinesStore } from '@/stores/pipelines'
 
@@ -199,7 +200,7 @@ function clearFile(spec: ParamSpec) {
 // 看该 run 跑的配置 —— 同一个 drawer，标题区分来源。详情按文件名缓存
 // 并后台重取（SWR）：重复打开秒显，改过 YAML 也会自动跟上，无需刷新按钮
 // ---------------------------------------------------------------------------
-// 打开来源：selection = 顶部预览所选流水线；run = 查看 run 实际跑的配置
+// 打开来源：selection = 顶部预览所选流水线；run = 查看 run 钉住的配置快照
 type PreviewSource = { kind: 'selection' } | { kind: 'run'; runId: number }
 
 const previewOpen = ref(false)
@@ -207,15 +208,36 @@ const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
 const previewFile = ref<string | null>(null)
 const previewFrom = ref<PreviewSource>({ kind: 'selection' })
+// run 来源的详情（查 run 的 definition 快照，不经 store：按文件名缓存会
+// 被当前文件污染，快照也不可变、无需 SWR）
+const runPreviewDetail = ref<PipelineDetail | null>(null)
 
 // 标题里的流水线中文名：详情未加载时从列表兜底，打开即可见
 const previewItem = computed(() =>
   pipelinesStore.pipelines.find((p) => p.filename === previewFile.value),
 )
 
+// 抽屉实际渲染的详情：run 来源用快照，选中来源走 store（含 SWR 缓存）
+const previewDetail = computed<PipelineDetail | null>(() =>
+  previewFrom.value.kind === 'run' ? runPreviewDetail.value : pipelinesStore.detail,
+)
+
 async function loadPreview() {
   if (!previewFile.value) return
   previewError.value = null
+  if (previewFrom.value.kind === 'run') {
+    previewLoading.value = !runPreviewDetail.value
+    try {
+      runPreviewDetail.value = await getRunConfig(previewFrom.value.runId)
+    } catch {
+      if (!runPreviewDetail.value) {
+        previewError.value = '加载运行配置快照失败，请检查后端是否可用。'
+      }
+    } finally {
+      previewLoading.value = false
+    }
+    return
+  }
   // 无缓存才转圈；有缓存先秒显旧内容，后台重取静默更新
   previewLoading.value = !pipelinesStore.detailCache[previewFile.value]
   try {
@@ -237,8 +259,10 @@ async function openPreview(filename: string, from: PreviewSource = { kind: 'sele
   await loadPreview()
 }
 
-// run 详情「查看配置」：看该 run 实际跑的配置文件，而非当前下拉选项
+// run 详情「查看配置」：看该 run 创建时钉住的 definition 快照，而非当前
+// 文件（文件可能在 run 创建后已被修改甚至删除）
 function viewRunConfig(configFileOfRun: string, runId: number) {
+  runPreviewDetail.value = null
   openPreview(configFileOfRun, { kind: 'run', runId })
 }
 
@@ -551,14 +575,14 @@ onUnmounted(() => {
     <el-drawer v-model="previewOpen" size="min(920px, 94vw)">
       <template #title>
         <div class="drawer-title">
-          <span class="name">{{ pipelinesStore.detail?.name ?? previewItem?.name ?? '流水线详情' }}</span>
+          <span class="name">{{ previewDetail?.name ?? previewItem?.name ?? '流水线详情' }}</span>
           <span class="muted file">
             {{ previewFile }}
-            <template v-if="pipelinesStore.detail?.node_count ?? previewItem?.node_count">
-              · {{ pipelinesStore.detail?.node_count ?? previewItem?.node_count }} 节点
+            <template v-if="previewDetail?.node_count ?? previewItem?.node_count">
+              · {{ previewDetail?.node_count ?? previewItem?.node_count }} 节点
             </template>
           </span>
-          <el-tag v-if="previewFrom.kind === 'run'" size="small" type="info">运行 #{{ previewFrom.runId }}</el-tag>
+          <el-tag v-if="previewFrom.kind === 'run'" size="small" type="info">运行 #{{ previewFrom.runId }} · 配置快照</el-tag>
         </div>
       </template>
       <div v-loading="previewLoading" class="drawer-body">
@@ -566,7 +590,7 @@ onUnmounted(() => {
           <span class="muted">{{ previewError }}</span>
           <el-button size="small" plain @click="loadPreview">重试</el-button>
         </div>
-        <PipelineDetailPanel v-else-if="pipelinesStore.detail" :detail="pipelinesStore.detail" />
+        <PipelineDetailPanel v-else-if="previewDetail" :detail="previewDetail" />
       </div>
     </el-drawer>
   </div>

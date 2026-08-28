@@ -151,6 +151,7 @@ class DAG:
                 Node(
                     name=name,
                     func=func,
+                    label=name,
                     depends_on=depends_on or [],
                     retry=retry,
                     timeout=timeout,
@@ -262,11 +263,18 @@ class DAG:
         node = Node(
             name=name,
             func=loop_func,
+            label="循环",
             depends_on=depends_on or [],
             retry=retry,
             timeout=timeout,
-            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）
-            metadata={"loop": True, "max_iterations": max_iterations, "label": "循环"},
+            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）；
+            # type/type_label 供小字行显示类型名与类型 label
+            metadata={
+                "loop": True,
+                "max_iterations": max_iterations,
+                "type": "loop",
+                "type_label": "循环",
+            },
         )
         self.add_node(node)
         return node
@@ -380,10 +388,16 @@ class DAG:
         node = Node(
             name=name,
             func=review_func,
+            label="人工审核",
             depends_on=depends_on or [],
             condition=condition,
             retry=retry,
-            metadata={"human_review": True, "label": "人工审核", "review": review},
+            metadata={
+                "human_review": True,
+                "type": "human",
+                "type_label": "人工审核",
+                "review": review,
+            },
         )
         self.add_node(node)
         return node
@@ -498,22 +512,26 @@ class DAG:
 
     def to_mermaid(self) -> str:
         """Render the DAG as a Mermaid flowchart (for docs / debugging).
+
+        节点文案：大字行 = 节点 label（未声明回退节点名）；小字行 = 类型名 ·
+        类型 label（函数节点取注册表快照 metadata.type/type_label，human/loop
+        为内置 kind），再加条件 [?] 与重试 [Rn] 角标。
         """
         lines = ["graph TD"]
         for node in self._nodes.values():
             nid = node.name.replace(" ", "_").replace("-", "_")
+            main_text = node.metadata.get("label") or node.name
+
             small = []
             type_name = node.metadata.get("type")
-            label = node.metadata.get("label")
+            type_label = node.metadata.get("type_label")
             if type_name:
-                small.append(f"{type_name} · {label}" if label else type_name)
-            elif label:
-                small.append(label)
+                small.append(f"{type_name} · {type_label}" if type_label else type_name)
             if node.condition:
                 small.append("[?]")
             if node.retry and node.retry.max_retries:
                 small.append(f"[R{node.retry.max_retries}]")
-            text = node.name + (f"<br/><i>{' '.join(small)}</i>" if small else "")
+            text = main_text + (f"<br/><i>{' '.join(small)}</i>" if small else "")
             lines.append(f'    {nid}["{text}"]')
             for dep in node.depends_on:
                 did = dep.replace(" ", "_").replace("-", "_")

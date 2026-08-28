@@ -157,18 +157,20 @@ def load_dag(
         else:
             node_type = REGISTRY[spec["type"]]
             func = _wired_func(node_type.func, wiring, deps)
+            node_label = spec.get("label") or node_type.label
             dag.add_node(
                 Node(
                     name=name,
                     func=func,
+                    node_type=node_type,
+                    label=node_label,
+                    inputs=spec.get("inputs"),
                     depends_on=deps,
                     retry=retry,
                     timeout=spec.get("timeout"),
                     condition=cond_func,
                     metadata={
                         "type": node_type.name,
-                        # YAML label（中文展示名）优先，缺省用注册表 label
-                        "label": spec.get("label") or node_type.label,
                         **(spec.get("metadata") or {}),
                     },
                 )
