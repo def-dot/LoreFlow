@@ -23,8 +23,8 @@ _PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "fi
 #: 每种节点类型接受的字段。
 _KIND_FIELDS = {
     "node": {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition", "metadata"},
-    "human": {"label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
-    "loop": {"label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
+    "human": {"type", "label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
+    "loop": {"type", "label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
 }
 
 

@@ -512,6 +512,10 @@ class DAG:
 
     def to_mermaid(self) -> str:
         """Render the DAG as a Mermaid flowchart (for docs / debugging).
+
+        节点文案：大字行 = 节点 label（未声明回退节点名）；小字行 = 类型名 ·
+        类型 label（函数节点取注册表快照 metadata.type/type_label，human/loop
+        为内置 kind），再加条件 [?] 与重试 [Rn] 角标。
         """
         lines = ["graph TD"]
         for node in self._nodes.values():

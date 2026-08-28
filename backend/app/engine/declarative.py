@@ -155,14 +155,14 @@ def load_dag(
                 loop.metadata["label"] = spec["label"]
 
         else:
-            nt = REGISTRY[type_key]
-            func = _wired_func(nt.func, wiring, deps)
-            node_label = spec.get("label") or nt.label
+            node_type = REGISTRY[spec["type"]]
+            func = _wired_func(node_type.func, wiring, deps)
+            node_label = spec.get("label") or node_type.label
             dag.add_node(
                 Node(
                     name=name,
                     func=func,
-                    node_type=nt,
+                    node_type=node_type,
                     label=node_label,
                     inputs=spec.get("inputs"),
                     depends_on=deps,
@@ -170,7 +170,7 @@ def load_dag(
                     timeout=spec.get("timeout"),
                     condition=cond_func,
                     metadata={
-                        "type": nt.name,
+                        "type": node_type.name,
                         **(spec.get("metadata") or {}),
                     },
                 )
