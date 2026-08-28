@@ -284,7 +284,12 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             edges[name] = []
             continue
 
-        kind = spec.get("kind", "node")
+        # kind 推导：显式 kind > type 是结构化类型 > 默认 node
+        kind = spec.get("kind")
+        if kind is None:
+            type_val = spec.get("type")
+            kind = type_val if type_val in ("human", "loop") else "node"
+
         allowed = _KIND_FIELDS.get(kind)
         if allowed is None:
             errors.append(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")

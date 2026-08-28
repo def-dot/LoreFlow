@@ -115,7 +115,7 @@ def load_dag(
     )
 
     for name, spec in config["nodes"].items():
-        node_type = spec.get("type")
+        type_key = spec.get("type")
 
         deps = spec.get("depends_on") or []
         retry = parse_retry(spec.get("retry"))
@@ -124,7 +124,7 @@ def load_dag(
         wiring = spec.get("inputs")
         cond_func = _condition_func(condition, wiring) if condition is not None else None
 
-        if node_type == "human":
+        if type_key == "human":
             human = dag.human_node(
                 name,
                 depends_on=deps,
@@ -137,7 +137,7 @@ def load_dag(
             if spec.get("label"):
                 human.metadata["label"] = spec["label"]
 
-        elif node_type == "loop":
+        elif type_key == "loop":
             body = spec.get("body")
 
             # Body nodes go through the same parsing path as top-level nodes.
@@ -155,14 +155,14 @@ def load_dag(
                 loop.metadata["label"] = spec["label"]
 
         else:
-            node_type = REGISTRY[spec["type"]]
-            func = _wired_func(node_type.func, wiring, deps)
-            node_label = spec.get("label") or node_type.label
+            nt = REGISTRY[type_key]
+            func = _wired_func(nt.func, wiring, deps)
+            node_label = spec.get("label") or nt.label
             dag.add_node(
                 Node(
                     name=name,
                     func=func,
-                    node_type=node_type,
+                    node_type=nt,
                     label=node_label,
                     inputs=spec.get("inputs"),
                     depends_on=deps,
@@ -170,7 +170,7 @@ def load_dag(
                     timeout=spec.get("timeout"),
                     condition=cond_func,
                     metadata={
-                        "type": node_type.name,
+                        "type": nt.name,
                         **(spec.get("metadata") or {}),
                     },
                 )
