@@ -65,9 +65,9 @@ class DAGExecutor:
             nodes: All nodes in the DAG (keyed by name).
             inputs: Initial key-value pairs placed into the shared context.
             resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
-                    已完成/条件跳过的节点作为既成事实不重跑（前者输出进
-                    上下文，后者下游照常恢复）；其余节点正常重跑（含重新
-                    挂起的审批节点）。
+                    已完成/跳过（条件不满足或级联）的节点作为既成事实不
+                    重跑（前者输出进上下文，后者的下游按级联语义恢复）；
+                    其余节点正常重跑（含重新挂起的审批节点）。
 
         Returns:
             Dict mapping each node name to its :class:`NodeResult`.
@@ -78,52 +78,41 @@ class DAGExecutor:
         # ----- shared state -----
         ctx: dict[str, Any] = dict(inputs) if inputs else {}
         events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in nodes}
-        results: dict[str, NodeResult] = {}
+        tasks: dict[str, asyncio.Future[NodeResult]] = {}
 
-        # ----- resume: 已完成/条件跳过的节点作为既成事实直接恢复 -----
+        # ----- resume: 已完成/跳过（条件或级联）的节点作为既成事实直接恢复 -----
         resume = resume or {}
+        loop = asyncio.get_running_loop()
+
         for name, saved in resume.items():
-            if saved.get("status") not in ("completed", "skipped"):
+            if saved.get("status") not in ("completed", "skipped", "upstream_skipped"):
                 continue
-            if name not in nodes:
-                # 快照来自旧版配置：当前 DAG 已无此节点（配置改版），跳过
-                logger.warning("[resume] 快照节点 %r 不在当前 DAG 中，跳过", name)
-                continue
+
             events[name].set()
-            status = NodeStatus(saved.get("status"))
-            # 快照是 to_dict() 的有损串行化（无 node_name、status 为字符串），
-            # 须用循环变量名重建并把 status 还原成枚举才能满足返回契约
-            results[name] = NodeResult(
+            restored = NodeResult(
                 node_name=name,
-                status=status,
+                status=NodeStatus(saved.get("status")),
                 output=saved.get("output"),
-                attempts=saved.get("attempts") or (0 if status is NodeStatus.SKIPPED else 1),
+                attempts=saved.get("attempts"),
                 duration_ms=saved.get("duration_ms") or 0.0,
             )
+            tasks[name] = loop.create_future()
+            tasks[name].set_result(restored)
 
-            ctx[name] = saved.get("output")  # falsy 输出（0/""）同样是合法结果
-
-            # 人工审核节点的修订写回是节点对共享上下文的可观察副作用：
-            # 恢复不重跑，须重放，否则 resume 后续节点退回看到修订前的值
+            ctx[name] = saved.get("output")
             if nodes[name].metadata.get("human_review"):
                 replay_review_edits(ctx, saved.get("output"))
 
-        # Task registry — 节点任务表（下游跳过检查也从中读上游终态）
-        tasks: dict[str, asyncio.Task[NodeResult]] = {}
-
         # ----- spawn remaining nodes -----
         for node in nodes.values():
-            if node.name in results:
-                continue  # 恢复时已完成，不重跑
+            if node.name in tasks:
+                continue
             tasks[node.name] = asyncio.create_task(self._run_node(node, ctx, tasks, events))
 
         # ----- wait for completion -----
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
-        # ----- collect results from task return values -----
-        for name, task in tasks.items():
-            results[name] = task.result()
-
+        results = {name: task.result() for name, task in tasks.items()}
         # ----- surface failures as DAGExecutionError -----
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
@@ -145,10 +134,10 @@ class DAGExecutor:
         self,
         node: Node,
         ctx: dict[str, Any],
-        tasks: dict[str, asyncio.Task[NodeResult]],
+        tasks: dict[str, asyncio.Future[NodeResult]],
         events: dict[str, asyncio.Event],
     ) -> NodeResult:
-        """Lifecycle of a single node: 等依赖 → 跳过/条件判断 → 带重试执行 → 收尾。
+        """Lifecycle of a single node: 等依赖 → 失败/跳过级联 → 条件判断 → 带重试执行 → 收尾。
 
         Task-level safety net: 除挂起信号（SuspendExecution 向上穿透、
         本节点挂起已带 REVIEWING result 供 emit）外，无论执行如何退出，
@@ -161,18 +150,30 @@ class DAGExecutor:
             for dep in node.depends_on:
                 await events[dep].wait()
 
-            # ---- 2. Check for cascading failure ----
-            blocked_deps = [
+            # ---- 2. Cascading failure / cascading skip ----
+            dep_status = {dep: tasks[dep].result().status for dep in node.depends_on}
+            # 失败优先级最高，压过一切跳过规则
+            blocked = [
                 dep
-                for dep in node.depends_on
-                if dep in tasks
-                and tasks[dep].result().status in (NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED)
+                for dep, s in dep_status.items()
+                if s in (NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED)
             ]
-            if blocked_deps:
-                logger.warning("[%s] Upstream failed, node not executed: %s", node.name, blocked_deps)
+            if blocked:
+                logger.warning("[%s] Upstream failed, node not executed: %s", node.name, blocked)
                 result = NodeResult(
                     node_name=node.name,
                     status=NodeStatus.UPSTREAM_FAILED,
+                )
+                return result
+            
+            # 汇合语义（any-success）：全部依赖被跳过才跟着跳过（级联）；
+            if node.depends_on and all(
+                s in (NodeStatus.SKIPPED, NodeStatus.UPSTREAM_SKIPPED) for s in dep_status.values()
+            ):
+                logger.info("[%s] Upstream skipped, node not executed", node.name)
+                result = NodeResult(
+                    node_name=node.name,
+                    status=NodeStatus.UPSTREAM_SKIPPED,
                 )
                 return result
 
@@ -245,8 +246,7 @@ class DAGExecutor:
 
                 except SuspendExecution as exc:
                     # 本节点审批挂起：REVIEWING + 审核视图（output）随 finally 的
-                    # emit 落快照；重新抛出让 run 走挂起收尾。级联节点在依赖检查
-                    # 处收到同一异常时不带 result、不 emit，快照不被污染
+                    # emit 落快照；重新抛出让 run 走挂起收尾。
                     result = NodeResult(
                         node_name=node.name,
                         status=NodeStatus.REVIEWING,

@@ -69,8 +69,8 @@ class DAG:
                 按需派生。
         on_event: Optional async callback invoked on every node state change
                   (running/retrying/completed/failed/upstream_failed/skipped/
-                  cancelled) and awaited. Useful for live progress monitoring
-                  (e.g. a web UI).
+                  upstream_skipped/cancelled) and awaited. Useful for live
+                  progress monitoring (e.g. a web UI).
     """
 
     def __init__(

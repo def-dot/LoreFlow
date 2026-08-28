@@ -242,7 +242,8 @@ async def test_human_reject_bypasses_retry() -> None:
 
 
 async def test_human_node_condition_false_skips_review() -> None:
-    """condition 为 False 时跳过审核：approver 不被调用，节点 SKIPPED，下游照跑。"""
+    """condition 为 False 时跳过审核：approver 不被调用，节点 SKIPPED，
+    下游按级联语义标 UPSTREAM_SKIPPED（不带着缺失的审核输出执行）。"""
     called = False
 
     async def spy_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -273,7 +274,7 @@ async def test_human_node_condition_false_skips_review() -> None:
     results = await dag.run()
     assert called is False
     assert results["review"].status == NodeStatus.SKIPPED
-    assert results["publish"].output == 1  # 条件跳过是分支语义，下游照跑
+    assert results["publish"].status == NodeStatus.UPSTREAM_SKIPPED
 
 
 async def test_human_node_requires_approver() -> None:

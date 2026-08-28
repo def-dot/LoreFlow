@@ -20,6 +20,7 @@ class NodeStatus(Enum):
     FAILED = "failed"
     UPSTREAM_FAILED = "upstream_failed"
     SKIPPED = "skipped"
+    UPSTREAM_SKIPPED = "upstream_skipped"
     CANCELLED = "cancelled"
 
 

@@ -30,7 +30,7 @@ def _wired_view(ctx: dict[str, Any], wiring: dict[str, Any]) -> dict[str, Any]:
                     return None
                 value = value[part]
             return value
-        return v
+        return v  # 字面量原样透传（含 dict/list；嵌套 $ 引用由 validate 载入期拒绝）
 
     return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
 
@@ -52,14 +52,19 @@ def _condition_func(expr: str | bool, wiring: dict[str, Any] | None = None) -> C
     return wired
 
 
-def _wired_func(func: Callable[..., Any], wiring: dict[str, Any] | None = None) -> Callable[..., Any]:
+def _wired_func(
+    func: Callable[..., Any],
+    wiring: dict[str, Any] | None = None,
+    deps: list[str] | None = None,
+) -> Callable[..., Any]:
     """数据流接线视图套在节点函数外（视图语义见 _wired_view；工厂按参捕获，
-    循环内多次调用无闭包晚绑定）。"""
-    if not wiring:
-        return func
-    
+    循环内多次调用无闭包晚绑定）。
+    """
     async def wired(ctx: dict[str, Any]) -> Any:
-        return await func(_wired_view(ctx, wiring))
+        view = _wired_view(ctx, wiring) if wiring else dict(ctx)
+        if deps:
+            view["_upstream"] = {d: ctx.get(d) for d in deps}
+        return await func(view)
     return wired
 
 
@@ -151,7 +156,7 @@ def load_dag(
 
         else:
             node_type = REGISTRY[spec["type"]]
-            func = _wired_func(node_type.func, wiring)
+            func = _wired_func(node_type.func, wiring, deps)
             dag.add_node(
                 Node(
                     name=name,

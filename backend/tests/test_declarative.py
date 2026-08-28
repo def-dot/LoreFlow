@@ -4,7 +4,9 @@ from typing import Any, Literal
 
 import pytest
 
+from app.core.config import settings
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
+from app.engine.declarative import read_yaml
 from app.engine.resolve import parse_retry
 from app.engine.validate import (
     validate_config,
@@ -811,6 +813,64 @@ def test_condition_ref_must_be_upstream() -> None:
     assert validate_config({"nodes": {
         "甲": {"type": "cfg_fetch", "condition": "$query == x"},
     }, "inputs": {"query": {}}}) == []
+
+
+# ---------------------------------------------------------------------------
+# 真实示例流水线 02_condition.yaml — 级联 skip 与 final_answer 汇合
+# ---------------------------------------------------------------------------
+
+
+async def _run_condition_yaml(
+    monkeypatch: pytest.MonkeyPatch, prompt: str, classify_raw: str = ""
+) -> dict[str, Any]:
+    """桩掉 Ollama 跑真实 02_condition.yaml：classify_raw 控制 llm_classify 的
+    模型输出（空串 = 预期不触达模型，如「人工」关键词短路）。"""
+    from app.registry import llm as llm_mod
+
+    async def fake_ollama(model: str, messages: list[dict[str, str]], fmt: Any = None) -> str:
+        assert classify_raw, "本用例不应触达 Ollama"
+        system = next((m["content"] for m in messages if m["role"] == "system"), "")
+        if "意图分类器" in system:
+            return classify_raw
+        if "知识库问答助手" in system:
+            return "知识库支路答复"
+        return "闲聊支路答复"
+
+    monkeypatch.setattr(llm_mod, "_ollama_chat", fake_ollama)
+    _, config = read_yaml(settings.PIPELINES_DIR / "02_condition.yaml")
+    dag = load_dag(config)
+    return await dag.run(inputs={"prompt": prompt})
+
+
+async def test_condition_yaml_chat_branch_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """chat 支路：rag 支路整条级联跳过，final_answer 汇合取 chat 答复。"""
+    results = await _run_condition_yaml(monkeypatch, "你好呀", classify_raw="chat")
+    assert results["intent_recognition"].status is NodeStatus.COMPLETED
+    assert results["llm_chat"].status is NodeStatus.COMPLETED
+    assert results["rag_retrieve"].status is NodeStatus.SKIPPED
+    assert results["llm_rag_reply"].status is NodeStatus.UPSTREAM_SKIPPED
+    assert results["final_answer"].status is NodeStatus.COMPLETED
+    assert results["final_answer"].output == {"branch": "llm_chat", "answer": "闲聊支路答复"}
+
+
+async def test_condition_yaml_rag_branch_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rag 支路：chat 支路条件跳过，final_answer 汇合取 rag 答复。"""
+    results = await _run_condition_yaml(monkeypatch, "北境要塞是什么", classify_raw="rag")
+    assert results["llm_chat"].status is NodeStatus.SKIPPED
+    assert results["rag_retrieve"].status is NodeStatus.COMPLETED
+    assert results["llm_rag_reply"].status is NodeStatus.COMPLETED
+    assert results["final_answer"].status is NodeStatus.COMPLETED
+    assert results["final_answer"].output == {"branch": "llm_rag_reply", "answer": "知识库支路答复"}
+
+
+async def test_condition_yaml_human_keyword_cascades_to_join(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「人工」关键词短路判 human：两条支路全跳过，汇合节点级联跳过。
+    （human_service 支路已从示例移除，转人工意图暂无落点——全跳过时
+    final_answer 不执行，run 空手完成。）"""
+    results = await _run_condition_yaml(monkeypatch, "我要找人工客服")
+    assert results["llm_chat"].status is NodeStatus.SKIPPED
+    assert results["llm_rag_reply"].status is NodeStatus.UPSTREAM_SKIPPED
+    assert results["final_answer"].status is NodeStatus.UPSTREAM_SKIPPED
 
 
 def test_condition_expression_validation() -> None:

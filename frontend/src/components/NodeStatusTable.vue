@@ -14,13 +14,17 @@ const rows = computed<Row[]>(() =>
 )
 
 // 与旧 UI 一致：completed 显示输出，否则显示 error / 跳过说明
-// skipped 只剩一种含义（条件不满足）；上游失败级联是独立状态 upstream_failed
+// skipped 只剩一种含义（条件不满足）；级联跳过/级联失败是独立状态
+// upstream_skipped / upstream_failed
 function cellText(row: Row): string {
   if (row.status === 'completed') {
     return row.output === null || row.output === undefined ? '' : JSON.stringify(row.output, null, 1)
   }
   if (row.status === 'skipped') {
     return '条件不满足，分支未执行'
+  }
+  if (row.status === 'upstream_skipped') {
+    return '上游路径全部跳过，未执行'
   }
   if (row.status === 'upstream_failed') {
     return '上游失败，未执行'

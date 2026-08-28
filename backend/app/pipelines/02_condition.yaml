@@ -31,12 +31,10 @@ nodes:
     depends_on: [rag_retrieve]
     inputs: {chunks: $rag_retrieve}
 
-  human_service:
-    kind: human
-    label: 人工客服
-    depends_on: [intent_recognition]
-    condition: intent == human
-    inputs: {intent: $intent_recognition.intent}
-    prompt: "用户点名转人工：请人工客服接管处理。"
-    review:
-      prompt: {label: 用户诉求}
+  # 汇合节点（any-success 语义）：互斥支路必有一条跑成，按 depends_on 声明
+  # 顺序自动取第一个非空支路输出作为最终结果（无需 inputs 接线）；
+  # 全跳过（如 intent=human）时本节点级联跳过
+  final_answer:
+    type: final_answer
+    label: 最终答复
+    depends_on: [llm_chat, llm_rag_reply]
