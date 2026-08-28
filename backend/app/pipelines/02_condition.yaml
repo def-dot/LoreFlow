@@ -17,8 +17,7 @@ nodes:
     type: llm_chat
     label: LLM回答
     depends_on: [intent_recognition]
-    condition: intent == chat
-    inputs: {intent: $intent_recognition.intent}
+    condition: $intent_recognition.intent == chat
 
   rag_retrieve:
     type: rag_retrieve

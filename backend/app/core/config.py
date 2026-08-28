@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     UPLOADS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "uploads"
     UPLOAD_MAX_MB: int = 20
 
-    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    OLLAMA_BASE_URL: str = "http://192.168.2.228:11434"
     OLLAMA_MODEL: str = "qwen2.5:latest"
     OLLAMA_TIMEOUT_SECONDS: float = 120.0
 

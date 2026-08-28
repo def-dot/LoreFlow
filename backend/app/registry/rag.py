@@ -90,7 +90,7 @@ _MOCK_KB: list[dict[str, Any]] = [
 ]
 
 
-@node(label="知识库检索", description="模拟 RAG 检索：按提示词关键词打分返回设定片段（演示骨架，未接向量库）")
+@node(label="知识库检索", description="模拟 RAG 检索：按提示词关键词打分返回设定片段")
 async def rag_retrieve(ctx: dict[str, Any]) -> list[dict[str, str]]:
     await asyncio.sleep(0.05)
     prompt = str(ctx.get("prompt", ""))

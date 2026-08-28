@@ -42,20 +42,11 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
-    content = prompt
-    pages = ctx.get("pages")  # 上游 web_fetch 节点（YAML 里命名为 pages）的输出
-    if isinstance(pages, list) and pages:
-        refs = "\n\n".join(
-            f"[网页 {i}] {page.get('url')}\n{page.get('text', '')}"
-            for i, page in enumerate(pages, 1)
-            if isinstance(page, dict)
-        )
-        content = f"{prompt}\n\n---\n以下是提示词中链接对应的网页内容，回答时请参考：\n\n{refs}"
     messages: list[dict[str, str]] = []
     system = ctx.get("system")
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": content})
+    messages.append({"role": "user", "content": prompt})
     model = str(ctx.get("model") or settings.OLLAMA_MODEL)
     return await _ollama_chat(model, messages)
 

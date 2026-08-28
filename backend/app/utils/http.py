@@ -8,5 +8,5 @@ _client: httpx.AsyncClient | None = None
 def http_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(timeout=120.0)
+        _client = httpx.AsyncClient(timeout=300)
     return _client
