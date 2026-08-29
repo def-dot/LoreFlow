@@ -33,7 +33,7 @@ from app.registry.human import human_review
 
 from .dag import DAG, terminal_approver
 from .declarative import load_dag
-from .node import HumanRejected, Node, wired_view
+from .node import HumanRejected, Node, wired_ctx
 from .types import (
     DAGExecutionError,
     NodeResult,
@@ -54,5 +54,5 @@ __all__ = [
     "human_review",
     "load_dag",
     "terminal_approver",
-    "wired_view",
+    "wired_ctx",
 ]

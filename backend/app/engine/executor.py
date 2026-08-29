@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from .condition import eval_condition
-from .node import HumanRejected, Node, wired_view
+from .node import HumanRejected, Node, wired_ctx
 from .types import (
     DAGExecutionError,
     NodeEventFunc,
@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 class DAGExecutor:
     """Executes a DAG concurrently, respecting node dependencies.
 
+    字段 = 构造输入与配置（nodes/ctx/semaphore/on_event，回答"执行什么"）；
+    events/tasks 是 execute 的过程状态（回答"这次怎么走"），留在方法帧里。
+    ctx 为共享可变状态——同一实例并发调用 execute 不安全，顺序复用安全
+    （execute 不改 nodes，ctx 语义上属于单次运行）。
+
     Attributes:
         concurrency: Maximum number of nodes to run simultaneously.
                      ``None`` means unlimited.
@@ -39,10 +44,15 @@ class DAGExecutor:
 
     def __init__(
         self,
+        nodes: dict[str, Node] | None = None,
         ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
     ):
+        # 执行对象（nodes）与共享上下文（ctx）都从构造器进：
+        # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
+        # 控制流簿记（events/tasks）是 execute 的过程状态，留在方法内
+        self.nodes: dict[str, Node] = nodes if nodes is not None else {}
         self.ctx: dict[str, Any] = ctx if ctx is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
@@ -58,13 +68,11 @@ class DAGExecutor:
 
     async def execute(
         self,
-        nodes: dict[str, Node],
         resume: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, NodeResult]:
-        """Execute all *nodes* and return a mapping of node name → NodeResult.
+        """Execute ``self.nodes`` and return a mapping of node name → NodeResult.
 
         Args:
-            nodes: All nodes in the DAG (keyed by name).
             resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
 
         Returns:
@@ -73,13 +81,13 @@ class DAGExecutor:
         Raises:
             DAGExecutionError: If one or more nodes ultimately failed.
         """
-        # ----- control-flow bookkeeping（数据在 self.ctx，构造时传入）-----
-        events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in nodes}
+        # ----- control-flow bookkeeping（图与数据在 self.nodes/self.ctx）-----
+        events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in self.nodes}
         tasks: dict[str, asyncio.Future[NodeResult]] = {}
         resume = resume or {}
         loop = asyncio.get_running_loop()
-       
-        for node in nodes.values():
+
+        for node in self.nodes.values():
             saved = resume.get(node.name)
             if saved is not None and saved.get("status") in ("completed", "skipped", "upstream_skipped"):
                 events[node.name].set()
@@ -124,10 +132,8 @@ class DAGExecutor:
     ) -> NodeResult:
         """Lifecycle of a single node: 等依赖 → 失败/跳过级联 → 条件判断 → 带重试执行 → 收尾。
 
-        Task-level safety net: 除挂起信号（SuspendExecution 向上穿透、
-        本节点挂起已带 REVIEWING result 供 emit）外，无论执行如何退出，
-        必返回终态 NodeResult。同步(events)/事件汇报两件事都在 finally
-        收口——全部从这同一个 result 推导。
+        events/tasks 是 execute 的过程簿记（并发协调表）：等上游事件、
+        读依赖状态、完成时置位自己的事件。
         """
         result: NodeResult | None = None
         try:
@@ -165,7 +171,7 @@ class DAGExecutor:
             # ---- 3. Evaluate condition (branching) ----
             if node.condition is not None:
                 try:
-                    should_run = eval_condition(node.condition, wired_view(self.ctx, node.inputs))
+                    should_run = eval_condition(node.condition, wired_ctx(self.ctx, node.inputs))
                 except Exception as exc:
                     logger.error(
                         "[%s] Condition raised %s: %s - skipping node",
@@ -184,9 +190,9 @@ class DAGExecutor:
                     return result
 
             # ---- 4. Execute with retry ----
+            await self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
             retry = node.retry or RetryPolicy(max_retries=0)
             last_error: Exception | None = None
-            await self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
 
             for attempt in range(retry.max_retries + 1):
                 try:
@@ -311,16 +317,15 @@ class DAGExecutor:
     async def _call(self, node: Node) -> Any:
         """Invoke *node.func* with timeout if configured.
 
-        统一在此组装接线视图（``Node.inputs`` + 保留键 ``_node``/``_upstream``）；
+        统一在此组装接线上下文（``Node.inputs`` + 保留键 ``_node``/``_upstream``）；
         循环节点例外——body 子流水线要直接读写共享上下文（输出累积进顶层）。
         """
         if node.metadata.get("loop"):
             target: dict[str, Any] = self.ctx
         else:
-            target = wired_view(self.ctx, node.inputs)
+            target = wired_ctx(self.ctx, node.inputs)
             target["_node"] = node.name
-            if node.depends_on:
-                target["_upstream"] = {d: self.ctx.get(d) for d in node.depends_on}
+            target["_upstream"] = {d: self.ctx.get(d) for d in node.depends_on} if node.depends_on else {}
         coro = node.func(target)
         if node.timeout is not None:
             return await asyncio.wait_for(coro, timeout=node.timeout)

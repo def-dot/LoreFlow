@@ -20,11 +20,8 @@ ConditionFunc = Callable[[dict[str, Any]], bool]
 ApproverFunc = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
-def wired_view(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[str, Any]:
-    """接线 → 节点视图 ``{**ctx, **{本地键: 视图值}}``（唯一实现，全引擎共用）。
-
-    ``$`` 前缀按点路径取 ctx 值（缺键 → None）；其余值原样透传
-    （含 dict/list 字面量；嵌套 ``$`` 引用由 validate 载入期拒绝）。
+def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[str, Any]:
+    """接线 → 节点上下文 ``{**ctx, **{本地键: 解析值}}``（唯一实现，全引擎共用）。
     """
     def resolve(v: Any) -> Any:
         if isinstance(v, str) and v.startswith("$"):

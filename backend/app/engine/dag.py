@@ -229,7 +229,7 @@ class DAG:
                 # 不是「输入」，不走 run() 的输入白名单。body 失败时已完成
                 # 节点的输出已在共享上下文，是否终止循环由 condition 决定
                 try:
-                    await DAGExecutor(ctx=ctx, on_event=sub.on_event).execute(sub.nodes)
+                    await DAGExecutor(nodes=sub.nodes, ctx=ctx, on_event=sub.on_event).execute()
                 except DAGExecutionError:
                     pass
 
@@ -370,8 +370,8 @@ class DAG:
         if self.approver is not None:
             ctx["_approver"] = self.approver
 
-        executor = DAGExecutor(ctx=ctx, concurrency=concurrency, on_event=self.on_event)
-        return await executor.execute(self._nodes, resume=resume)
+        executor = DAGExecutor(nodes=self._nodes, ctx=ctx, concurrency=concurrency, on_event=self.on_event)
+        return await executor.execute(resume=resume)
 
     # ------------------------------------------------------------------
     # Visualisation
