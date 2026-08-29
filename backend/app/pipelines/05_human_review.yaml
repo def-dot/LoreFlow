@@ -15,10 +15,12 @@ inputs:
 nodes:
   review:
     type: human
-    prompt: "请审核文章内容是否可以发布"
-    review:
-      title: {label: 标题}
-      content: {label: 正文}
+    label: 内容审核
+    inputs:
+      _prompt: "请审核文章内容是否可以发布"
+      title: $title
+      content: $content
+      _review: {title: {label: 标题}, content: {label: 正文}}
 
   publish:
     type: cfg_publish

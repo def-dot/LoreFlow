@@ -2,7 +2,7 @@
 Node definitions for DAG Flow.
 """
 
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +18,27 @@ ConditionFunc = Callable[[dict[str, Any]], bool]
 #: Signature for a human-review approver: receives ``(node_name, payload)``
 #: and returns a decision dict: ``{"approve": bool, "reason": Optional[str]}``.
 ApproverFunc = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+def wired_view(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[str, Any]:
+    """接线 → 节点视图 ``{**ctx, **{本地键: 视图值}}``（唯一实现，全引擎共用）。
+
+    ``$`` 前缀按点路径取 ctx 值（缺键 → None）；其余值原样透传
+    （含 dict/list 字面量；嵌套 ``$`` 引用由 validate 载入期拒绝）。
+    """
+    def resolve(v: Any) -> Any:
+        if isinstance(v, str) and v.startswith("$"):
+            value: Any = ctx
+            for part in v[1:].split("."):
+                if not isinstance(value, Mapping) or part not in value:
+                    return None
+                value = value[part]
+            return value
+        return v
+
+    if not wiring:
+        return dict(ctx)
+    return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
 
 
 class HumanRejected(Exception):
@@ -61,10 +82,13 @@ class Node:
         label: Human-readable label for this node.
         inputs: Optional input wiring mapping from parameter names to node outputs or values.
         depends_on: Names of upstream nodes that must complete first.
-        condition: Optional predicate; if it returns False the node is skipped.
+        condition: Optional condition declaration; falsy at runtime the node
+                   is skipped. bool constant / expression string — evaluated
+                   on the wiring view by the executor.
         retry: Retry policy, or ``None`` for no retries.
         timeout: Per-node timeout in seconds, or ``None`` for no limit.
-        metadata: Arbitrary user-defined key-value pairs.
+        metadata: 引擎内部标记（如 loop 直用共享上下文的旗标、无注册表
+                  引用类型的 type/type_label 展示回退）。
     """
 
     name: str
@@ -73,7 +97,7 @@ class Node:
     label: str = ""
     inputs: dict[str, Any] | None = None
     depends_on: list[str] = field(default_factory=list)
-    condition: ConditionFunc | None = None
+    condition: str | bool | None = None
     retry: RetryPolicy | None = None
     timeout: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

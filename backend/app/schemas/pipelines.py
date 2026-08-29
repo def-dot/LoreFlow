@@ -32,7 +32,7 @@ class PipelineNodeOut(BaseModel):
     """一个节点的展示元信息（YAML spec + 注册表元数据合成）。"""
 
     name: str
-    kind: str  # node | human | loop
+    kind: str  # 由 type 推导：human | node（前端标签用，YAML 无此字段）
     type: str | None = None          # 注册表函数键（kind=node 才有）
     type_label: str | None = None    # 注册表 label；human=人工审核，loop=循环
     type_description: str | None = None  # node=注册表描述；human=审核提示；loop=循环体摘要

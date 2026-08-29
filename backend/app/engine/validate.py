@@ -20,12 +20,8 @@ from .condition import _parse
 #: 每个参数键接受的字段。
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "file"}
 
-#: 每种节点类型接受的字段。
-_KIND_FIELDS = {
-    "node": {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition", "metadata"},
-    "human": {"type", "label", "depends_on", "inputs", "retry", "prompt", "condition", "review"},
-    "loop": {"type", "label", "depends_on", "retry", "timeout", "condition", "body", "max_iterations"},
-}
+#: 注册函数类型接受的默认字段集（human 同样使用，无特殊字段）。
+_NODE_FIELDS = {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition"}
 
 
 # ------------------------------------------------------------------
@@ -284,21 +280,13 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             edges[name] = []
             continue
 
-        # kind 推导：显式 kind > type 是结构化类型 > 默认 node
-        kind = spec.get("kind")
-        if kind is None:
-            type_val = spec.get("type")
-            kind = type_val if type_val in ("human", "loop") else "node"
+        # type 是唯一判别字段：所有类型用同一字段集
+        type_key = spec.get("type")
+        allowed = _NODE_FIELDS
 
-        allowed = _KIND_FIELDS.get(kind)
-        if allowed is None:
-            errors.append(f"节点 {name!r}: 未知类型 {kind!r}（支持 node|human|loop）")
-            edges[name] = []
-            continue
-
-        unknown = set(spec) - {"kind"} - allowed
+        unknown = set(spec) - allowed
         if unknown:
-            errors.append(f"节点 {name!r}（{kind}）: 不支持的字段 {sorted(unknown)}")
+            errors.append(f"节点 {name!r}（{type_key}）: 不支持的字段 {sorted(unknown)}")
 
         edges[name] = spec.get("depends_on")
 
@@ -311,8 +299,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         condition = spec.get("condition")
         if condition:
             cond_available = available_ref | (set(wiring) if isinstance(wiring, dict) else set())
-            if kind == "loop":
-                cond_available |= {"iteration"}  # 循环谓词视图每轮注入 iteration
             errors.extend(_validate_condition(condition, name, cond_available))
             if isinstance(condition, str):
                 try:
@@ -320,29 +306,18 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 except ValueError:
                     pass
 
-        # kind 特定必需字段校验
-        if kind == "node":
-            type_key = spec.get("type")
+        # 类型特定校验（membership → human 的 _review 声明）
+        if type_key not in REGISTRY:
             if not type_key:
                 errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
-            elif type_key not in REGISTRY:
-                errors.append(f"节点 {name!r}（node）: 类型函数 {type_key!r} 未注册")
-        elif kind == "human":
-            review_spec = spec.get("review")
+            else:
+                errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
+        elif type_key == "human":
+            # 审核视图经 inputs 接线声明：_review 字面量给载荷键配标签，键域 = 接线键
+            review_spec = wiring.get("_review") if isinstance(wiring, dict) else None
             if review_spec is not None:
                 errors.extend(
-                    f"审核节点 {name!r}: {msg}" for msg in validate_review(review_spec, available_ref)
-                )
-        elif kind == "loop":
-            body = spec.get("body")
-            if not isinstance(body, dict) or not body:
-                errors.append(f"循环节点 {name!r}: 需要非空的 'body' 映射")
-            if condition is None:  # condition: false 是合法的循环条件（body 一轮不跑）
-                errors.append(f"循环节点 {name!r}: 需要 'condition' 表达式")
-            elif isinstance(body, dict) and body:
-                errors.extend(
-                    f"循环节点 {name!r}: {msg}"
-                    for msg in validate_nodes({"nodes": body})
+                    f"审核节点 {name!r}: {msg}" for msg in validate_review(review_spec, set(wiring))
                 )
 
     errors.extend(validate_graph(edges))

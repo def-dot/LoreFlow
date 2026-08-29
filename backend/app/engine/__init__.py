@@ -29,9 +29,11 @@ Quick start::
     print(results["process"].output)
 """
 
+from app.registry.human import human_review
+
 from .dag import DAG, terminal_approver
 from .declarative import load_dag
-from .node import HumanRejected, Node
+from .node import HumanRejected, Node, wired_view
 from .types import (
     DAGExecutionError,
     NodeResult,
@@ -49,6 +51,8 @@ __all__ = [
     "NodeStatus",
     "RetryPolicy",
     "SuspendExecution",
+    "human_review",
     "load_dag",
     "terminal_approver",
+    "wired_view",
 ]

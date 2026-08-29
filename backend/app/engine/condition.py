@@ -123,3 +123,10 @@ def compile_condition(expr: str) -> ConditionFunc:
 def condition_key(expr: str) -> str:
     """表达式引用的根键（点路径取首段）—— 加载期核对键存在的依据。"""
     return _parse(expr)[1].split(".")[0]
+
+
+def eval_condition(cond: str | bool, view: dict[str, Any]) -> bool:
+    """节点条件求值（原始声明 → bool）：布尔常量 / 表达式字符串（接线视图上）。"""
+    if isinstance(cond, bool):
+        return cond
+    return bool(compile_condition(cond)(view))

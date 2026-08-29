@@ -3,6 +3,7 @@
 
 本模块是叶子模块（不 import 应用内其他模块），供 ``functions.py``
 在函数定义处声明元信息；``__init__.py`` 只做纯再导出。
+human 结构化类型在 :mod:`app.registry.human` 注册（协议函数本体）。
 
 ``REGISTRY`` 是唯一的注册表本体（``name -> NodeType``），其余模块
 直接读写该字典：``@node`` 装饰器负责注册，插件加载器负责清理。

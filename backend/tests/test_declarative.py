@@ -23,8 +23,8 @@ def registered() -> Any:
     """临时注册测试用的节点函数，测试结束后自动撤销（直接读写 REGISTRY）。"""
     added: list[str] = []
 
-    def _reg(name: str, func: Any, kind: str = "function") -> None:
-        REGISTRY[name] = NodeType(name=name, func=func, kind=kind, label=name, description=name)
+    def _reg(name: str, func: Any) -> None:
+        REGISTRY[name] = NodeType(name=name, func=func, label=name, description=name)
         added.append(name)
 
     yield _reg
@@ -53,7 +53,7 @@ async def test_load_dag_with_human_node() -> None:
     config = {
         "nodes": {
             "data": {"type": "cfg_fetch"},
-            "review": {"kind": "human", "depends_on": ["data"], "prompt": "check it"},
+            "review": {"type": "human", "depends_on": ["data"], "prompt": "check it"},
         },
     }
     dag = load_dag(config, approver=approver)
@@ -73,7 +73,7 @@ async def test_load_dag_human_with_condition() -> None:
         "inputs": {"approved": {"default": False}},
         "nodes": {
             "data": {"type": "cfg_fetch"},
-            "review": {"kind": "human", "depends_on": ["data"], "condition": "approved == true"},
+            "review": {"type": "human", "depends_on": ["data"], "condition": "approved == true"},
         },
     }
     dag = load_dag(config, approver=approver)
@@ -91,7 +91,7 @@ async def test_load_dag_loop(registered: Any) -> None:
     config = {
         "nodes": {
             "batch": {
-                "kind": "loop",
+                "type": "loop",
                 "body": {"tick": {"type": "tick"}},
                 "condition": "iteration < 1",
                 "max_iterations": 2,
@@ -135,8 +135,8 @@ def test_parse_retry_forms() -> None:
 
 
 def test_validation_errors() -> None:
-    with pytest.raises(ValueError, match="未知类型"):
-        load_dag({"nodes": {"a": {"kind": "quantum"}}})
+    with pytest.raises(ValueError, match="不支持的字段"):
+        load_dag({"nodes": {"a": {"kind": "human"}}})  # kind 已废除，只有 type
     with pytest.raises(ValueError, match="不支持的字段"):
         load_dag({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}})
     with pytest.raises(ValueError, match="需要 'type'"):
@@ -155,11 +155,11 @@ def test_validation_errors() -> None:
             }
         )
     with pytest.raises(ValueError, match="非空的 'body'"):
-        load_dag({"nodes": {"l": {"kind": "loop", "condition": "x"}}})
+        load_dag({"nodes": {"l": {"type": "loop", "condition": "x"}}})
     with pytest.raises(ValueError, match="需要 'condition'"):
-        load_dag({"nodes": {"l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}}}})
+        load_dag({"nodes": {"l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}}}})
     with pytest.raises(ValueError, match="必须提供 approver"):
-        load_dag({"nodes": {"r": {"kind": "human"}}})
+        load_dag({"nodes": {"r": {"type": "human"}}})
     with pytest.raises(ValueError, match="必须是 dict"):
         load_dag(123)  # type: ignore[arg-type]
 
@@ -199,7 +199,7 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
         ran["n"] += 1
         return ctx["query"]
 
-    registered("t_only", only, "function")
+    registered("t_only", only)
     dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "inputs": {"query": {"required": True}}})
 
     assert dag.validate() == []
@@ -222,7 +222,7 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
         ran["n"] += 1
         return ctx["query"]
 
-    registered("t_required_default", only, "function")
+    registered("t_required_default", only)
     dag = load_dag(
         {"nodes": {"only": {"type": "t_required_default"}},
          "inputs": {"query": {"required": True, "default": "建议值"}}}
@@ -254,7 +254,7 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
     async def only(ctx: dict[str, Any]) -> Any:
         return ctx["count"]
 
-    registered("t_echo_count", only, "function")
+    registered("t_echo_count", only)
     dag = load_dag(
         {"nodes": {"echo": {"type": "t_echo_count"}},
          "inputs": {"count": {"required": True}}}
@@ -276,7 +276,7 @@ async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
     async def echo(ctx: dict[str, Any]) -> Any:
         return ctx["extra"]
 
-    registered("t_echo_extra", echo, "function")
+    registered("t_echo_extra", echo)
 
     # 声明了 params 契约：extra 未声明 → 拒
     declared = load_dag(
@@ -337,7 +337,7 @@ async def test_params_rich_form_runs(registered: Any) -> None:
     async def search(ctx: dict[str, Any]) -> dict[str, Any]:
         return {"query": ctx["query"], "topic": ctx.get("topic")}
 
-    registered("t_search", search, "function")
+    registered("t_search", search)
     dag = load_dag(
         {
             "nodes": {"search": {"type": "t_search"}},
@@ -436,10 +436,10 @@ def test_validate_nodes_accepts() -> None:
     assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": []}}}) == []
 
     # human 类型节点
-    assert validate_nodes({"nodes": {"a": {"kind": "human", "prompt": "审核"}}}) == []
+    assert validate_nodes({"nodes": {"a": {"type": "human", "prompt": "审核"}}}) == []
     # human 节点 review - 键必须在 params 或 nodes 中
     assert validate_nodes({
-        "nodes": {"a": {"kind": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}},
+        "nodes": {"a": {"type": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}},
         "inputs": {"title": {}},
     }) == []
 
@@ -447,7 +447,7 @@ def test_validate_nodes_accepts() -> None:
 def test_validate_nodes_accepts_loop() -> None:
     """loop 节点的 condition 是表达式（iteration 在循环谓词视图可用）"""
     assert validate_nodes({
-        "nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "iteration < 3"}}
+        "nodes": {"a": {"type": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "iteration < 3"}}
     }) == []
 
 
@@ -467,14 +467,15 @@ def test_validate_nodes_rejects() -> None:
         "节点 'a': 定义必须是映射(dict)，实际是 str"
     ]
 
-    # 未知 kind
+    # kind 已废除：报不支持字段 + 缺 type（字段检查先于 membership）
     assert validate_nodes({"nodes": {"a": {"kind": "quantum"}}}) == [
-        "节点 'a': 未知类型 'quantum'（支持 node|human|loop）"
+        "节点 'a': 不支持的字段 ['kind']",
+        "节点 'a': 需要 'type'（函数键）",
     ]
 
     # 不支持的字段
     assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}}) == [
-        "节点 'a'（node）: 不支持的字段 ['bogus']"
+        "节点 'a'（cfg_fetch）: 不支持的字段 ['bogus']"
     ]
 
     # node 类型缺少 type
@@ -484,7 +485,7 @@ def test_validate_nodes_rejects() -> None:
 
     # type 未注册
     assert validate_nodes({"nodes": {"a": {"type": "no_such_fn"}}}) == [
-        "节点 'a'（node）: 类型函数 'no_such_fn' 未注册"
+        "节点 'a': 类型函数 'no_such_fn' 未注册"
     ]
 
     # depends_on 类型错误 / 依赖缺失 / 循环依赖（已并入 validate_nodes）
@@ -500,17 +501,17 @@ def test_validate_nodes_rejects() -> None:
     }}) == ["检测到循环依赖: a → b"]
 
     # loop 类型缺少 body / condition、condition 引用未知键（condition 校验先于 body 检查）
-    assert validate_nodes({"nodes": {"a": {"kind": "loop", "condition": "x"}}}) == [
+    assert validate_nodes({"nodes": {"a": {"type": "loop", "condition": "x"}}}) == [
         "节点 'a': condition 引用的 'x' 不是参数键、节点名或 inputs 本地键",
         "循环节点 'a': 需要非空的 'body' 映射",
     ]
-    assert validate_nodes({"nodes": {"a": {"kind": "loop", "body": {"b": {"type": "cfg_fetch"}}}}}) == [
+    assert validate_nodes({"nodes": {"a": {"type": "loop", "body": {"b": {"type": "cfg_fetch"}}}}}) == [
         "循环节点 'a': 需要 'condition' 表达式"
     ]
 
     # human 节点 review 校验失败（带节点名前缀）
     assert validate_nodes({
-        "nodes": {"a": {"kind": "human", "review": {"a": {"label": None}}}},
+        "nodes": {"a": {"type": "human", "review": {"a": {"label": None}}}},
         "inputs": {"a": {}},
     }) == ["审核节点 'a': review 字段 'a': label 必须是字符串"]
 
@@ -519,14 +520,14 @@ def test_validate_nodes_collects_errors_across_nodes() -> None:
     """不同节点的错误一次性全部返回。"""
     errors = validate_nodes({
         "nodes": {
-            "a": {},                       # 缺 type
-            "b": {"kind": "quantum"},      # 未知 kind
-            "c": {"type": "cfg_fetch"},    # 合法
+            "a": {},                                   # 缺 type
+            "b": {"type": "cfg_fetch", "bogus": 1},    # 不支持的字段
+            "c": {"type": "cfg_fetch"},                # 合法
         }
     })
     assert len(errors) == 2
     assert any("需要 'type'" in e for e in errors)
-    assert any("未知类型" in e for e in errors)
+    assert any("不支持的字段" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +570,7 @@ def test_validate_config_rejects_bad_structure() -> None:
     # loop body 是独立命名空间：body 内依赖缺失带循环节点名前缀
     assert validate_config({"nodes": {
         "l": {
-            "kind": "loop",
+            "type": "loop",
             "condition": "iteration < 3",
             "body": {"b": {"type": "cfg_fetch", "depends_on": ["ghost"]}},
         },
@@ -617,8 +618,8 @@ def test_validate_config_collects_all_errors() -> None:
             "r": {"required": "yes"},   # required 类型错误
         },
         "nodes": {
-            "a": {},                    # 缺 type
-            "b": {"kind": "quantum"},   # 未知 kind
+            "a": {},                                 # 缺 type
+            "b": {"type": "cfg_fetch", "bogus": 1},  # 不支持的字段
         },
     }
     errors = validate_config(config)
@@ -631,7 +632,6 @@ def test_validate_config_collects_all_errors() -> None:
     assert "不支持的字段 ['bogus']" in message
     assert "required 必须是布尔值" in message
     assert "需要 'type'" in message
-    assert "未知类型" in message
 
 
 async def test_human_review_view_payload(registered: Any) -> None:
@@ -645,7 +645,7 @@ async def test_human_review_view_payload(registered: Any) -> None:
     async def work(ctx: dict[str, Any]) -> str:
         return "done"
 
-    registered("t_work", work, "function")
+    registered("t_work", work)
     dag = load_dag(
         {
             # opt：可选参数、无默认值 → 本次运行不提供，审核视图里应为 None 而非消失
@@ -653,7 +653,7 @@ async def test_human_review_view_payload(registered: Any) -> None:
             "nodes": {
                 "work": {"type": "t_work"},
                 "gate": {
-                    "kind": "human",
+                    "type": "human",
                     "depends_on": ["work"],
                     "prompt": "重点核对工作成果",
                     "review": {"work": {"label": "工作成果"}, "opt": {"label": "可选参数"}},
@@ -686,7 +686,7 @@ def test_review_unknown_key_rejected() -> None:
                 "nodes": {
                     "work": {"type": "cfg_fetch"},
                     "gate": {
-                        "kind": "human", "depends_on": ["work"],
+                        "type": "human", "depends_on": ["work"],
                         "review": {"ttile": {"label": "标题"}},
                     },
                 },
@@ -705,7 +705,7 @@ def test_review_param_key_allowed() -> None:
             "inputs": {"q": {"required": True}, "opt": {}},
             "nodes": {
                 "gate": {
-                    "kind": "human", "depends_on": [],
+                    "type": "human", "depends_on": [],
                     "review": {"q": {"label": "查询"}, "opt": {"label": "可选参数"}},
                 },
             },
@@ -790,7 +790,7 @@ async def test_condition_boolean_constants() -> None:
 
     # loop 的 condition: false 合法（body 一轮不跑）；condition: null 等同未声明
     assert validate_config({"nodes": {
-        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": False},
+        "l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": False},
     }}) == []
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": None},
@@ -907,8 +907,8 @@ def test_condition_expression_validation() -> None:
 
     # loop 的条件里 iteration 可用，其余键同样核对
     assert validate_config({"nodes": {
-        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "iteration < 3"},
+        "l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "iteration < 3"},
     }}) == []
     assert validate_config({"nodes": {
-        "l": {"kind": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "rounds < 3"},
+        "l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "rounds < 3"},
     }}) == ["节点 'l': condition 引用的 'rounds' 不是参数键、节点名或 inputs 本地键"]

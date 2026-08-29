@@ -15,7 +15,8 @@ import logging
 import time
 from typing import Any
 
-from .node import HumanRejected, Node, replay_review_edits
+from .condition import eval_condition
+from .node import HumanRejected, Node, replay_review_edits, wired_view
 from .types import (
     DAGExecutionError,
     NodeEventFunc,
@@ -65,9 +66,6 @@ class DAGExecutor:
             nodes: All nodes in the DAG (keyed by name).
             inputs: Initial key-value pairs placed into the shared context.
             resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
-                    已完成/跳过（条件不满足或级联）的节点作为既成事实不
-                    重跑（前者输出进上下文，后者的下游按级联语义恢复）；
-                    其余节点正常重跑（含重新挂起的审批节点）。
 
         Returns:
             Dict mapping each node name to its :class:`NodeResult`.
@@ -100,7 +98,9 @@ class DAGExecutor:
             tasks[name].set_result(restored)
 
             ctx[name] = saved.get("output")
-            if nodes[name].metadata.get("human_review"):
+            
+            node_type = nodes[name].node_type
+            if node_type is not None and node_type.name == "human":
                 replay_review_edits(ctx, saved.get("output"))
 
         # ----- spawn remaining nodes -----
@@ -180,7 +180,7 @@ class DAGExecutor:
             # ---- 3. Evaluate condition (branching) ----
             if node.condition is not None:
                 try:
-                    should_run = node.condition(ctx)
+                    should_run = eval_condition(node.condition, wired_view(ctx, node.inputs))
                 except Exception as exc:
                     logger.error(
                         "[%s] Condition raised %s: %s - skipping node",
@@ -217,6 +217,9 @@ class DAGExecutor:
 
                     # success
                     ctx[node.name] = output
+                    # 人工审核通过后的修订回放共享上下文（与 resume 恢复同一条路径）
+                    if node.node_type is not None and node.node_type.name == "human":
+                        replay_review_edits(ctx, output)
                     logger.info(
                         "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
                         node.name,
@@ -325,8 +328,19 @@ class DAGExecutor:
 
     @staticmethod
     async def _call(node: Node, ctx: dict[str, Any]) -> Any:
-        """Invoke *node.func* with timeout if configured."""
-        coro = node.func(ctx)
+        """Invoke *node.func* with timeout if configured.
+
+        统一在此组装接线视图（``Node.inputs`` + 保留键 ``_node``/``_upstream``）；
+        循环节点例外——body 子流水线要直接读写共享上下文（输出累积进顶层）。
+        """
+        if node.metadata.get("loop"):
+            target: dict[str, Any] = ctx
+        else:
+            target = wired_view(ctx, node.inputs)
+            target["_node"] = node.name
+            if node.depends_on:
+                target["_upstream"] = {d: ctx.get(d) for d in node.depends_on}
+        coro = node.func(target)
         if node.timeout is not None:
             return await asyncio.wait_for(coro, timeout=node.timeout)
         return await coro

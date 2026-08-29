@@ -2,8 +2,8 @@
 
 列表只做轻量解析（快、容错：单个文件坏了跳过并告警，不让整个
 目录 500）；详情走 load_dag 的完整校验与图构建（mermaid/拓扑序）。
-approver 必须传 no-op：含 human 节点的流水线在构建时会校验 approver
-存在，但浏览不执行 dag.run()，no-op 永远不会被调用。
+浏览不执行 dag.run()，无需 approver（human 节点的 approver 缺失只在
+真正运行时报错）。
 """
 
 from __future__ import annotations
@@ -43,11 +43,6 @@ def _param_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
         }
         for name, spec in (config.get("inputs") or {}).items()
     ]
-
-
-async def _noop_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """静态浏览用的空审批器：load_dag 要求 human 节点有 approver，但浏览不执行。"""
-    return {"approve": False}
 
 
 def list_pipelines() -> list[dict[str, Any]]:
@@ -91,12 +86,13 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
 
 
 def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
-    """把 YAML 节点 spec 合成展示行：类型名来自 spec，label/描述来自注册表。
+    """把 YAML 节点 spec 合成展示行：type 是唯一判别字段，label/描述来自注册表。
 
-    human/loop 是引擎内置 kind，不在注册表里，给固定 label；type_description
-    分别放审核提示和循环体摘要。
+    kind 由 type 推导（结构化类型 human，其余为 node）供前端标签使用；
+    human 的 type_description 放审核提示（inputs._prompt 字面量）。
     """
-    kind = spec.get("kind", "node")
+    type_val = spec.get("type")
+    kind = "human" if type_val == "human" else "node"
     cond_spec = spec.get("condition")
     row: dict[str, Any] = {
         "name": name,
@@ -111,20 +107,17 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "review": None,
     }
     if kind == "node":
-        row["type"] = spec.get("type")
-        node_type = REGISTRY.get(row["type"]) if row["type"] else None
+        row["type"] = type_val
+        node_type = REGISTRY.get(type_val) if type_val else None
         if node_type:
             row["type_label"] = node_type.label
             row["type_description"] = node_type.description
     elif kind == "human":
         row["type_label"] = "人工审核"
-        row["type_description"] = spec.get("prompt")
-        # 原始富声明 {key: {label}} 直通前端；格式已由 load_dag 校验
-        row["review"] = spec.get("review")
-    elif kind == "loop":
-        row["type_label"] = "循环"
-        body = spec.get("body") or {}
-        row["type_description"] = f"循环体 {len(body)} 个节点，上限 {spec.get('max_iterations', 100)} 轮"
+        wiring = spec.get("inputs") or {}
+        row["type_description"] = wiring.get("_prompt")
+        # 审核视图声明（inputs._review 字面量 {key: {label}}）直通前端；格式已由 validate 校验
+        row["review"] = wiring.get("_review")
     if isinstance(cond_spec, bool):
         row["condition_label"] = "恒执行" if cond_spec else "恒跳过"
     elif cond_spec:
@@ -166,7 +159,7 @@ def mermaid_from_definition(record: RunRecord) -> str | None:
         config = yaml.safe_load(record.definition)
         if not isinstance(config, dict):
             return None
-        return load_dag(config, approver=_noop_approver).to_mermaid()
+        return load_dag(config).to_mermaid()
     except Exception as exc:
         logger.warning("[run %s] definition 现渲染 mermaid 失败，回退存储快照: %s", record.id, exc)
         return None
@@ -174,7 +167,7 @@ def mermaid_from_definition(record: RunRecord) -> str | None:
 
 def _detail_from_config(filename: str, raw: str, config: dict[str, Any]) -> dict[str, Any]:
     """已解析的 YAML 配置 → 详情展示数据（图、节点行、YAML 原文）。"""
-    dag = load_dag(config, approver=_noop_approver)
+    dag = load_dag(config)
     nodes_cfg = config.get("nodes") or {}
     rows = [_node_row(name, nodes_cfg.get(name) or {}) for name in dag.topological_order()]
     return {

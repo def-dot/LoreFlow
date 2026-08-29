@@ -14,21 +14,23 @@ inputs:
 
 nodes:
   编辑初审:
-    kind: human
-    prompt: "初审把关：标题达意、正文完整可读再通过。"
-    # 审核视图
-    review:
-      title: {label: 标题}
-      content: {label: 正文}
+    type: human
+    inputs:
+      _prompt: "初审把关：标题达意、正文完整可读再通过。"
+      title: $title
+      content: $content
+      # 审核视图标签
+      _review: {title: {label: 标题}, content: {label: 正文}}
 
   主编终审:
-    kind: human
+    type: human
     depends_on: [编辑初审]
-    prompt: "终审把关：确认可对外发布再通过。"
-    # 终审视图
-    review:
-      title: {label: 标题}
-      content: {label: 正文}
+    inputs:
+      _prompt: "终审把关：确认可对外发布再通过。"
+      title: $title
+      content: $content
+      # 终审视图标签
+      _review: {title: {label: 标题}, content: {label: 正文}}
 
   发布:
     type: cfg_publish

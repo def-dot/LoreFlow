@@ -24,14 +24,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import pprint
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
 from .executor import DAGExecutor
-from .node import ApproverFunc, ConditionFunc, HumanRejected, Node, NodeFunc
+from .node import ApproverFunc, ConditionFunc, Node, NodeFunc
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
-from .validate import validate_graph, validate_inputs, validate_params, validate_review
+from .validate import validate_graph, validate_inputs, validate_params
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 async def terminal_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Interactive approver: ask the reviewer on the terminal (y/n).
 
-    Pass explicitly to :meth:`DAG.human_node` or ``load_dag(approver=...)``
+    Pass explicitly to ``load_dag(approver=...)`` or ``DAG(approver=...)``
     for runs driven from a terminal; on EOF (e.g. CI) the review is rejected.
     """
     print(f"  Payload:\n{pprint.pformat(payload, sort_dicts=False)}")
@@ -78,11 +78,12 @@ class DAG:
         name: str = "dag",
         params: dict[str, dict[str, Any]] | None = None,
         on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
+        approver: ApproverFunc | None = None,
     ):
         self.name = name
-        # 声明原样保存（形状由 validate_params 保证），派生视图见下方属性
         self.params = params if params else {}
         self.on_event = on_event
+        self.approver = approver
         self._nodes: dict[str, Node] = {}
 
     @property
@@ -121,9 +122,10 @@ class DAG:
             raise ValueError(
                 f"节点 {node.name!r}: func 必须是可调用对象，实际是 {type(node.func).__name__}"
             )
-        if node.condition is not None and not callable(node.condition):
+        if node.condition is not None and not isinstance(node.condition, (str, bool)):
             raise ValueError(
-                f"节点 {node.name!r}: condition 必须是可调用对象，实际是 {type(node.condition).__name__}"
+                f"节点 {node.name!r}: condition 必须是表达式字符串或布尔常量，"
+                f"实际是 {type(node.condition).__name__}"
             )
         self._nodes[node.name] = node
         return node
@@ -134,7 +136,7 @@ class DAG:
         depends_on: list[str] | None = None,
         retry: RetryPolicy | None = None,
         timeout: float | None = None,
-        condition: ConditionFunc | None = None,
+        condition: str | bool | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Callable[[NodeFunc], NodeFunc]:
         """Decorator: register an async function as a DAG node.
@@ -263,140 +265,16 @@ class DAG:
         node = Node(
             name=name,
             func=loop_func,
-            label="循环",
             depends_on=depends_on or [],
             retry=retry,
             timeout=timeout,
-            # label 供 to_mermaid 做展示主行（可被同名 key 覆盖）；
-            # type/type_label 供小字行显示类型名与类型 label
+            # loop 标记供 executor 直用共享上下文；
+            # type/type_label 供 to_mermaid 小字行（无注册表引用的类型）
             metadata={
                 "loop": True,
                 "max_iterations": max_iterations,
                 "type": "loop",
                 "type_label": "循环",
-            },
-        )
-        self.add_node(node)
-        return node
-
-    # ------------------------------------------------------------------
-    # Human review support
-    # ------------------------------------------------------------------
-
-    def human_node(
-        self,
-        name: str,
-        depends_on: list[str] | None = None,
-        prompt: str | None = None,
-        condition: ConditionFunc | None = None,
-        retry: RetryPolicy | None = None,
-        approver: ApproverFunc | None = None,
-        review: Mapping[str, Mapping[str, str]] | Sequence[str] | None = None,
-    ) -> Node:
-        """Register a human-in-the-loop review node.
-
-        When the DAG reaches this node it pauses and asks a human to
-        review the current context. Approving completes the node with
-        the payload as seen at review time — the snapshot is never
-        modified after the fact; decision ``edits`` are archived in
-        ``decision.edits`` and written back to the shared context, so
-        downstream nodes (a second-level review, a publisher, …) read
-        the revised values. Rejecting raises :exc:`HumanRejected`,
-        which fails the node and cascades to skip all downstream nodes
-        (standard failure semantics). The rejection details are carried
-        in the FAILED node result's ``output``.
-
-        Args:
-            name: Unique node name.
-            depends_on: Upstream nodes whose outputs are shown for review.
-            prompt: Optional extra text shown with the review request.
-            condition: Optional predicate; if it returns False the review
-                       is skipped (the human is never asked).
-            retry: Optional retry policy. 拒绝是终局决策（HumanRejected 被
-                   executor 专用捕获，不进重试循环），retry 对拒绝无效。
-            approver: Async callable ``(node_name, payload) ->
-                      {"approve": bool, "reason": Optional[str]}``.
-                      Required. Use :func:`terminal_approver` for
-                      interactive terminals, or your own to drive reviews
-                      from elsewhere (e.g. a web UI).
-            review: Optional review view — raw format mapping of context key →
-                    {label: display text}. Or a bare list of keys, label = key.
-                    Declared: the payload shown to the reviewer contains
-                    only these keys (plus a leading ``_review`` entry
-                    carrying the labels; runtime-absent keys become
-                    ``None``). ``None`` (default): the payload is the
-                    whole context minus the node itself.
-
-        Returns:
-            The registered review :class:`Node`.
-
-        Raises:
-            ValueError: If *approver* is not provided.
-        """
-        if approver is None:
-            raise ValueError(f"人工审核节点 {name!r} 必须提供 approver —— 例如 terminal_approver")
-        if not callable(approver):
-            raise ValueError(f"人工审核节点 {name!r}: approver 必须是可调用对象")
-
-        async def review_func(ctx: dict[str, Any]) -> dict[str, Any]:
-            if review is not None:
-                payload: dict[str, Any] = {}
-                if prompt:
-                    payload["_prompt"] = prompt
-
-                payload["_review"] = review
-                for key in review:
-                    payload[key] = ctx.get(key)
-            else:
-                payload = {k: v for k, v in ctx.items() if k != name}
-                if prompt:
-                    payload = {"_prompt": prompt, **payload}
-
-            print(f"\n  [REVIEW] node {name!r} is waiting for human approval")
-            if prompt:
-                print(f"  {prompt}")
-
-            decision = await approver(name, payload)
-            if decision.get("approve"):
-                logger.info("[%s] approved by human reviewer", name)
-
-                edits = decision.get("edits")
-                if isinstance(edits, dict):
-                    for key, value in edits.items():
-                        if key in payload and not key.startswith("_"):
-                            ctx[key] = value
-                return {
-                    "approved": True,
-                    "payload": payload,
-                    "decision": decision,
-                    "approved_at": datetime.now().isoformat(timespec="seconds"),
-                }
-
-            reason = decision.get("reason") or "被人工审核拒绝"
-            logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
-            raise HumanRejected(
-                reason,
-                output={
-                    "approved": False,
-                    "reason": reason,
-                    "payload": payload,
-                    "decision": decision,
-                    "approved_at": datetime.now().isoformat(timespec="seconds"),
-                },
-            )
-
-        node = Node(
-            name=name,
-            func=review_func,
-            label="人工审核",
-            depends_on=depends_on or [],
-            condition=condition,
-            retry=retry,
-            metadata={
-                "human_review": True,
-                "type": "human",
-                "type_label": "人工审核",
-                "review": review,
             },
         )
         self.add_node(node)
@@ -417,15 +295,6 @@ class DAG:
 
         # 程序化 DAG 无 config —— 按函数入参形状合成（只用到 inputs/nodes 键）
         errors.extend(validate_params({"inputs": self.params, "nodes": self._nodes}))
-
-        available = set(self._nodes) | set(self.params)
-        for node in self._nodes.values():
-            review = node.metadata.get("review")
-            if review is not None:
-                errors.extend(
-                    f"审核节点 {node.name!r}: {msg}"
-                    for msg in validate_review(review, available)
-                )
 
         edges = {name: node.depends_on for name, node in self._nodes.items()}
         errors.extend(validate_graph(edges))
@@ -504,7 +373,11 @@ class DAG:
             logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
 
         executor = DAGExecutor(concurrency=concurrency, on_event=self.on_event)
-        return await executor.execute(self._nodes, inputs, resume=resume)
+        # _approver 注入共享上下文：human 节点的审核结果来自当前运行
+        ctx: dict[str, Any] = dict(inputs or {})
+        if self.approver is not None:
+            ctx["_approver"] = self.approver
+        return await executor.execute(self._nodes, ctx, resume=resume)
 
     # ------------------------------------------------------------------
     # Visualisation
@@ -514,17 +387,19 @@ class DAG:
         """Render the DAG as a Mermaid flowchart (for docs / debugging).
 
         节点文案：大字行 = 节点 label（未声明回退节点名）；小字行 = 类型名 ·
-        类型 label（函数节点取注册表快照 metadata.type/type_label，human/loop
-        为内置 kind），再加条件 [?] 与重试 [Rn] 角标。
+        类型 label（经 node_type 引用读取；无引用的类型回退 metadata），
+        再加条件 [?] 与重试 [Rn] 角标。
         """
         lines = ["graph TD"]
         for node in self._nodes.values():
             nid = node.name.replace(" ", "_").replace("-", "_")
-            main_text = node.metadata.get("label") or node.name
+            main_text = node.label or node.name
 
             small = []
-            type_name = node.metadata.get("type")
-            type_label = node.metadata.get("type_label")
+            # 类型身份经 node_type 引用（定义—实例）；无引用的类型（程序化
+            # loop_node 等）回退 metadata
+            type_name = node.node_type.name if node.node_type else node.metadata.get("type")
+            type_label = node.node_type.label if node.node_type else node.metadata.get("type_label")
             if type_name:
                 small.append(f"{type_name} · {type_label}" if type_label else type_name)
             if node.condition:
@@ -554,8 +429,12 @@ class DAG:
 
     @property
     def human_nodes(self) -> list[Node]:
-        """Nodes that pause for human review (``human_review`` metadata)."""
-        return [node for node in self._nodes.values() if node.metadata.get("human_review")]
+        """Nodes that pause for human review（类型为 human）."""
+        return [
+            node
+            for node in self._nodes.values()
+            if node.node_type is not None and node.node_type.name == "human"
+        ]
 
     def __repr__(self) -> str:
         return f"DAG({self.name!r}, nodes={list(self._nodes)})"
