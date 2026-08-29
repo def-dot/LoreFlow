@@ -39,21 +39,19 @@ async def cfg_merge(ctx: dict[str, Any]) -> dict[str, Any]:
 
 @node(label="发布", description="发布人工审核通过的内容")
 async def cfg_publish(ctx: dict[str, Any]) -> str:
-    """发布最近一次人工审核通过的内容。审核输出固定含 decision/payload，
-    但 payload 是「审核时看到的输出」快照，审核修订不进去 —— 生效值在
-    共享上下文（引擎把 decision.edits 写回 ctx）。故以最后一级审核的
-    payload 键定范围、从 ctx 取值，再从中找出带 title 的内容输出（如
-    merge / fetch 的 {title, body}）；扁平输入（如 08 的 title/content
-    字符串键）没有嵌套 dict，兜底取顶层 "title" 键。跳过 "_" 前缀的
-    引擎保留键（声明视图的 _review 标签字典，否则会被误认成内容）。
+    """发布最后一级人工审核通过的内容。
+
+    审核输出固定含 ``revised``（载荷数据键应用修订后的生效值，引擎不
+    写回共享上下文）；从中找出带 title 的内容输出（如 merge / fetch 的
+    {title, body}），扁平输入（title/content 字符串键）直接取顶层
+    "title" 键。无审核节点时兜底全 ctx。
     """
-    reviews = [v for v in ctx.values() if isinstance(v, dict) and "decision" in v and "payload" in v]
-    if reviews and isinstance(reviews[-1]["payload"], dict):
-        # 审核范围 = 最后一级审核视图的键；生效值 = ctx（含修订写回）
-        keys = (k for k in reviews[-1]["payload"] if not str(k).startswith("_"))
-        payload = {k: ctx.get(k) for k in keys}
-    else:
-        payload = ctx
+    reviews = [
+        v
+        for v in ctx.values()
+        if isinstance(v, dict) and v.get("approved") and isinstance(v.get("revised"), dict)
+    ]
+    payload = reviews[-1]["revised"] if reviews else ctx
     titled = next(
         (v for v in reversed(list(payload.values())) if isinstance(v, dict) and "title" in v),
         {},

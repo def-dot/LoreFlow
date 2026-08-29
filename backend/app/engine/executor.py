@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from .condition import eval_condition
-from .node import HumanRejected, Node, replay_review_edits, wired_view
+from .node import HumanRejected, Node, wired_view
 from .types import (
     DAGExecutionError,
     NodeEventFunc,
@@ -39,9 +39,11 @@ class DAGExecutor:
 
     def __init__(
         self,
+        ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
     ):
+        self.ctx: dict[str, Any] = ctx if ctx is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
 
@@ -57,14 +59,12 @@ class DAGExecutor:
     async def execute(
         self,
         nodes: dict[str, Node],
-        inputs: dict[str, Any] | None = None,
         resume: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, NodeResult]:
         """Execute all *nodes* and return a mapping of node name → NodeResult.
 
         Args:
             nodes: All nodes in the DAG (keyed by name).
-            inputs: Initial key-value pairs placed into the shared context.
             resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
 
         Returns:
@@ -73,41 +73,28 @@ class DAGExecutor:
         Raises:
             DAGExecutionError: If one or more nodes ultimately failed.
         """
-        # ----- shared state -----
-        ctx: dict[str, Any] = dict(inputs) if inputs else {}
+        # ----- control-flow bookkeeping（数据在 self.ctx，构造时传入）-----
         events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in nodes}
         tasks: dict[str, asyncio.Future[NodeResult]] = {}
-
-        # ----- resume: 已完成/跳过（条件或级联）的节点作为既成事实直接恢复 -----
         resume = resume or {}
         loop = asyncio.get_running_loop()
-
-        for name, saved in resume.items():
-            if saved.get("status") not in ("completed", "skipped", "upstream_skipped"):
-                continue
-
-            events[name].set()
-            restored = NodeResult(
-                node_name=name,
-                status=NodeStatus(saved.get("status")),
-                output=saved.get("output"),
-                attempts=saved.get("attempts"),
-                duration_ms=saved.get("duration_ms") or 0.0,
-            )
-            tasks[name] = loop.create_future()
-            tasks[name].set_result(restored)
-
-            ctx[name] = saved.get("output")
-            
-            node_type = nodes[name].node_type
-            if node_type is not None and node_type.name == "human":
-                replay_review_edits(ctx, saved.get("output"))
-
-        # ----- spawn remaining nodes -----
+       
         for node in nodes.values():
-            if node.name in tasks:
-                continue
-            tasks[node.name] = asyncio.create_task(self._run_node(node, ctx, tasks, events))
+            saved = resume.get(node.name)
+            if saved is not None and saved.get("status") in ("completed", "skipped", "upstream_skipped"):
+                events[node.name].set()
+                restored = NodeResult(
+                    node_name=node.name,
+                    status=NodeStatus(saved.get("status")),
+                    output=saved.get("output"),
+                    attempts=saved.get("attempts"),
+                    duration_ms=saved.get("duration_ms") or 0.0,
+                )
+                tasks[node.name] = loop.create_future()
+                tasks[node.name].set_result(restored)
+                self.ctx[node.name] = saved.get("output")
+            else:
+                tasks[node.name] = asyncio.create_task(self._run_node(node, tasks, events))
 
         # ----- wait for completion -----
         await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -116,7 +103,6 @@ class DAGExecutor:
         # ----- surface failures as DAGExecutionError -----
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
-            # 构建详细失败消息：节点名 + 异常类型 + 消息
             fail_lines = [f"DAG 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}"]
             for name in failed:
                 result = results[name]
@@ -133,7 +119,6 @@ class DAGExecutor:
     async def _run_node(
         self,
         node: Node,
-        ctx: dict[str, Any],
         tasks: dict[str, asyncio.Future[NodeResult]],
         events: dict[str, asyncio.Event],
     ) -> NodeResult:
@@ -180,7 +165,7 @@ class DAGExecutor:
             # ---- 3. Evaluate condition (branching) ----
             if node.condition is not None:
                 try:
-                    should_run = eval_condition(node.condition, wired_view(ctx, node.inputs))
+                    should_run = eval_condition(node.condition, wired_view(self.ctx, node.inputs))
                 except Exception as exc:
                     logger.error(
                         "[%s] Condition raised %s: %s - skipping node",
@@ -209,17 +194,14 @@ class DAGExecutor:
 
                     if self._semaphore:
                         async with self._semaphore:
-                            output = await self._call(node, ctx)
+                            output = await self._call(node)
                     else:
-                        output = await self._call(node, ctx)
+                        output = await self._call(node)
 
                     duration_ms = (time.monotonic() - start) * 1000
 
                     # success
-                    ctx[node.name] = output
-                    # 人工审核通过后的修订回放共享上下文（与 resume 恢复同一条路径）
-                    if node.node_type is not None and node.node_type.name == "human":
-                        replay_review_edits(ctx, output)
+                    self.ctx[node.name] = output
                     logger.info(
                         "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
                         node.name,
@@ -326,20 +308,19 @@ class DAGExecutor:
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def _call(node: Node, ctx: dict[str, Any]) -> Any:
+    async def _call(self, node: Node) -> Any:
         """Invoke *node.func* with timeout if configured.
 
         统一在此组装接线视图（``Node.inputs`` + 保留键 ``_node``/``_upstream``）；
         循环节点例外——body 子流水线要直接读写共享上下文（输出累积进顶层）。
         """
         if node.metadata.get("loop"):
-            target: dict[str, Any] = ctx
+            target: dict[str, Any] = self.ctx
         else:
-            target = wired_view(ctx, node.inputs)
+            target = wired_view(self.ctx, node.inputs)
             target["_node"] = node.name
             if node.depends_on:
-                target["_upstream"] = {d: ctx.get(d) for d in node.depends_on}
+                target["_upstream"] = {d: self.ctx.get(d) for d in node.depends_on}
         coro = node.func(target)
         if node.timeout is not None:
             return await asyncio.wait_for(coro, timeout=node.timeout)

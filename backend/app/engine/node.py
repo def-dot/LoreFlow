@@ -53,21 +53,6 @@ class HumanRejected(Exception):
         self.output = output
 
 
-def replay_review_edits(ctx: dict[str, Any], output: Any) -> None:
-    """恢复已完成的人工审核节点时，重放审核修订对共享上下文的写回。
-    """
-    if not isinstance(output, dict):
-        return
-    decision = output.get("decision")
-    payload = output.get("payload")
-    edits = decision.get("edits") if isinstance(decision, dict) else None
-    if not isinstance(edits, dict) or not isinstance(payload, dict):
-        return
-    for key, value in edits.items():
-        if key in payload and not key.startswith("_"):
-            ctx[key] = value
-
-
 @dataclass
 class Node:
     """A single executable node in the DAG.

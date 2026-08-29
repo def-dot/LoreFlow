@@ -50,9 +50,15 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     decision = await approver(name, payload)
     if decision.get("approve"):
         logger.info("[%s] approved by human reviewer", name)
+        edits = decision.get("edits") if isinstance(decision.get("edits"), dict) else {}
         return {
             "approved": True,
             "payload": payload,
+            # 生效值 = 载荷数据键应用修订（未修订键原样）：不写回共享上下文，
+            # 下游（含下一级审核）经 ``$节点.revised.键`` 显式引用
+            "revised": {
+                k: edits.get(k, v) for k, v in payload.items() if not k.startswith("_")
+            },
             "decision": decision,
             "approved_at": datetime.now().isoformat(timespec="seconds"),
         }

@@ -224,21 +224,14 @@ class DAG:
                 iteration += 1
                 logger.info("[%s] loop iteration %d / %d", name, iteration, max_iterations)
 
-                # Run the body sub-DAG。body 失败抛 DAGExecutionError——取其
-                # results 继续，是否终止循环由 condition 决定。直接驱动执行器：
-                # body 已在注册期校验过，且外层上下文对无 params 的 body 不是
-                # 「输入」，不走 run() 的输入白名单
+                # Run the body sub-DAG。直接驱动执行器并共享外层上下文：
+                # body 已在注册期校验过，且外层上下文对无 params 的 body
+                # 不是「输入」，不走 run() 的输入白名单。body 失败时已完成
+                # 节点的输出已在共享上下文，是否终止循环由 condition 决定
                 try:
-                    iter_results = await DAGExecutor(on_event=sub.on_event).execute(
-                        sub.nodes, ctx
-                    )
-                except DAGExecutionError as exc:
-                    iter_results = exc.results
-
-                # Merge successful outputs into context
-                for nname, nr in iter_results.items():
-                    if nr.status == NodeStatus.COMPLETED:
-                        ctx[nname] = nr.output
+                    await DAGExecutor(ctx=ctx, on_event=sub.on_event).execute(sub.nodes)
+                except DAGExecutionError:
+                    pass
 
                 # Evaluate loop condition on a view with ``iteration`` injected
                 try:
@@ -372,12 +365,13 @@ class DAG:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
 
-        executor = DAGExecutor(concurrency=concurrency, on_event=self.on_event)
         # _approver 注入共享上下文：human 节点的审核结果来自当前运行
         ctx: dict[str, Any] = dict(inputs or {})
         if self.approver is not None:
             ctx["_approver"] = self.approver
-        return await executor.execute(self._nodes, ctx, resume=resume)
+
+        executor = DAGExecutor(ctx=ctx, concurrency=concurrency, on_event=self.on_event)
+        return await executor.execute(self._nodes, resume=resume)
 
     # ------------------------------------------------------------------
     # Visualisation

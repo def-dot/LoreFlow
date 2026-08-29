@@ -22,13 +22,14 @@ nodes:
       # 审核视图标签
       _review: {title: {label: 标题}, content: {label: 正文}}
 
+  # 终审看到的是初审修订后的生效值（$编辑初审.revised.键）
   主编终审:
     type: human
     depends_on: [编辑初审]
     inputs:
       _prompt: "终审把关：确认可对外发布再通过。"
-      title: $title
-      content: $content
+      title: $编辑初审.revised.title
+      content: $编辑初审.revised.content
       # 终审视图标签
       _review: {title: {label: 标题}, content: {label: 正文}}
 
