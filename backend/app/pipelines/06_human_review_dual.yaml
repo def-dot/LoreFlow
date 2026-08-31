@@ -22,17 +22,17 @@ nodes:
         $title: 标题
         $content: 正文
 
-  # 终审看到的是初审修订后的生效值：卡片字段平铺在决策里，直接引用；
-  # 来源不同 → 接线条目
   final_review:
     type: human
     label: 主编终审
     depends_on: [first_review]
     inputs:
       _prompt: "终审把关：确认可对外发布再通过。"
+      title: $first_review.decision.title
+      content: $first_review.decision.content
       _review:
-        $first_review.decision.title: 标题
-        $first_review.decision.content: 正文
+        $title: 标题
+        $content: 正文
 
   publish:
     type: cfg_publish
