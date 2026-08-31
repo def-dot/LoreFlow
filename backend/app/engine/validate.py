@@ -152,10 +152,6 @@ def _validate_condition(condition: Any, available_refs: set[str]) -> list[str]:
 
 def _validate_review(review: Any, available_refs: set[str]) -> list[str]:
     """_review 卡片声明校验：``{$键: 标签文本}``，键根 ∈ available_refs。
-
-    与 condition 同域（参数 ∪ 上游 ∪ 本地键——载荷从接线视图取值）；
-    卡片字段不得占用协议键 approve/reason（决策送回时平铺同名冲突）。
-    消息不带节点名前缀，由调用点统一加。
     """
     if not isinstance(review, dict):
         return [f"_review 必须是「$键: 标签文本」的映射，实际是 {type(review).__name__}"]
@@ -252,7 +248,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
             continue
 
-        # type 是唯一判别字段：所有类型用同一字段集
         type_key = spec.get("type")
         if not type_key:
             errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
@@ -279,7 +274,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         if condition:
             errors.extend(f"节点 {name!r}: {msg}" for msg in _validate_condition(condition, refs))
 
-        # _review 只在 human 节点上有意义；未声明 = 全量上下文，合法不校验
         if type_key == "human" and isinstance(wiring, dict) and wiring.get("_review") is not None:
             errors.extend(
                 f"节点 {name!r}: {msg}" for msg in _validate_review(wiring["_review"], refs)

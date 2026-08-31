@@ -91,10 +91,6 @@ class DAG:
     @property
     def default_inputs(self) -> dict[str, Any]:
         """声明了 ``default`` 的参数 → 默认值（必填键也不例外）。
-
-        :meth:`run` 未传 inputs 时以本视图顶班，输入校验也看回退后的
-        生效输入（defaults 算已提供）；API 边界在 create_run 校验原始
-        inputs，required 即使有 default 也须显式传入。
         """
         return {
             name: spec["default"]
@@ -361,8 +357,7 @@ class DAG:
             inputs = self.default_inputs
 
         if self.params:
-            errors = validate_inputs(inputs, self.params)
-            if errors:
+            if errors := validate_inputs(inputs, self.params):
                 raise ValueError("\n".join(errors))
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
