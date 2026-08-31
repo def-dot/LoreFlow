@@ -88,10 +88,10 @@ async def test_upload_to_run_e2e_gbk(client: AsyncClient) -> None:
     data = await _wait_terminal(client, resp.json()["data"]["run_id"])
 
     assert data["status"] == "completed"
-    output = data["nodes"]["文档解析"]["output"]
+    output = data["nodes"]["load"]["output"]
     assert output["doc_id"] == "北境要塞"
     assert "你好，北境。" in output["text"]
-    assert data["nodes"]["写入向量库"]["status"] == "completed"
+    assert data["nodes"]["upsert"]["status"] == "completed"
 
 
 async def test_run_fails_when_file_deleted(client: AsyncClient) -> None:
@@ -107,4 +107,4 @@ async def test_run_fails_when_file_deleted(client: AsyncClient) -> None:
     data = await _wait_terminal(client, resp.json()["data"]["run_id"])
 
     assert data["status"] == "failed"
-    assert "不存在或已被清理" in data["nodes"]["文档解析"]["error"]
+    assert "不存在或已被清理" in data["nodes"]["load"]["error"]

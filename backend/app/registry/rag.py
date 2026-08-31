@@ -37,7 +37,7 @@ async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
     document = ctx.get("document")
     if not isinstance(document, dict):
         raise ValueError("上游缺少文档输出：inputs 需接线 document ← rag_load 节点（或该上游被条件跳过）")
-    return [p.strip() for p in document["text"].split("\n\n") if p.strip()]
+    return [p.strip() for p in document["text"].split("\r\n\r\n") if p.strip()]
 
 
 @node_type(label="向量化", description="为每个 chunk 生成 8 维确定性向量；输入 document、chunks ← rag_load/rag_chunk 节点（YAML inputs 接线）")

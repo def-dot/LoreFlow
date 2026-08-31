@@ -21,7 +21,7 @@ export interface ParamSpec {
   has_default: boolean    // 区分「声明了 default: null」与「未声明默认值」
   required: boolean
   multiline: boolean      // 多行文本（渲染 textarea，如文章正文）
-  file: boolean           // 文件上传（渲染上传控件，提交 {filename, content}）
+  file: boolean           // 文件上传（渲染上传控件，提交上传接口返回的 {id, filename} 引用）
 }
 
 export interface PipelineListItem {

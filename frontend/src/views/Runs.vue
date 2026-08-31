@@ -6,6 +6,7 @@ import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
 import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
 import { getRunConfig } from '@/api/runs'
+import { uploadFile, type UploadOut } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
 import { usePipelinesStore } from '@/stores/pipelines'
 
@@ -25,8 +26,11 @@ const creating = ref(false)
 const inputsText = ref('')
 // 表单模式的字段值（字符串输入，提交时解析）
 const paramValues = ref<Record<string, string>>({})
-// file 参数已选的文件名（正文文本存 paramValues，提交时合成 {filename, content}）
+// file 参数的服务端引用（选文件即上传，提交时用 {id, filename}）与展示用文件名
+const uploadRefs = ref<Record<string, UploadOut>>({})
 const fileNames = ref<Record<string, string>>({})
+// file 参数上传中（防重复选择 + 按钮态）
+const uploading = ref<Record<string, boolean>>({})
 // 声明了 params 的流水线默认表单模式；未声明的只有 JSON 文本
 const jsonMode = ref(false)
 
@@ -79,6 +83,7 @@ watch(
         .map((s) => [s.name, defaultToText(s.default)]),
     )
     fileNames.value = {}
+    uploadRefs.value = {}
     inputsText.value = ''
   },
 )
@@ -107,13 +112,17 @@ function parseFieldValue(raw: string, multiline: boolean): unknown {
 const formInputs = computed(() => {
   const value: Record<string, unknown> = {}
   for (const spec of paramSpecs.value) {
+    // file 字段的值是上传接口返回的 {id, filename} 引用（rag_load 按 id 读盘）；
+    // 未选文件 = 不传该参数（用默认值或不传）
+    if (spec.file) {
+      const ref = uploadRefs.value[spec.name]
+      if (!ref) continue
+      value[spec.name] = { id: ref.id, filename: ref.filename }
+      continue
+    }
     const raw = (paramValues.value[spec.name] ?? '').trim()
     if (raw === '') continue
-    // file 字段的值是文件正文：不做 JSON 启发式（正文形似数字/JSON 不该
-    // 被改类型），合成 {filename, content} 供节点取标题
-    value[spec.name] = spec.file
-      ? { filename: fileNames.value[spec.name] || '上传文档', content: paramValues.value[spec.name] }
-      : parseFieldValue(raw, spec.multiline)
+    value[spec.name] = parseFieldValue(raw, spec.multiline)
   }
   return value
 })
@@ -174,24 +183,28 @@ function fillDefaults() {
   inputsText.value = defaultsJson.value
 }
 
-// file 参数选择文件：客户端读纯文本入参（上传即读取，无服务端暂存），
-// 文件名单独记录供提交时合成 {filename, content}
-function onFilePicked(spec: ParamSpec, event: Event) {
+// file 参数选择文件：上传到服务端换 {id, filename} 引用（rag_load 按 id 读盘），
+// 不再客户端读正文；上传失败由拦截器提示，保持「未选择」状态
+async function onFilePicked(spec: ParamSpec, event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = '' // 清掉选择，允许再次选同一文件
   if (!file) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    paramValues.value[spec.name] = String(reader.result ?? '')
-    fileNames.value[spec.name] = file.name
+  uploading.value[spec.name] = true
+  try {
+    const ref = await uploadFile(file)
+    uploadRefs.value[spec.name] = ref
+    fileNames.value[spec.name] = ref.filename
+  } catch {
+    // 错误已由拦截器提示；保持未选择状态
+  } finally {
+    uploading.value[spec.name] = false
   }
-  reader.readAsText(file)
 }
 
 // 移除已选文件：回到「未选择」= 该参数不随新建运行提交（用默认值或不传）
 function clearFile(spec: ParamSpec) {
-  delete paramValues.value[spec.name]
+  delete uploadRefs.value[spec.name]
   delete fileNames.value[spec.name]
 }
 
@@ -467,13 +480,17 @@ onUnmounted(() => {
                 {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
                 <span v-else class="param-optional">可选</span>
               </div>
-              <!-- file 参数：上传控件 + 文件名（正文不回显，随提交合成 {filename, content}） -->
+              <!-- file 参数：选文件即上传到服务端，提交时用返回的 {id, filename} 引用 -->
               <div v-if="spec.file" class="param-file">
-                <label class="param-file-button">
-                  选择文件
+                <label
+                  class="param-file-button"
+                  :class="{ disabled: uploading[spec.name] }"
+                >
+                  {{ uploading[spec.name] ? '上传中…' : '选择文件' }}
                   <input
                     type="file"
                     accept=".txt,.md,.markdown,text/plain"
+                    :disabled="uploading[spec.name]"
                     @change="onFilePicked(spec, $event)"
                   />
                 </label>
@@ -483,7 +500,7 @@ onUnmounted(() => {
                   </span>
                   <button class="param-file-clear" title="移除文件" @click="clearFile(spec)">✕</button>
                 </template>
-                <span v-else class="param-file-empty">未选择文件</span>
+                <span v-else class="param-file-empty">{{ uploading[spec.name] ? '上传中，请稍候…' : '未选择文件' }}</span>
               </div>
               <el-input
                 v-else
@@ -678,6 +695,10 @@ onUnmounted(() => {
 .param-file-button:hover {
   border-color: var(--ink-3);
   color: var(--ink);
+}
+.param-file-button.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .param-file-button input {
   display: none;

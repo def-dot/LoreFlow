@@ -9,20 +9,24 @@ inputs:
     description: 上传 txt/md 等文本文件入库
 
 nodes:
-  文档解析:
+  load:
     type: rag_load
+    label: 文档解析
 
-  切块:
+  chunk:
     type: rag_chunk
-    depends_on: [文档解析]
-    inputs: {document: $文档解析}
+    label: 切块
+    depends_on: [load]
+    inputs: {document: $load}
 
-  向量化:
+  embed:
     type: rag_embed
-    depends_on: [切块]
-    inputs: {document: $文档解析, chunks: $切块}
+    label: 向量化
+    depends_on: [chunk]
+    inputs: {document: $load, chunks: $chunk}
 
-  写入向量库:
+  upsert:
     type: rag_upsert
-    depends_on: [向量化]
-    inputs: {document: $文档解析, embeds: $向量化}
+    label: 写入向量库
+    depends_on: [embed]
+    inputs: {document: $load, embeds: $embed}

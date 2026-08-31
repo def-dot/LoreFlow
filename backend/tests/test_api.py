@@ -367,7 +367,7 @@ async def test_create_run_with_config_file(client: AsyncClient) -> None:
     assert data["status"] == "completed"
     assert data["config_file"] == "01_serial.yaml"
     assert all(n["status"] != "reviewing" for n in data["nodes"].values())  # 无人工审核节点
-    assert data["nodes"]["写入向量库"]["status"] == "completed"
+    assert data["nodes"]["upsert"]["status"] == "completed"
 
 
 async def _wait_status(client: AsyncClient, run_id: int, status: str, timeout: float = 15) -> dict[str, Any]:
