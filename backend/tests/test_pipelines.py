@@ -24,8 +24,8 @@ async def test_pipelines_list(client: AsyncClient) -> None:
 
     # 参数行是表单渲染与必填判断的单一事实源（不再单独输出 inputs/required_inputs）
     by_file = {p["filename"]: p for p in pipelines}
-    # 04：带默认值的可选参数 → 整行形状
-    assert by_file["04_loop_iteration.yaml"]["params"] == [
+    # 11：带默认值的可选参数 → 整行形状
+    assert by_file["11_loop_iteration.yaml"]["params"] == [
         {
             "name": "tick", "label": "初始计数", "description": "每轮迭代 +1 的计数器初始值（默认 0）",
             "default": 0, "has_default": True, "required": False, "multiline": False, "file": False,
@@ -74,7 +74,7 @@ async def test_pipeline_detail_human(client: AsyncClient) -> None:
 
 
 async def test_pipeline_detail_loop(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/pipelines/04_loop_iteration.yaml")
+    resp = await client.get("/api/v1/pipelines/11_loop_iteration.yaml")
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert 'batch["batch<br/><i>循环</i>"]' in data["mermaid"]
@@ -87,12 +87,12 @@ async def test_pipeline_detail_loop(client: AsyncClient) -> None:
 
 
 async def test_pipeline_detail_retry(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/pipelines/03_retry_backoff.yaml")
+    resp = await client.get("/api/v1/pipelines/03_retry_successed.yaml")
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert 'flaky["flaky<br/><i>demo_flaky · 演示重试 [R3]</i>"]' in data["mermaid"]
-    flaky = {n["name"]: n for n in data["nodes"]}["flaky"]
-    assert flaky["retry"] == "重试 3 次，退避 0.05s×2（≤0.5s），仅 RuntimeError，无抖动"
+    assert 'external_api["外部API<br/><i>svc_external_api · 调用外部API [R5]</i>"]' in data["mermaid"]
+    svc = {n["name"]: n for n in data["nodes"]}["external_api"]
+    assert svc["retry"] == "重试 5 次，退避 0.05s×2（≤0.5s），仅 TimeoutError，无抖动"
 
 
 async def test_pipeline_detail_plugin(client: AsyncClient) -> None:

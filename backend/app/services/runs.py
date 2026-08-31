@@ -82,7 +82,7 @@ async def get_run(run_id: int) -> RunRecord | None:
 
 async def save_nodes(record: RunRecord) -> None:
     """节点快照落库（事件汇与 approve 决策写入共用的唯一持久化路径）。
-
+ 
     决策随快照持久化：approve 后进程崩溃，启动恢复重跑时 approver 仍能
     从快照取到决策。
     """

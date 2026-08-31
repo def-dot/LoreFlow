@@ -1,0 +1,16 @@
+# DAG Flow — 重试最终失败示例。
+
+name: 重试失败
+description: 节点持续故障时按退避策略重试，最终失败。
+
+nodes:
+  external_api:
+    type: svc_unavailable
+    label: 外部API
+    retry:
+      max_retries: 2
+      backoff_base: 0.05
+      backoff_factor: 2
+      backoff_max: 0.5
+      jitter: false
+      retry_on: [TimeoutError]

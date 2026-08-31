@@ -51,6 +51,13 @@ function isCellError(row: Row): boolean {
     <el-table-column label="输出 / 错误" min-width="200">
       <template #default="{ row }">
         <pre class="cell-pre" :class="{ err: isCellError(row) }">{{ cellText(row) }}</pre>
+        <!-- 重试历史：成功/失败都显示，说明「为什么尝试了 N 次」 -->
+        <div v-if="row.attempts_log?.length" class="retry-log">
+          <div v-for="a in row.attempts_log" :key="`${a.attempt}-${a.at}`">
+            <span class="retry-no">#{{ a.attempt }}</span>{{ a.error }}
+            <span class="retry-at">{{ a.at }}</span>
+          </div>
+        </div>
       </template>
     </el-table-column>
   </el-table>
@@ -76,6 +83,23 @@ function isCellError(row: Row): boolean {
  * 底色与其余格保持一致 */
 .cell-pre.err {
   color: #ff8f8a;
+}
+/* 重试历史：小字灰底，与输出格同列——#序号 错误 时间 */
+.retry-log {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+.retry-no {
+  margin-right: 4px;
+  font-family: var(--font-mono);
+  color: #d9a05b;
+}
+.retry-at {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  color: var(--ink-3);
 }
 /* pending 等无内容行：不渲染空盒子 */
 .cell-pre:empty {

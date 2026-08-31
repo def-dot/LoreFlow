@@ -19,6 +19,7 @@ from app.core.logging import get_logger
 from app.engine import (
     DAG,
     NodeResult,
+    NodeStatus,
     SuspendExecution,
     load_dag,
 )
@@ -53,11 +54,20 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
 
     async def on_event(result: NodeResult) -> None:
         entry = result.to_dict()
-        if entry.get("output") is None:
-            prev = (record.nodes.get(result.node_name) or {}).get("output")
-            if prev is not None:
-                entry["output"] = prev
-        record.nodes[result.node_name] = entry
+        prev = record.nodes.get(result.node_name) or {}
+        prev_output = prev.get("output")
+        if entry.get("output") is None and prev_output is not None:
+            entry["output"] = prev_output
+
+        if result.status is NodeStatus.RETRYING:
+            entry["attempts_log"] = (prev.get("attempts_log") or []) + [
+                {
+                    "attempt": result.attempts,
+                    "error": entry.get("error"),
+                    "at": datetime.now().isoformat(timespec="seconds"),
+                }
+            ]
+        record.nodes[result.node_name] = {**prev, **entry}
         try:
             await runs.save_nodes(record)
         except Exception as exc:

@@ -1,0 +1,16 @@
+# DAG Flow — 重试最终成功示例。
+
+name: 重试成功
+description: 节点偶发故障时按退避策略自动重试，最终成功。
+
+nodes:
+  external_api:
+    type: svc_external_api
+    label: 外部API
+    retry:
+      max_retries: 5
+      backoff_base: 0.05
+      backoff_factor: 2
+      backoff_max: 0.5
+      jitter: false
+      retry_on: [TimeoutError]

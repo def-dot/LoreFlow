@@ -17,6 +17,8 @@ export interface NodeSnapshot {
   error: string | null
   attempts: number
   duration_ms: number
+  /** 重试历史：每次 RETRYING 事件追加一条；终态输出/错误是最后一次的值，历史不丢 */
+  attempts_log?: Array<{ attempt: number; error: string | null; at: string }>
 }
 
 export interface RunDetail extends RunListItem {

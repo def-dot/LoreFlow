@@ -148,7 +148,7 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
         "cfg_publish",
         "cfg_report",
         "cfg_needs_report",
-        "demo_flaky",
+        "svc_external_api",
         "demo_tick",
         "demo_keep_iterating",
         "demo_needs_review",
