@@ -13,7 +13,6 @@ from app.engine.validate import (
     validate_inputs,
     validate_nodes,
     validate_params,
-    validate_review,
 )
 from app.registry import REGISTRY, NodeType
 
@@ -393,34 +392,13 @@ def test_params_no_clash_accepted() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_validate_review_accepts() -> None:
-    """validate_review 只查形状：{key: 文本}，允许空字符串（键域统一走 _validate_refs）"""
-    assert validate_review({"title": "标题"}) == []
-    assert validate_review({"title": ""}) == []  # 空字符串允许
-
-
-def test_validate_review_rejects() -> None:
-    """非法格式返回错误列表"""
-    assert validate_review(None) == ["review 必须是映射，实际是 NoneType"]
-    assert validate_review(["title"]) == ["review 必须是映射，实际是 list"]
-    assert validate_review({}) == ["review 声明不能为空映射"]
-    # 标签非字符串
-    assert validate_review({"t": {"label": "x"}}) == ["review 字段 't': 标签必须是字符串"]
-    assert validate_review({"t": None}) == ["review 字段 't': 标签必须是字符串"]
-
-
-def test_review_key_must_resolve() -> None:
-    """卡片键与 $ 引用同规则：必须是参数键或上游依赖节点（拼错载入期报出）。"""
-    assert validate_config({"nodes": {
-        "work": {"type": "cfg_fetch"},
-        "gate": {"type": "human", "depends_on": ["work"],
-                 "inputs": {"_review": {"ttile": "标题"}}},
-    }}) == ["节点 'gate': _review.ttile 引用的 'ttile' 不是参数键或上游依赖节点"]
-    # 参数键、上游节点名可以做卡片键
+def test_review_declaration_not_validated() -> None:
+    """review 卡片声明不校验内容与来源（运行期兜底：字段取不到显示「未提供」）。"""
+    # 拼错键 / 参数键 / 上游节点名 / 协议键——载入期一律放行
     assert validate_config({"inputs": {"title": {}}, "nodes": {
         "work": {"type": "cfg_fetch"},
         "gate": {"type": "human", "depends_on": ["work"],
-                 "inputs": {"_review": {"title": "标题", "work": "产出"}}},
+                 "inputs": {"_review": {"title": "标题", "work": "产出", "ttile": "拼错", "approve": "协议键"}}},
     }}) == []
 
 
@@ -674,25 +652,25 @@ async def test_human_review_view_payload(registered: Any) -> None:
     assert results["gate"].output["payload"]["work"] == "done"
 
 
-def test_review_unknown_key_rejected() -> None:
-    """review 键不在参数键/节点名里（拼写错误）→ 载入时拒绝，而非审核时静默 None。"""
+def test_review_unknown_key_not_checked() -> None:
+    """review 键拼错不拦截：载入照常，审核卡片上该字段显示「未提供」。"""
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"approve": True}
 
-    with pytest.raises(ValueError, match="不是参数键或上游依赖节点"):
-        load_dag(
-            {
-                "inputs": {},
-                "nodes": {
-                    "work": {"type": "cfg_fetch"},
-                    "gate": {
-                        "type": "human", "depends_on": ["work"],
-                        "inputs": {"_review": {"ttile": "标题"}},
-                    },
+    dag = load_dag(
+        {
+            "inputs": {},
+            "nodes": {
+                "work": {"type": "cfg_fetch"},
+                "gate": {
+                    "type": "human", "depends_on": ["work"],
+                    "inputs": {"_review": {"ttile": "标题"}},
                 },
             },
-            approver=approver,
-        )
+        },
+        approver=approver,
+    )
+    assert dag.human_nodes[0].name == "gate"
 
 
 def test_review_param_key_allowed() -> None:

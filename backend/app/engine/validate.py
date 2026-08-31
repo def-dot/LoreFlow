@@ -2,9 +2,9 @@
 
 布局：字段白名单 → 图结构 → 单项校验 → 汇总（validate_config）。
 
-引用类声明（inputs 的 ``$`` 接线、condition 表达式、review 卡片声明）不校验
-内容与来源——缺失/畸形由运行期兜底（接线取 None、条件恒 False、卡片字段
-显示「未提供」）。
+inputs 的 ``$`` 引用做来源校验（参数键 ∪ 上游节点）；condition 表达式与
+review 卡片声明只查语法/形状，不做来源校验——缺失键由运行期兜底（条件恒
+False、卡片字段显示「未提供」）。
 """
 
 from __future__ import annotations
@@ -29,8 +29,20 @@ _NODE_FIELDS = {"type", "label", "depends_on", "inputs", "retry", "timeout", "co
 
 
 # ------------------------------------------------------------------
-# 图结构（依赖存在 / 环）
+# 图结构（依赖存在 / 环 / 上游闭包）
 # ------------------------------------------------------------------
+
+
+def _ancestors(name: str, edges: Mapping[str, Any]) -> set[str]:
+    """depends_on 闭包（直接上游及其全部祖先）。"""
+    seen: set[str] = set()
+    stack = [name]
+    while stack:
+        for dep in edges.get(stack.pop()) or []:
+            if dep not in seen:
+                seen.add(dep)
+                stack.append(dep)
+    return seen
 
 
 def _find_cycle(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
@@ -97,15 +109,30 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
 # ------------------------------------------------------------------
 # 单项校验（condition / 运行输入）
 # ------------------------------------------------------------------
-    if not isinstance(review, dict):
-        return [f"review 必须是映射，实际是 {type(review).__name__}"]
-    if not review:
-        return ["review 声明不能为空映射"]
 
+
+def _validate_wiring(
+    wiring: Any,
+    name: str,
+    edges: Mapping[str, Any],
+    params: Mapping[str, Any],
+) -> list[str]:
+    """inputs 声明校验：必须是映射，``$`` 引用根键 ∈ 参数键 ∪ depends_on 上游闭包。
+
+    与运行期语义一致——``wired_ctx`` 只从共享上下文（参数 + 节点输出）解析，
+    本地键不参与解析；非上游节点输出在并发下不保证已就绪，必须声明依赖。
+    """
+    if not isinstance(wiring, dict):
+        return [f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射"]
+
+    ancestors = _ancestors(name, edges)
     errors: list[str] = []
-    for key, val in review.items():
-        if not isinstance(val, str):
-            errors.append(f"review 字段 {key!r}: 标签必须是字符串")
+    for local, source in wiring.items():
+        if not (isinstance(source, str) and source.startswith("$")):
+            continue  # 字面量不校验来源
+        root = source[1:].partition(".")[0]  # $node.field → node
+        if root not in ancestors and root not in params:
+            errors.append(f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是参数键或上游依赖节点")
     return errors
 
 
@@ -194,12 +221,17 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
 
     errors: list[str] = []
-    edges: dict[str, Any] = {}
+    params = config.get("inputs") or {}  # YAML ``inputs:`` 空值 → None
+
+    edges: dict[str, Any] = {
+        n: (s.get("depends_on") if isinstance(s, dict) else []) for n, s in nodes.items()
+    }
+    if errors := validate_graph(edges):
+        return errors
 
     for name, spec in nodes.items():
         if not isinstance(spec, dict):
             errors.append(f"节点 {name!r}: 定义必须是映射(dict)，实际是 {type(spec).__name__}")
-            edges[name] = []
             continue
 
         # type 是唯一判别字段：所有类型用同一字段集
@@ -210,11 +242,9 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         if unknown:
             errors.append(f"节点 {name!r}（{type_key}）: 不支持的字段 {sorted(unknown)}")
 
-        edges[name] = spec.get("depends_on")
-
         wiring = spec.get("inputs")
-        if wiring and not isinstance(wiring, dict):
-            errors.append(f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射")
+        if wiring:
+            errors.extend(_validate_wiring(wiring, name, edges, params))
 
         condition = spec.get("condition")
         if condition:
@@ -225,8 +255,6 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
         elif type_key not in REGISTRY:
             errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
-
-    errors.extend(validate_graph(edges))
     return errors
 
 

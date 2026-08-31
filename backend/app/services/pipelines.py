@@ -109,7 +109,7 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     if type_val == "human":
         wiring = spec.get("inputs") or {}
         row["type_description"] = wiring.get("_prompt")
-        # 审核视图声明（inputs._review 字面量 {key: {label}}）直通前端；格式已由 validate 校验
+        # 审核视图声明（inputs._review 字面量 {key: 标签文本}）直通前端
         row["review"] = wiring.get("_review")
     if isinstance(cond_spec, bool):
         row["condition_label"] = "恒执行" if cond_spec else "恒跳过"

@@ -1,6 +1,6 @@
 """YAML ``inputs`` 数据流接线 — 校验与注入视图的单元测试（不经 HTTP）。
 
-值语义："$键" = 引用（去前缀取 ctx 键；引用不做来源校验）；其余
+值语义："$键" = 引用（去前缀取 ctx 键；根键须是参数键或上游节点）；其余
 （裸字符串/数字/布尔等）= 字面量原样注入。
 """
 
@@ -104,17 +104,21 @@ async def test_wiring_non_string_literal() -> None:
     assert results["节点"].output == {"seen_document": 5}
 
 
-def test_validate_inputs_refs_not_checked() -> None:
-    """inputs 的 $ 引用不做来源校验：拼错 / 非上游节点都不报——
-    解析（wired_ctx）对缺失键返回 None，由运行期数据流兜底。"""
+def test_validate_unknown_source() -> None:
+    """$ 引用的来源既不是参数键也不是上游节点 → 加载期报错。"""
+    cfg = {"nodes": {"甲": {"type": "wire_probe"}, "乙": {"type": "wire_probe", "inputs": {"x": "$不存在"}}}}
+    assert any("不是参数键或上游依赖节点" in e for e in validate_config(cfg))
+
+
+def test_validate_source_must_be_upstream() -> None:
+    """来源节点不在 depends_on 上游链 → 报错（数据只能来自已声明的上游）。"""
     cfg = {
         "nodes": {
             "甲": {"type": "wire_probe"},
-            "乙": {"type": "wire_probe", "inputs": {"x": "$不存在"}},
-            "丙": {"type": "wire_probe", "inputs": {"y": "$甲"}},  # 未声明依赖
+            "乙": {"type": "wire_probe", "inputs": {"x": "$甲"}},  # 未声明依赖
         }
     }
-    assert validate_config(cfg) == []
+    assert any("不是参数键或上游依赖节点" in e for e in validate_config(cfg))
 
 
 def test_validate_transitive_upstream_allowed() -> None:
