@@ -123,10 +123,7 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
         or entry.get("status") != NodeStatus.REVIEWING.value
     ):
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
-    # 决策写进节点快照（先落库再恢复——中途崩溃时启动恢复仍能取到决策）
-    await orchestrator.approve_and_resume(
-        record,
-        node_name,
-        {"approve": body.approve, "reason": body.reason, "values": body.values},
-    )
+    # 决策 = body 原样（协议键 approve/reason + 平铺的卡片字段）；
+    # 先落库再恢复——中途崩溃时启动恢复仍能取到决策
+    await orchestrator.approve_and_resume(record, node_name, body.model_dump())
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

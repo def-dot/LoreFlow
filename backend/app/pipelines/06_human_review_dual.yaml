@@ -22,6 +22,8 @@ nodes:
         title: 标题
         content: 正文
 
+  # 终审看到的是初审修订后的生效值：卡片字段平铺在决策里，直接引用；
+  # 来源不同 → 接线条目
   final_review:
     type: human
     label: 主编终审
@@ -31,8 +33,8 @@ nodes:
       _review:
         title: 标题
         content: 正文
-      title: $first_review.revised.title
-      content: $first_review.revised.content
+      title: $first_review.decision.title
+      content: $first_review.decision.content
 
   publish:
     type: cfg_publish

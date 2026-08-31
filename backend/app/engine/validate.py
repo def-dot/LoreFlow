@@ -306,13 +306,17 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         elif type_key == "human":
             # 审核视图经 inputs._review 声明（声明即卡片）：键 = 卡片字段
             # （同名取值，值已在 ctx），标签是裸字符串；来源不同才需要接线
-            # 条目。卡片键直引节点名时并入接线表，受同一上游链规则约束
+            # 条目。卡片键直引节点名时并入接线表，受同一上游链规则约束；
+            # 卡片字段平铺进决策，不得占用协议键
             review_spec = wiring.get("_review") if isinstance(wiring, dict) else None
             if isinstance(review_spec, dict) and review_spec:
                 domain = available_ref | set(wiring)
                 errors.extend(
                     f"审核节点 {name!r}: {msg}" for msg in validate_review(review_spec, domain)
                 )
+                clash = {"approve", "reason"} & set(review_spec)
+                if clash:
+                    errors.append(f"审核节点 {name!r}: 卡片字段不得占用协议键 {sorted(clash)}")
                 wirings[name] = {**wiring, **{k: f"${k}" for k in review_spec}}
 
     errors.extend(validate_graph(edges))

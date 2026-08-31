@@ -41,17 +41,28 @@ async def cfg_merge(ctx: dict[str, Any]) -> dict[str, Any]:
 async def cfg_publish(ctx: dict[str, Any]) -> str:
     """发布最后一级人工审核通过的内容。
 
-    审核输出固定含 ``revised``（载荷数据键应用修订后的生效值，引擎不
-    写回共享上下文）；从中找出带 title 的内容输出（如 merge / fetch 的
+    生效值 = 最后一级 approved 审核的载荷数据键，内联其决策里的平铺
+    卡片字段（文本字段的修订，扣除协议键 approve/reason；引擎不写回
+    共享上下文）。从中找出带 title 的内容输出（如 merge / fetch 的
     {title, body}），扁平输入（title/content 字符串键）直接取顶层
     "title" 键。无审核节点时兜底全 ctx。
     """
     reviews = [
         v
         for v in ctx.values()
-        if isinstance(v, dict) and v.get("approved") and isinstance(v.get("revised"), dict)
+        if isinstance(v, dict) and v.get("approved") and isinstance(v.get("payload"), dict)
     ]
-    payload = reviews[-1]["revised"] if reviews else ctx
+    if reviews:
+        last = reviews[-1]
+        data = {k: v for k, v in last["payload"].items() if not str(k).startswith("_")}
+        fields = {
+            k: v
+            for k, v in (last.get("decision") or {}).items()
+            if k not in ("approve", "reason")
+        }
+        payload = {**data, **fields}
+    else:
+        payload = ctx
     titled = next(
         (v for v in reversed(list(payload.values())) if isinstance(v, dict) and "title" in v),
         {},

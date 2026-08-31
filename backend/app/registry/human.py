@@ -4,8 +4,9 @@ human 人工审核类型 — 审核协议函数（静态节点函数）与注册
 与普通注册函数同签名 ``(ctx) -> 输出``，唯一差异是审核结果从当前
 运行获取：``_approver`` 由 ``DAG.run`` 注入共享上下文（决策挂起/领取
 见 ``orchestrator.make_approver``）。载荷即卡片（``_review`` 声明），
-通过后 decision 携带审核者返回的字段终值 ``values``，生效值 ``revised``
-随节点输出供下游显式引用（不写回共享上下文）。
+通过后 decision 携带审核者返回的字段终值 ``values``——文本字段经
+``$节点.decision.values.键`` 引用，非文本字段不可编辑、经
+``$节点.payload.键`` 取原值（不写回共享上下文）。
 
 本模块是叶子模块（除 registry.core 外只依赖标准库）：engine 反向依赖
 registry，协议放这里才不会成环；``HumanRejected`` 在拒绝分支运行时
@@ -48,17 +49,9 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     decision = await approver(name, payload)
     if decision.get("approve"):
         logger.info("[%s] approved by human reviewer", name)
-        # values = 审核者返回的字段终值（ApproveRequest 钉死 dict | None，
-        # 未返回的键——非文本字段——保持原值）
-        values = decision.get("values") or {}
         return {
             "approved": True,
             "payload": payload,
-            # 生效值 = 载荷数据键取审核返回值：不写回共享上下文，
-            # 下游（含下一级审核）经 ``$节点.revised.键`` 显式引用
-            "revised": {
-                k: values.get(k, v) for k, v in payload.items() if not k.startswith("_")
-            },
             "decision": decision,
             "approved_at": datetime.now().isoformat(timespec="seconds"),
         }
