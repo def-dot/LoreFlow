@@ -32,8 +32,9 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
 
     review = ctx.get("_review")
     if isinstance(review, dict) and review:
-        payload: dict[str, Any] = {k: ctx.get(k) for k in review}
-        payload["_review"] = review
+        # 卡片键带 $ 引用前缀（声明层约定）；载荷与决策字段用剥前缀后的裸键
+        fields = {k.removeprefix("$"): ctx.get(k.removeprefix("$")) for k in review}
+        payload: dict[str, Any] = {**fields, "_review": {k.removeprefix("$"): v for k, v in review.items()}}
     else:
         payload = {k: v for k, v in ctx.items() if not k.startswith("_")}
     if isinstance(ctx.get("_prompt"), str):

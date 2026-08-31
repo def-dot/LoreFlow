@@ -2,10 +2,9 @@
 
 布局：字段白名单 → 图结构 → 单项校验 → 汇总（validate_config）。
 
-inputs 的 ``$`` 引用与 condition 表达式的引用根键做来源校验（参数键 ∪
-上游节点；condition 域另含本节点 inputs 本地键——求值在接线视图上）。
-review 卡片声明不校验内容与来源——缺失键由运行期兜底（卡片字段显示
-「未提供」）。
+引用类声明统一 ``$`` 前缀并做来源校验：inputs 的 ``$`` 引用与 condition
+根键 ∈ 参数键 ∪ 上游节点（condition/_review 域另含本节点 inputs 本地键——
+求值/取值在接线视图上），_review 卡片键再查协议键占用。
 """
 
 from __future__ import annotations
@@ -133,10 +132,6 @@ def _validate_wiring(
 
 def _validate_condition(condition: Any, available_refs: set[str]) -> list[str]:
     """condition 声明校验：布尔常量（``true``/``false`` 开关）或表达式字符串。
-
-    语法 + 引用根键 ∈ available_refs——求值在接线视图上进行，域含参数键、
-    上游闭包与本节点 inputs 本地键（调用点合入）。消息不带节点名前缀，
-    由调用点统一加。
     """
     if isinstance(condition, bool):
         return []  # 未声明（YAML ``condition:`` 空值）/ true-false 常量开关
@@ -153,6 +148,31 @@ def _validate_condition(condition: Any, available_refs: set[str]) -> list[str]:
     if root not in available_refs:
         return [f"condition 引用的 {root!r} 不是参数键、上游依赖节点或本地键"]
     return []
+
+
+def _validate_review(review: Any, available_refs: set[str]) -> list[str]:
+    """_review 卡片声明校验：``{$键: 标签文本}``，键根 ∈ available_refs。
+
+    与 condition 同域（参数 ∪ 上游 ∪ 本地键——载荷从接线视图取值）；
+    卡片字段不得占用协议键 approve/reason（决策送回时平铺同名冲突）。
+    消息不带节点名前缀，由调用点统一加。
+    """
+    if not isinstance(review, dict):
+        return [f"_review 必须是「$键: 标签文本」的映射，实际是 {type(review).__name__}"]
+    if not review:
+        return ["_review 声明不能为空映射"]
+
+    errors: list[str] = []
+    for k in review:
+        if not (isinstance(k, str) and k.startswith("$") and len(k) > 1):
+            errors.append(f"_review 键 {k!r} 必须带 $ 引用前缀（如 $title）")
+            continue
+        root = k[1:].split(".")[0]
+        if root in ("approve", "reason"):
+            errors.append(f"_review 字段 {root!r} 不得占用协议键")
+        if root not in available_refs:
+            errors.append(f"_review 字段 {root!r} 不是参数键、上游依赖节点或本地键")
+    return errors
 
 
 def validate_inputs(
@@ -253,12 +273,18 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 f"节点 {name!r}: {msg}"
                 for msg in _validate_wiring(wiring, refs)
             )
+        refs = refs | set(wiring) if isinstance(wiring, dict) else refs
 
         condition = spec.get("condition")
         if condition:
-            refs = refs | set(wiring) if isinstance(wiring, dict) else refs
             errors.extend(f"节点 {name!r}: {msg}" for msg in _validate_condition(condition, refs))
-        
+
+        # _review 只在 human 节点上有意义；未声明 = 全量上下文，合法不校验
+        if type_key == "human" and isinstance(wiring, dict) and wiring.get("_review") is not None:
+            errors.extend(
+                f"节点 {name!r}: {msg}" for msg in _validate_review(wiring["_review"], refs)
+            )
+
     return errors
 
 
