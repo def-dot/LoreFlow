@@ -313,9 +313,6 @@ class DAGExecutor:
 
     async def _call(self, node: Node) -> Any:
         """Invoke *node.func* with timeout if configured.
-
-        统一在此组装接线上下文（``Node.inputs`` + 保留键 ``_node``/``_upstream``）；
-        循环节点例外——body 子流水线要直接读写共享上下文（输出累积进顶层）。
         """
         if node.metadata.get("loop"):
             target: dict[str, Any] = self.ctx
