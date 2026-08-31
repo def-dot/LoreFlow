@@ -3,10 +3,9 @@ human 人工审核类型 — 审核协议函数（静态节点函数）与注册
 
 与普通注册函数同签名 ``(ctx) -> 输出``，唯一差异是审核结果从当前
 运行获取：``_approver`` 由 ``DAG.run`` 注入共享上下文（决策挂起/领取
-见 ``orchestrator.make_approver``）。载荷 = 接线键（``_wired``，由
-``_wired_func`` 注入；``_prompt``/``_review`` 等字面量保留键原样进
-载荷），未接线则为整个视图去掉自身与 ``_`` 保留键。通过后的 decision
-``edits`` 由 executor 统一回放共享上下文（与 resume 恢复同一条路径）。
+见 ``orchestrator.make_approver``）。载荷即卡片（``_review`` 声明），
+通过后 decision 携带审核者返回的字段终值 ``values``，生效值 ``revised``
+随节点输出供下游显式引用（不写回共享上下文）。
 
 本模块是叶子模块（除 registry.core 外只依赖标准库）：engine 反向依赖
 registry，协议放这里才不会成环；``HumanRejected`` 在拒绝分支运行时
@@ -25,9 +24,10 @@ logger = logging.getLogger(__name__)
 async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。
 
-    载荷即卡片：声明 ``_review``（inputs 字面量 ``{key: {label}}``）时
-    只含声明键（声明即卡片规格），未声明则为整个视图去掉 ``_`` 保留键；
-    ``_prompt`` 声明则置顶携带。
+    载荷即卡片：声明 ``_review``（inputs 字面量 ``{key: 标签文本}``）时
+    只含声明键（同名取值——来源不同才需要接线条目），声明原文随载荷
+    直通前端；未声明则为整个上下文去掉 ``_`` 保留键；``_prompt`` 声明
+    则置顶携带。
     """
     approver = ctx.get("_approver")
     if approver is None:
@@ -43,21 +43,21 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     if isinstance(ctx.get("_prompt"), str):
         payload["_prompt"] = ctx["_prompt"]
 
-    print(f"\n  [REVIEW] node {name!r} is waiting for human approval")
-    if isinstance(payload.get("_prompt"), str):
-        print(f"  {payload['_prompt']}")
+    logger.info(f"\n  [REVIEW] node {name!r} is waiting for human approval")
 
     decision = await approver(name, payload)
     if decision.get("approve"):
         logger.info("[%s] approved by human reviewer", name)
-        edits = decision.get("edits") if isinstance(decision.get("edits"), dict) else {}
+        # values = 审核者返回的字段终值（ApproveRequest 钉死 dict | None，
+        # 未返回的键——非文本字段——保持原值）
+        values = decision.get("values") or {}
         return {
             "approved": True,
             "payload": payload,
-            # 生效值 = 载荷数据键应用修订（未修订键原样）：不写回共享上下文，
+            # 生效值 = 载荷数据键取审核返回值：不写回共享上下文，
             # 下游（含下一级审核）经 ``$节点.revised.键`` 显式引用
             "revised": {
-                k: edits.get(k, v) for k, v in payload.items() if not k.startswith("_")
+                k: values.get(k, v) for k, v in payload.items() if not k.startswith("_")
             },
             "decision": decision,
             "approved_at": datetime.now().isoformat(timespec="seconds"),

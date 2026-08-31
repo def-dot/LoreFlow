@@ -27,23 +27,23 @@ from app.engine.node import ApproverFunc
 from app.engine.types import NodeEventFunc
 from app.engine.validate import validate_inputs
 from app.models.run import RunRecord, RunStatus
-from app.services import reviews, runs
+from app.services import runs
 
 logger = get_logger(__name__)
 
 
 def make_approver(record: RunRecord) -> ApproverFunc:
-    """人工审核时挂起;审核后恢复"""
+    """人工审核时挂起；审核后恢复。
+
+    决策由 approve 端点写进节点快照 ``output.decision``（run 记录是决策
+    的唯一持久层），节点（重）执行时从这里取；没有决策即挂起等待。
+    """
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         entry = record.nodes.setdefault(node_name, {})
-        if entry.get('output') and entry["output"].get("decision"):
-            # 重跑时已审核过
-            return entry["output"]["decision"]
-
-        decision = await reviews.claim_decision(record.id, node_name)
-        if decision is not None:
-            return decision
+        output = entry.get("output") or {}
+        if output.get("decision"):
+            return output["decision"]
 
         raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批", {"payload": payload})
 
@@ -51,18 +51,37 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
 
 def make_event_sink(record: RunRecord) -> NodeEventFunc:
-    """节点状态变化写进快照并落库（只写 nodes，status 归 CAS 独占）。"""
+    """节点状态变化写进快照并落库（只写 nodes，status 归 CAS 独占）。
+
+    瞬态（running/retrying）不带输出，保留该节点上一份输出——挂起重跑
+    时 approve 写进快照的决策不能被 RUNNING 事件冲掉（approver 从快读取）。
+    """
 
     async def on_event(result: NodeResult) -> None:
-        record.nodes[result.node_name] = result.to_dict()
+        entry = result.to_dict()
+        if entry.get("output") is None:
+            prev = (record.nodes.get(result.node_name) or {}).get("output")
+            if prev is not None:
+                entry["output"] = prev
+        record.nodes[result.node_name] = entry
         try:
-            async with database.AsyncSessionLocal() as session:
-                await session.execute(update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes))
-                await session.commit()
+            await runs.save_nodes(record)
         except Exception as exc:
             logger.error("Failed to save run snapshot: %s", exc)
 
     return on_event
+
+
+async def approve_and_resume(record: RunRecord, node_name: str, decision: dict[str, Any]) -> None:
+    """决策写进节点快照并持久化，随后恢复执行（approve 端点的全部动作）。
+
+    快照即决策的唯一持久层：先落库再 resume——若进程在恢复中途崩溃，
+    启动恢复重跑时 approver 仍从快照取到决策。
+    """
+    entry = record.nodes.setdefault(node_name, {})
+    entry.setdefault("output", {})["decision"] = decision
+    await runs.save_nodes(record)
+    await resume_record(record)
 
 
 async def run_pipeline(record: RunRecord, dag: DAG) -> None:

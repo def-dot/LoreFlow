@@ -5,11 +5,12 @@ import FieldValues, { type FieldValue } from './FieldValues.vue'
 const props = defineProps<{ reviewing: { name: string; payload: unknown }[]; deciding: boolean }>()
 
 const emit = defineEmits<{
-  decide: [node: string, approve: boolean, reason: string | null, edits: Record<string, string> | null]
+  decide: [node: string, approve: boolean, reason: string | null, values: Record<string, string> | null]
 }>()
 
 const reasons = reactive<Record<string, string>>({})
-// 审核修订草稿：node → (字段键 → 改后文本)。「改了再通过」——只送被改过的键
+// 审核草稿：node → (字段键 → 当前文本)。初始即原文，编辑即更新；
+// 「通过」时整体送回（未改字段送回的就是原值）
 const drafts = reactive<Record<string, Record<string, string>>>({})
 // node → 本轮草稿对应的 payload 引用：payload 变了（新一轮审核/loop 新迭代）即重置
 const draftBases = new Map<string, unknown>()
@@ -31,15 +32,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// 逐字段渲染：label 优先取引擎插入的 _review（声明式审核视图 {key: {label: 文本}}），
-// 未声明视图的 payload 同样按字段展示（label=键名）。_prompt（把关指引）
-// 与 _review 同为引擎保留键，不进字段列表、单独渲染在卡片顶部
+// 逐字段渲染：label 优先取引擎下发的 _review（声明式审核视图），未声明
+// 视图的 payload 同样按字段展示（label=键名）。_prompt（把关指引）与
+// _review 同为引擎保留键，不进字段列表、单独渲染在卡片顶部
 
-// _review 是富映射：键 → {label: 文本}（validate_review 仅放行 label 字段、
-// 允许空串）。形状不符或空 label 时回退键名
+// _review 是 YAML 声明原文 {key: 标签文本} 直通；空标签回退键名
 function labelOf(labels: Record<string, unknown>, key: string): string {
-  const spec = labels[key]
-  return isRecord(spec) && typeof spec.label === 'string' && spec.label ? spec.label : key
+  const label = labels[key]
+  return typeof label === 'string' && label ? label : key
 }
 const cards = computed<ReviewCardModel[]>(() =>
   props.reviewing.map((item) => {
@@ -86,14 +86,11 @@ watch(
   { immediate: true },
 )
 
-// 通过：带上与原文不同的修订键（无改动则不带 edits）
+// 通过：送回全部文本字段的当前值（drafts 初始即原文、编辑即更新——
+// 未改字段送回的就是原值；卡片无文本字段则不带 values）
 function approveCard(card: ReviewCardModel) {
-  const node = drafts[card.name] ?? {}
-  const changed = (card.fields ?? []).filter(
-    (f) => typeof f.value === 'string' && node[f.key] !== undefined && node[f.key] !== f.value,
-  )
-  const edits = Object.fromEntries(changed.map((f) => [f.key, node[f.key]]))
-  emit('decide', card.name, true, null, Object.keys(edits).length ? edits : null)
+  const values = drafts[card.name] ?? {}
+  emit('decide', card.name, true, null, Object.keys(values).length ? values : null)
 }
 </script>
 

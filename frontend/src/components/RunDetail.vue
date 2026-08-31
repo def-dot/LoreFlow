@@ -11,7 +11,7 @@ import FieldValues, { type FieldValue } from './FieldValues.vue'
 const props = defineProps<{ detail: RunDetail; deciding: boolean; params?: ParamSpec[] }>()
 
 const emit = defineEmits<{
-  decide: [node: string, approve: boolean, reason: string | null, edits: Record<string, string> | null]
+  decide: [node: string, approve: boolean, reason: string | null, values: Record<string, string> | null]
   viewConfig: [configFile: string, runId: number]
 }>()
 
@@ -81,7 +81,7 @@ const inputFields = computed<FieldValue[]>(() => {
           <ReviewCards
             :reviewing="reviewing"
             :deciding="deciding"
-            @decide="(node, ok, reason, edits) => emit('decide', node, ok, reason, edits)"
+            @decide="(node, ok, reason, values) => emit('decide', node, ok, reason, values)"
           />
         </template>
       </section>

@@ -79,15 +79,16 @@ class RunCreateResponse(BaseModel):
 
 
 class ApproveRequest(BaseModel):
-    """审批决策：通过/拒绝 + 可选拒绝原因 + 可选审核修订。
+    """审批决策：通过/拒绝 + 可选拒绝原因 + 审核返回的字段终值。
 
-    edits 是审核者对声明视图字符串字段的修改（"改了再通过"），仅通过时
-    生效；引擎只覆盖审核 payload 中已存在的键，并随决策入库留档。
+    values 是审核者返回的卡片字段值（文本字段可就地修改后原样送回，
+    未改字段即原值），仅通过时生效；未返回的字段（非文本）保持原值，
+    改动可由 payload 与 values 对比得出，随决策入库留档。
     """
 
     approve: bool
     reason: str | None = None
-    edits: dict[str, str] | None = None
+    values: dict[str, str] | None = None
 
 
 class ApproveResponse(BaseModel):

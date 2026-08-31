@@ -87,9 +87,9 @@ export function approve(
   node: string,
   ok: boolean,
   reason: string | null,
-  edits?: Record<string, string>,
+  values?: Record<string, string>,
 ): Promise<{ status: string; run_id: number; node: string; approve: boolean }> {
-  // edits 为空对象时不带（后端视为无修订）
-  const hasEdits = edits !== undefined && Object.keys(edits).length > 0
-  return api.post(`/runs/${runId}/approve/${node}`, { approve: ok, reason, edits: hasEdits ? edits : undefined })
+  // values = 审核返回的字段终值；为空对象时不带（卡片无文本字段）
+  const hasValues = values !== undefined && Object.keys(values).length > 0
+  return api.post(`/runs/${runId}/approve/${node}`, { approve: ok, reason, values: hasValues ? values : undefined })
 }

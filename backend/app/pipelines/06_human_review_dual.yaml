@@ -13,26 +13,28 @@ inputs:
     multiline: true
 
 nodes:
-  编辑初审:
+  first_review:
     type: human
+    label: 编辑初审
     inputs:
       _prompt: "初审把关：标题达意、正文完整可读再通过。"
-      title: $title
-      content: $content
-      # 审核视图标签
-      _review: {title: {label: 标题}, content: {label: 正文}}
+      _review:
+        title: 标题
+        content: 正文
 
-  # 终审看到的是初审修订后的生效值（$编辑初审.revised.键）
-  主编终审:
+  final_review:
     type: human
-    depends_on: [编辑初审]
+    label: 主编终审
+    depends_on: [first_review]
     inputs:
       _prompt: "终审把关：确认可对外发布再通过。"
-      title: $编辑初审.revised.title
-      content: $编辑初审.revised.content
-      # 终审视图标签
-      _review: {title: {label: 标题}, content: {label: 正文}}
+      _review:
+        title: 标题
+        content: 正文
+      title: $first_review.revised.title
+      content: $first_review.revised.content
 
-  发布:
+  publish:
     type: cfg_publish
-    depends_on: [主编终审]
+    label: 发布
+    depends_on: [final_review]

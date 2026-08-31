@@ -1,19 +1,17 @@
 """Run 持久化 — RunRecord 的仓储操作。
 
-与 services/reviews.py 对称：只做数据访问，执行编排见
-services/orchestrator.py。持久化函数调用时才查找
-``database.AsyncSessionLocal``——conftest 直接换掉该全局即可换库。
+只做数据访问，执行编排见 services/orchestrator.py。持久化函数调用时
+才查找 ``database.AsyncSessionLocal``——conftest 直接换掉该全局即可换库。
 """
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import update
 from sqlmodel import func, select
 
 from app.core import database
-from app.models.review import ReviewDecision
 from app.models.run import RunRecord, RunStatus
 
 
@@ -82,8 +80,21 @@ async def get_run(run_id: int) -> RunRecord | None:
         return await session.get(RunRecord, run_id)
 
 
+async def save_nodes(record: RunRecord) -> None:
+    """节点快照落库（事件汇与 approve 决策写入共用的唯一持久化路径）。
+
+    决策随快照持久化：approve 后进程崩溃，启动恢复重跑时 approver 仍能
+    从快照取到决策。
+    """
+    async with database.AsyncSessionLocal() as session:
+        await session.execute(
+            update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes)
+        )
+        await session.commit()
+
+
 async def delete_run(run_id: int) -> bool:
-    """删除一条**终态** run 及其审批决策（审计痕迹随 run 一并清理）。
+    """删除一条**终态** run（决策在节点快照里，随 run 一并清理）。
 
     不存在或非终态返回 False（由路由层区分 404/400）。
     """
@@ -91,8 +102,6 @@ async def delete_run(run_id: int) -> bool:
         record = await session.get(RunRecord, run_id)
         if record is None or record.status not in TERMINAL_STATUSES:
             return False
-        # cast：SQLModel 列比较的 mypy 摩擦与 reviews.py 同款（列表达式运行时是 InstrumentedAttribute）
-        await session.execute(sa_delete(ReviewDecision).where(cast(Any, ReviewDecision.run_id) == run_id))
         await session.delete(record)
         await session.commit()
         return True

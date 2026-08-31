@@ -19,7 +19,6 @@ from app.schemas.runs import (
 )
 from app.services import orchestrator
 from app.services import pipelines as pipeline_service
-from app.services import reviews as review_service
 from app.services import runs as run_service
 
 router = APIRouter(prefix="/runs", route_class=UnifiedResponseRoute, tags=["runs"])
@@ -124,15 +123,10 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
         or entry.get("status") != NodeStatus.REVIEWING.value
     ):
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
-    await review_service.create_decision(
-        run_id,
+    # 决策写进节点快照（先落库再恢复——中途崩溃时启动恢复仍能取到决策）
+    await orchestrator.approve_and_resume(
+        record,
         node_name,
-        {
-            "approve": body.approve,
-            "reason": body.reason,
-            "edits": body.edits,
-            "payload": (entry.get("output") or {}).get("payload"),
-        },
+        {"approve": body.approve, "reason": body.reason, "values": body.values},
     )
-    await orchestrator.resume_record(record)
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

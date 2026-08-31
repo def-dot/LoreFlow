@@ -140,7 +140,9 @@ def _validate_wiring_upstream(
 
 
 def validate_review(review: Any, available: Iterable[str]) -> list[str]:
-    """review 声明校验（顶层类型 + 非空 + 键引用 + 字段格式）
+    """review 声明校验（顶层类型 + 非空 + 键域 + 标签形状 ``{key: 文本}``）
+
+    键 = 卡片字段（同名取值，来源不同才需要接线条目）；标签是裸字符串。
     """
     if not isinstance(review, dict):
         return [f"review 必须是映射，实际是 {type(review).__name__}"]
@@ -153,19 +155,8 @@ def validate_review(review: Any, available: Iterable[str]) -> list[str]:
         errors.append(f"review 引用了未声明的键 {', '.join(unknown)}")
 
     for key, val in review.items():
-        if not isinstance(val, dict):
-            errors.append(
-                f"review 字段 {key!r}: 必须是 {{label: 文本}} 格式，实际是 {type(val).__name__}"
-            )
-            continue
-
-        unsupported = set(val) - {"label"}
-        if unsupported:
-            errors.append(f"review 字段 {key!r}: 不支持的字段 {sorted(unsupported)}")
-
-        label = val.get("label")
-        if not isinstance(label, str):
-            errors.append(f"review 字段 {key!r}: label 必须是字符串")
+        if not isinstance(val, str):
+            errors.append(f"review 字段 {key!r}: 标签必须是字符串")
     return errors
 
 
@@ -313,12 +304,16 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             else:
                 errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
         elif type_key == "human":
-            # 审核视图经 inputs 接线声明：_review 字面量给载荷键配标签，键域 = 接线键
+            # 审核视图经 inputs._review 声明（声明即卡片）：键 = 卡片字段
+            # （同名取值，值已在 ctx），标签是裸字符串；来源不同才需要接线
+            # 条目。卡片键直引节点名时并入接线表，受同一上游链规则约束
             review_spec = wiring.get("_review") if isinstance(wiring, dict) else None
-            if review_spec is not None:
+            if isinstance(review_spec, dict) and review_spec:
+                domain = available_ref | set(wiring)
                 errors.extend(
-                    f"审核节点 {name!r}: {msg}" for msg in validate_review(review_spec, set(wiring))
+                    f"审核节点 {name!r}: {msg}" for msg in validate_review(review_spec, domain)
                 )
+                wirings[name] = {**wiring, **{k: f"${k}" for k in review_spec}}
 
     errors.extend(validate_graph(edges))
     errors.extend(_validate_wiring_upstream(wirings, edges))

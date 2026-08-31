@@ -2,7 +2,7 @@
 Database layer — PostgreSQL via SQLModel (asyncpg driver).
 
 只保留连接基础设施：``engine`` 与 ``AsyncSessionLocal``。run 域的
-持久化操作见 ``app.services.runs``，审批决策见 ``app.services.reviews``。
+持久化操作（含审批决策——随节点快照）见 ``app.services.runs``。
 
 ``AsyncSessionLocal`` 是模块级全局、调用时才查找——测试 conftest
 直接赋值为 aiosqlite sessionmaker 即可换库，无需 DI/monkeypatch。

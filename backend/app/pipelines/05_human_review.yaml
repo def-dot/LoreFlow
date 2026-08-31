@@ -18,9 +18,8 @@ nodes:
     label: 内容审核
     inputs:
       _prompt: "请审核文章内容是否可以发布"
-      title: $title
-      content: $content
-      _review: {title: {label: 标题}, content: {label: 正文}}
+      # 声明即卡片：title/content 是参数键，值已在 ctx，直引即可
+      _review: {title: 标题, content: 正文}
 
   publish:
     type: cfg_publish

@@ -10,7 +10,7 @@ export interface PipelineNodeInfo {
   retry: string | null
   condition: string | null
   condition_label: string | null
-  review: Record<string, { label: string }> | null  // (human) 审核视图原文 {key: {label}}；null=全量上下文
+  review: Record<string, string> | null  // (human) 审核视图声明原文 {key: 标签文本}；null=全量上下文
 }
 
 /** 一个运行时输入参数的声明行（后端从 YAML params 声明归一化输出） */
