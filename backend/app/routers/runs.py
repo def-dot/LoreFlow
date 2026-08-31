@@ -114,8 +114,6 @@ async def cancel_run(run_id: int) -> dict[str, Any]:
 async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> ApproveResponse:
     record = await run_service.get_run(run_id)
     entry = (record.nodes or {}).get(node_name) if record else None
-    # 双门槛：run 状态必须是 REVIEWING（挂起落库与 approve 的并发窗口内
-    # 节点可能已 reviewing 而 run 仍 running），节点快照也在 reviewing
     if (
         record is None
         or record.status != RunStatus.REVIEWING
@@ -123,7 +121,6 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
         or entry.get("status") != NodeStatus.REVIEWING.value
     ):
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
-    # 决策写进节点快照（先落库再恢复——中途崩溃时启动恢复仍能取到决策）
     await orchestrator.approve_and_resume(
         record,
         node_name,

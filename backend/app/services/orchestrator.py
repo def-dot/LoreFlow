@@ -74,9 +74,6 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
 
 async def approve_and_resume(record: RunRecord, node_name: str, decision: dict[str, Any]) -> None:
     """决策写进节点快照并持久化，随后恢复执行（approve 端点的全部动作）。
-
-    快照即决策的唯一持久层：先落库再 resume——若进程在恢复中途崩溃，
-    启动恢复重跑时 approver 仍从快照取到决策。
     """
     entry = record.nodes.setdefault(node_name, {})
     entry.setdefault("output", {})["decision"] = decision
