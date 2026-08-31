@@ -39,25 +39,8 @@ async def cfg_merge(ctx: dict[str, Any]) -> dict[str, Any]:
 
 @node(label="发布", description="发布人工审核通过的内容")
 async def cfg_publish(ctx: dict[str, Any]) -> str:
-    """发布最后一级人工审核通过的内容。
-
-    审核输出固定含 ``revised``（载荷数据键应用修订后的生效值，引擎不
-    写回共享上下文）；从中找出带 title 的内容输出（如 merge / fetch 的
-    {title, body}），扁平输入（title/content 字符串键）直接取顶层
-    "title" 键。无审核节点时兜底全 ctx。
-    """
-    reviews = [
-        v
-        for v in ctx.values()
-        if isinstance(v, dict) and v.get("approved") and isinstance(v.get("revised"), dict)
-    ]
-    payload = reviews[-1]["revised"] if reviews else ctx
-    titled = next(
-        (v for v in reversed(list(payload.values())) if isinstance(v, dict) and "title" in v),
-        {},
-    )
-    title = titled.get("title") or payload.get("title")
-    return f"Published: {title or '(untitled)'}"
+    """发布审核生效值：title/content 由接线注入（``$审核节点.decision.键``）。"""
+    return f"Published: {ctx.get('title') or '(untitled)'}"
 
 
 @node(label="生成报告", description="基于 merge 输出生成报告文本")

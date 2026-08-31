@@ -34,9 +34,6 @@ logger = get_logger(__name__)
 
 def make_approver(record: RunRecord) -> ApproverFunc:
     """人工审核时挂起；审核后恢复。
-
-    决策由 approve 端点写进节点快照 ``output.decision``（run 记录是决策
-    的唯一持久层），节点（重）执行时从这里取；没有决策即挂起等待。
     """
 
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -52,17 +49,10 @@ def make_approver(record: RunRecord) -> ApproverFunc:
 
 def make_event_sink(record: RunRecord) -> NodeEventFunc:
     """节点状态变化写进快照并落库（只写 nodes，status 归 CAS 独占）。
-
-    瞬态（running/retrying）不带输出，保留该节点上一份输出——挂起重跑
-    时 approve 写进快照的决策不能被 RUNNING 事件冲掉（approver 从快读取）。
     """
 
     async def on_event(result: NodeResult) -> None:
         entry = result.to_dict()
-        if entry.get("output") is None:
-            prev = (record.nodes.get(result.node_name) or {}).get("output")
-            if prev is not None:
-                entry["output"] = prev
         record.nodes[result.node_name] = entry
         try:
             await runs.save_nodes(record)
@@ -75,6 +65,7 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
 async def approve_and_resume(record: RunRecord, node_name: str, decision: dict[str, Any]) -> None:
     """决策写进节点快照并持久化，随后恢复执行（approve 端点的全部动作）。
     """
+    decision = {**decision, "approved_at": datetime.now().isoformat(timespec="seconds")}
     entry = record.nodes.setdefault(node_name, {})
     entry.setdefault("output", {})["decision"] = decision
     await runs.save_nodes(record)

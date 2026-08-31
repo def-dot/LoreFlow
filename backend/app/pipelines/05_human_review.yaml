@@ -24,3 +24,6 @@ nodes:
   publish:
     type: cfg_publish
     depends_on: [review]
+    inputs:
+      title: $review.decision.title
+      content: $review.decision.content

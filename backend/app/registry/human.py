@@ -4,8 +4,9 @@ human 人工审核类型 — 审核协议函数（静态节点函数）与注册
 与普通注册函数同签名 ``(ctx) -> 输出``，唯一差异是审核结果从当前
 运行获取：``_approver`` 由 ``DAG.run`` 注入共享上下文（决策挂起/领取
 见 ``orchestrator.make_approver``）。载荷即卡片（``_review`` 声明），
-通过后 decision 携带审核者返回的字段终值 ``values``，生效值 ``revised``
-随节点输出供下游显式引用（不写回共享上下文）。
+通过后 decision 携带审核者返回的字段终值 ``values``——文本字段经
+``$节点.decision.values.键`` 引用，非文本字段不可编辑、经
+``$节点.payload.键`` 取原值（不写回共享上下文）。
 
 本模块是叶子模块（除 registry.core 外只依赖标准库）：engine 反向依赖
 registry，协议放这里才不会成环；``HumanRejected`` 在拒绝分支运行时
@@ -13,7 +14,6 @@ registry，协议放这里才不会成环；``HumanRejected`` 在拒绝分支运
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from app.registry.core import REGISTRY, NodeType
@@ -23,11 +23,6 @@ logger = logging.getLogger(__name__)
 
 async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。
-
-    载荷即卡片：声明 ``_review``（inputs 字面量 ``{key: 标签文本}``）时
-    只含声明键（同名取值——来源不同才需要接线条目），声明原文随载荷
-    直通前端；未声明则为整个上下文去掉 ``_`` 保留键；``_prompt`` 声明
-    则置顶携带。
     """
     approver = ctx.get("_approver")
     if approver is None:
@@ -48,36 +43,13 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     decision = await approver(name, payload)
     if decision.get("approve"):
         logger.info("[%s] approved by human reviewer", name)
-        # values = 审核者返回的字段终值（ApproveRequest 钉死 dict | None，
-        # 未返回的键——非文本字段——保持原值）
-        values = decision.get("values") or {}
-        return {
-            "approved": True,
-            "payload": payload,
-            # 生效值 = 载荷数据键取审核返回值：不写回共享上下文，
-            # 下游（含下一级审核）经 ``$节点.revised.键`` 显式引用
-            "revised": {
-                k: values.get(k, v) for k, v in payload.items() if not k.startswith("_")
-            },
-            "decision": decision,
-            "approved_at": datetime.now().isoformat(timespec="seconds"),
-        }
+        return {"payload": payload, "decision": decision}
 
-    # engine.node 反向依赖 registry，运行时导入断开初始化环（拒绝是冷路径）
     from app.engine.node import HumanRejected
 
-    reason = decision.get("reason") or "被人工审核拒绝"
+    reason = f"人工审核拒绝：{decision.get("reason")}"
     logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
-    raise HumanRejected(
-        reason,
-        output={
-            "approved": False,
-            "reason": reason,
-            "payload": payload,
-            "decision": decision,
-            "approved_at": datetime.now().isoformat(timespec="seconds"),
-        },
-    )
+    raise HumanRejected(reason, output={"payload": payload, "decision": decision})
 
 
 REGISTRY["human"] = NodeType(

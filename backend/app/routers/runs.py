@@ -121,9 +121,6 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
         or entry.get("status") != NodeStatus.REVIEWING.value
     ):
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
-    await orchestrator.approve_and_resume(
-        record,
-        node_name,
-        {"approve": body.approve, "reason": body.reason, "values": body.values},
-    )
+
+    await orchestrator.approve_and_resume(record, node_name, body.model_dump())
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

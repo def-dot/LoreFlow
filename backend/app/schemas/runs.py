@@ -79,16 +79,18 @@ class RunCreateResponse(BaseModel):
 
 
 class ApproveRequest(BaseModel):
-    """审批决策：通过/拒绝 + 可选拒绝原因 + 审核返回的字段终值。
+    """审批决策：通过/拒绝 + 可选拒绝原因 + 审核返回的卡片字段。
 
-    values 是审核者返回的卡片字段值（文本字段可就地修改后原样送回，
-    未改字段即原值），仅通过时生效；未返回的字段（非文本）保持原值，
-    改动可由 payload 与 values 对比得出，随决策入库留档。
+    卡片字段（``_review`` 声明的键）平铺在 body 顶层，与协议键
+    approve/reason 同级（``$节点.decision.键`` 直接可取）；文本字段
+    可就地修改后原样送回，未改即原值，仅通过时生效——改动可由
+    payload 与决策字段对比得出，随决策入库留档。
     """
+
+    model_config = ConfigDict(extra="allow")
 
     approve: bool
     reason: str | None = None
-    values: dict[str, str] | None = None
 
 
 class ApproveResponse(BaseModel):
