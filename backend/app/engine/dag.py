@@ -356,9 +356,8 @@ class DAG:
         if inputs is None:
             inputs = self.default_inputs
 
-        if self.params:
-            if errors := validate_inputs(inputs, self.params):
-                raise ValueError("\n".join(errors))
+        if self.params and (errors := validate_inputs(inputs, self.params)):
+            raise ValueError("\n".join(errors))
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
         if logger.isEnabledFor(logging.DEBUG):

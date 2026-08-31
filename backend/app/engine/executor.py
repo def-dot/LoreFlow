@@ -131,9 +131,6 @@ class DAGExecutor:
         events: dict[str, asyncio.Event],
     ) -> NodeResult:
         """Lifecycle of a single node: 等依赖 → 失败/跳过级联 → 条件判断 → 带重试执行 → 收尾。
-
-        events/tasks 是 execute 的过程簿记（并发协调表）：等上游事件、
-        读依赖状态、完成时置位自己的事件。
         """
         result: NodeResult | None = None
         try:
