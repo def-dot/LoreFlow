@@ -193,7 +193,7 @@ class DAG:
             condition: 与节点条件同一形态 ``(视图) -> bool``；视图 = 累积
                        上下文 + 每轮注入的 ``iteration``（从 1 起）。
                        Return ``True`` to **continue** looping（YAML 声明
-                       层写 ``condition: iteration < 3`` 即可）。
+                       层写 ``condition: $iteration < 3`` 即可）。
             depends_on: Upstream nodes the loop waits on before its first iteration.
             max_iterations: Safety cap on iterations.
             retry: Retry policy applied to each iteration of the whole sub-DAG.

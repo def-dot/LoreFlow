@@ -4,7 +4,7 @@
 编排结构（依赖/接线/条件）在 YAML 声明；这些函数是 YAML 里 type:
 引用的实现。cfg_* 是主链演示（抓取→清洗→富化→合并→发布→报告），
 demo_* 是引擎特性示例（重试/循环）的辅助节点。条件一律用表达式
-（``condition: merge`` / ``iteration < 3``），不再是注册函数。
+（``condition: $merge`` / ``$iteration < 3``），不再是注册函数。
 """
 
 from __future__ import annotations

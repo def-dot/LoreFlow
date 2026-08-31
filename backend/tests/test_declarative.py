@@ -72,7 +72,7 @@ async def test_load_dag_human_with_condition() -> None:
         "inputs": {"approved": {"default": False}},
         "nodes": {
             "data": {"type": "cfg_fetch"},
-            "review": {"type": "human", "depends_on": ["data"], "condition": "approved == true"},
+            "review": {"type": "human", "depends_on": ["data"], "condition": "$approved == true"},
         },
     }
     dag = load_dag(config, approver=approver)
@@ -92,7 +92,7 @@ async def test_load_dag_loop(registered: Any) -> None:
             "batch": {
                 "type": "loop",
                 "body": {"tick": {"type": "tick"}},
-                "condition": "iteration < 1",
+                "condition": "$iteration < 1",
                 "max_iterations": 2,
             },
         },
@@ -154,7 +154,7 @@ def test_validation_errors() -> None:
             }
         )
     with pytest.raises(ValueError, match="非空的 'body'"):
-        load_dag({"nodes": {"l": {"type": "loop", "condition": "x"}}})
+        load_dag({"nodes": {"l": {"type": "loop", "condition": "$x"}}})
     with pytest.raises(ValueError, match="需要 'condition'"):
         load_dag({"nodes": {"l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}}}})
     with pytest.raises(ValueError, match="必须提供 approver"):
@@ -425,7 +425,7 @@ def test_validate_nodes_accepts() -> None:
 def test_validate_nodes_accepts_loop() -> None:
     """loop 节点的 condition 是表达式（iteration 在循环谓词视图可用）"""
     assert validate_nodes({
-        "nodes": {"a": {"type": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "iteration < 3"}}
+        "nodes": {"a": {"type": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "$iteration < 3"}}
     }) == []
 
 
@@ -479,7 +479,7 @@ def test_validate_nodes_rejects() -> None:
     }}) == ["检测到循环依赖: a → b"]
 
     # loop 类型缺少 body / condition、condition 引用未知键（condition 校验先于 body 检查）
-    assert validate_nodes({"nodes": {"a": {"type": "loop", "condition": "x"}}}) == [
+    assert validate_nodes({"nodes": {"a": {"type": "loop", "condition": "$x"}}}) == [
         "节点 'a': condition 引用的 'x' 不是参数键或上游依赖节点",
         "循环节点 'a': 需要非空的 'body' 映射",
     ]
@@ -549,7 +549,7 @@ def test_validate_config_rejects_bad_structure() -> None:
     assert validate_config({"nodes": {
         "l": {
             "type": "loop",
-            "condition": "iteration < 3",
+            "condition": "$iteration < 3",
             "body": {"b": {"type": "cfg_fetch", "depends_on": ["ghost"]}},
         },
     }}) == ["循环节点 'l': 节点 'b' 依赖的 'ghost' 不在 DAG 中"]
@@ -703,8 +703,8 @@ async def test_condition_expression_runs_and_skips() -> None:
     config = {
         "inputs": {"pick": {}},
         "nodes": {
-            "a": {"type": "cfg_fetch", "condition": "pick == a"},
-            "b": {"type": "cfg_fetch", "condition": "pick == b"},
+            "a": {"type": "cfg_fetch", "condition": "$pick == a"},
+            "b": {"type": "cfg_fetch", "condition": "$pick == b"},
         },
     }
     results = await load_dag(config).run(inputs={"pick": "a"})
@@ -724,7 +724,7 @@ async def test_condition_expression_on_wired_key() -> None:
             "gold": {
                 "type": "cfg_fetch",
                 "depends_on": ["data"],
-                "condition": "tier == gold",
+                "condition": "$tier == gold",
                 "inputs": {"tier": "$data.title"},  # title = "DAG Flow v0.1" ≠ gold
             },
         },
@@ -784,7 +784,7 @@ def test_condition_refs_not_validated() -> None:
         "乙": {"type": "cfg_fetch", "condition": "$甲.title == x"},  # 未声明依赖
     }}) == []
     assert validate_config({"nodes": {
-        "甲": {"type": "cfg_fetch", "condition": "iteration < 3"},
+        "甲": {"type": "cfg_fetch", "condition": "$iteration < 3"},
     }, "inputs": {}}) == []
 
 
@@ -853,7 +853,7 @@ def test_condition_expression_validation() -> None:
         "a": {"type": "cfg_fetch", "condition": {"t_eq": "a"}},
     }}) == [
         "节点 'a': condition 必须是非空表达式字符串"
-        "（如 intent == chat / merge / not flag），实际是 {'t_eq': 'a'}"
+        "（如 $intent == chat / $merge / not $flag），实际是 {'t_eq': 'a'}"
     ]
 
     # 语法错误：缺键
@@ -861,19 +861,19 @@ def test_condition_expression_validation() -> None:
         "a": {"type": "cfg_fetch", "condition": "== chat"},
     }}) == [
         "节点 'a': 条件表达式 '== chat' 无法解析"
-        "（写法如 ``intent == chat``、``merge``、``not flag``）"
+        "（写法如 ``$intent == chat``、``$merge``、``not $flag``）"
     ]
 
     # 引用键不做来源校验（求值在接线视图上，loop 注入键无法静态枚举）：
     # 拼错 / $ 前缀 / iteration 均不报，运行期取 None 恒 False 跳过
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": "pick2 == a"},
+        "a": {"type": "cfg_fetch", "condition": "$pick2 == a"},
     }}) == []
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": "$typo.field == x"},
     }}) == []
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": "iteration < 3"},
+        "a": {"type": "cfg_fetch", "condition": "$iteration < 3"},
     }}) == []
     assert validate_config({"nodes": {
         "data": {"type": "cfg_fetch"},

@@ -31,4 +31,4 @@ nodes:
   notify:
     type: notify_message
     depends_on: [merge]
-    condition: notify_long_body
+    condition: $merge

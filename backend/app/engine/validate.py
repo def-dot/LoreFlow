@@ -2,9 +2,10 @@
 
 布局：字段白名单 → 图结构 → 单项校验 → 汇总（validate_config）。
 
-inputs 的 ``$`` 引用做来源校验（参数键 ∪ 上游节点）；condition 表达式与
-review 卡片声明只查语法/形状，不做来源校验——缺失键由运行期兜底（条件恒
-False、卡片字段显示「未提供」）。
+inputs 的 ``$`` 引用与 condition 表达式的引用根键做来源校验（参数键 ∪
+上游节点；condition 域另含本节点 inputs 本地键——求值在接线视图上）。
+review 卡片声明不校验内容与来源——缺失键由运行期兜底（卡片字段显示
+「未提供」）。
 """
 
 from __future__ import annotations
@@ -130,11 +131,12 @@ def _validate_wiring(
     return errors
 
 
-def _validate_condition(condition: Any) -> list[str]:
+def _validate_condition(condition: Any, available_refs: set[str]) -> list[str]:
     """condition 声明校验：布尔常量（``true``/``false`` 开关）或表达式字符串。
 
-    只查语法；引用键不做来源校验（求值在接线视图上进行，loop 注入的
-    iteration 等运行期键无法静态枚举）。消息不带节点名前缀，由调用点统一加。
+    语法 + 引用根键 ∈ available_refs——求值在接线视图上进行，域含参数键、
+    上游闭包与本节点 inputs 本地键（调用点合入）。消息不带节点名前缀，
+    由调用点统一加。
     """
     if isinstance(condition, bool):
         return []  # 未声明（YAML ``condition:`` 空值）/ true-false 常量开关
@@ -142,12 +144,14 @@ def _validate_condition(condition: Any) -> list[str]:
     if not isinstance(condition, str) or not condition.strip():
         return [
             f"condition 必须是非空表达式字符串"
-            f"（如 intent == chat / merge / not flag），实际是 {condition!r}"
+            f"（如 $intent == chat / $merge / not $flag），实际是 {condition!r}"
         ]
     try:
-        _parse(condition)
+        root = _parse(condition)[1].split(".")[0]
     except ValueError as exc:
         return [exc]
+    if root not in available_refs:
+        return [f"condition 引用的 {root!r} 不是参数键、上游依赖节点或本地键"]
     return []
 
 
@@ -230,30 +234,31 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
 
         # type 是唯一判别字段：所有类型用同一字段集
         type_key = spec.get("type")
+        if not type_key:
+            errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
+        elif type_key not in REGISTRY:
+            errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
+
         allowed = _NODE_FIELDS
 
         unknown = set(spec) - allowed
         if unknown:
             errors.append(f"节点 {name!r}（{type_key}）: 不支持的字段 {sorted(unknown)}")
 
-        available_refs = _ancestors(name, edges) | set(params)
-        
+        refs = _ancestors(name, edges) | set(params)
+
         wiring = spec.get("inputs")
         if wiring:
             errors.extend(
                 f"节点 {name!r}: {msg}"
-                for msg in _validate_wiring(wiring, available_refs)
+                for msg in _validate_wiring(wiring, refs)
             )
 
         condition = spec.get("condition")
         if condition:
-            # condition 只查语法（布尔常量/表达式可解析）
-            errors.extend(f"节点 {name!r}: {msg}" for msg in _validate_condition(condition))
-
-        if not type_key:
-            errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
-        elif type_key not in REGISTRY:
-            errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
+            refs = refs | set(wiring) if isinstance(wiring, dict) else refs
+            errors.extend(f"节点 {name!r}: {msg}" for msg in _validate_condition(condition, refs))
+        
     return errors
 
 

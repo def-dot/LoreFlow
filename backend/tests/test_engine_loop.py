@@ -97,7 +97,7 @@ def test_loop_node_requires_callable_condition() -> None:
         return 1
 
     with pytest.raises(ValueError, match="condition 必须是可调用对象"):
-        dag.loop_node("loop", body_nodes=[Node(name="tick", func=tick)], condition="yes")
+        dag.loop_node("loop", body_nodes=[Node(name="tick", func=tick)], condition="$yes")
 
 
 def test_loop_body_missing_dep_fails_at_registration() -> None:

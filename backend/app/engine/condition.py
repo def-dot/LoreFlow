@@ -1,19 +1,19 @@
 """
 条件表达式 — YAML ``condition`` 声明的解析与求值。
 
-语法（对标 Argo ``when`` 的内嵌条件）::
+语法（对标 Argo ``when`` 的内嵌条件；键必须带 ``$`` 引用前缀——与
+inputs 接线同一拼法，``$`` 开头 = 引用上下文）::
 
-    condition: intent == chat          # 等值 / 不等（== !=）
-    condition: score >= 0.8            # 大小比较（> >= < <=）
-    condition: intent in [chat, rag]   # 成员（in / not in，值为列表）
-    condition: merge                   # 裸键真值（视图值非空即真）
-    condition: not flag                # 取反
-    condition: $router.intent == rag   # $ 引用前缀（与 inputs 接线同拼法，等价于省略 $）
+    condition: $intent == chat          # 等值 / 不等（== !=）
+    condition: $score >= 0.8            # 大小比较（> >= < <=）
+    condition: $intent in [chat, rag]   # 成员（in / not in，值为列表）
+    condition: $merge                   # 裸键真值（视图值非空即真）
+    condition: not $flag                # 取反
+    condition: $router.intent == rag    # 点路径下钻上游输出字段
 
 - 键在节点视图上取值（共享 ctx + ``inputs`` 接线本地键；loop 额外注入
-  ``iteration``），支持 ``a.b.c`` 点路径下钻 dict 字段。加载期按
-  「params ∪ 节点名 ∪ inputs 本地键」核对根键存在 —— 拼错键在载入时
-  报，不等到运行。
+  ``iteration``），支持 ``a.b.c`` 点路径下钻 dict 字段。引用键不做加载期
+  校验——拼错键运行期取 ``None``，恒 False 跳过。
 - 值为标量字面量：裸词按字符串（``chat``）、数字/true/false/null 按
   字面量、带空格的字符串加引号；``in`` 的值是 ``[a, b]`` 列表。数字
   与字符串不隐式转换（``1 == "1"`` 为 False）。
@@ -29,10 +29,11 @@ from typing import Any
 
 from .node import ConditionFunc
 
-#: 表达式 = [not] 键 [操作符 值]。键不含空白/比较符字符（支持中文与
-#: ``.`` 字段路径）；值至少一个非空字符（``intent ==`` 缺值则整体不匹配）。
+#: 表达式 = [not] $键 [操作符 值]。键以 ``$`` 开头（引用上下文，与 inputs
+#: 接线同拼法），不含空白/比较符字符（支持中文与 ``.`` 字段路径）；值至少
+#: 一个非空字符（``$intent ==`` 缺值则整体不匹配）。
 _EXPR_RE = re.compile(
-    r"^\s*(?P<neg>not\s+)?(?P<key>[^\s=!<>]+)"
+    r"^\s*(?P<neg>not\s+)?\$(?P<key>[^\s=!<>]+)"
     r"(?:\s*(?P<op>not\s+in|==|!=|>=|<=|>|<|in)\s*(?P<value>\S.*?))?\s*$"
 )
 
@@ -70,12 +71,12 @@ def _parse(expr: str) -> tuple[bool, str, str | None, Any]:
     m = _EXPR_RE.match(expr)
     if not m:
         raise ValueError(
-            f"条件表达式 {expr!r} 无法解析（写法如 ``intent == chat``、``merge``、``not flag``）"
+            f"条件表达式 {expr!r} 无法解析（写法如 ``$intent == chat``、``$merge``、``not $flag``）"
         )
     value_raw = m.group("value")
     return (
         m.group("neg") is not None,
-        m.group("key").removeprefix("$"),  # $ 引用前缀（与 inputs 接线同拼法），等价于省略
+        m.group("key"),
         m.group("op"),
         _parse_value(value_raw) if value_raw is not None else None,
     )

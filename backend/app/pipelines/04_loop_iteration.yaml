@@ -23,5 +23,5 @@ nodes:
     body:
       tick:
         type: demo_tick
-    condition: iteration < 3
+    condition: $iteration < 3
     max_iterations: 5
