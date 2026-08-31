@@ -53,6 +53,10 @@ def make_event_sink(record: RunRecord) -> NodeEventFunc:
 
     async def on_event(result: NodeResult) -> None:
         entry = result.to_dict()
+        if entry.get("output") is None:
+            prev = (record.nodes.get(result.node_name) or {}).get("output")
+            if prev is not None:
+                entry["output"] = prev
         record.nodes[result.node_name] = entry
         try:
             await runs.save_nodes(record)
