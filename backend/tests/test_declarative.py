@@ -394,34 +394,34 @@ def test_params_no_clash_accepted() -> None:
 
 
 def test_validate_review_accepts() -> None:
-    """validate_review 只接受富映射格式：{key: {label: 文本}}，允许空字符串"""
-    keys = {"title"}
-    assert validate_review({"title": {"label": "标题"}}, keys) == []
-    assert validate_review({"title": {"label": ""}}, keys) == []  # 空字符串允许
+    """validate_review 只查形状：{key: 文本}，允许空字符串（键域统一走 _validate_refs）"""
+    assert validate_review({"title": "标题"}) == []
+    assert validate_review({"title": ""}) == []  # 空字符串允许
 
 
 def test_validate_review_rejects() -> None:
     """非法格式返回错误列表"""
-    assert validate_review(None, set()) == ["review 必须是映射，实际是 NoneType"]
-    assert validate_review(["title"], set()) == ["review 必须是映射，实际是 list"]
-    assert validate_review({}, set()) == ["review 声明不能为空映射"]
-    # 裸字符串值（非富映射）
-    assert validate_review({"title": "标题"}, {"title"}) == [
-        "review 字段 'title': 必须是 {label: 文本} 格式，实际是 str"
-    ]
-    # 不支持的字段 + 缺 label（收集全部错误）
-    assert validate_review({"t": {"format": "text"}}, {"t"}) == [
-        "review 字段 't': 不支持的字段 ['format']",
-        "review 字段 't': label 必须是字符串",
-    ]
-    # label 非字符串
-    assert validate_review({"t": {"label": None}}, {"t"}) == [
-        "review 字段 't': label 必须是字符串"
-    ]
-    # 键引用未声明
-    assert validate_review({"ghost": {"label": "x"}}, {"title"}) == [
-        "review 引用了未声明的键 ghost"
-    ]
+    assert validate_review(None) == ["review 必须是映射，实际是 NoneType"]
+    assert validate_review(["title"]) == ["review 必须是映射，实际是 list"]
+    assert validate_review({}) == ["review 声明不能为空映射"]
+    # 标签非字符串
+    assert validate_review({"t": {"label": "x"}}) == ["review 字段 't': 标签必须是字符串"]
+    assert validate_review({"t": None}) == ["review 字段 't': 标签必须是字符串"]
+
+
+def test_review_key_must_resolve() -> None:
+    """卡片键与 $ 引用同规则：必须是参数键或上游依赖节点（拼错载入期报出）。"""
+    assert validate_config({"nodes": {
+        "work": {"type": "cfg_fetch"},
+        "gate": {"type": "human", "depends_on": ["work"],
+                 "inputs": {"_review": {"ttile": "标题"}}},
+    }}) == ["节点 'gate': _review.ttile 引用的 'ttile' 不是参数键或上游依赖节点"]
+    # 参数键、上游节点名可以做卡片键
+    assert validate_config({"inputs": {"title": {}}, "nodes": {
+        "work": {"type": "cfg_fetch"},
+        "gate": {"type": "human", "depends_on": ["work"],
+                 "inputs": {"_review": {"title": "标题", "work": "产出"}}},
+    }}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +502,7 @@ def test_validate_nodes_rejects() -> None:
 
     # loop 类型缺少 body / condition、condition 引用未知键（condition 校验先于 body 检查）
     assert validate_nodes({"nodes": {"a": {"type": "loop", "condition": "x"}}}) == [
-        "节点 'a': condition 引用的 'x' 不是参数键、节点名或 inputs 本地键",
+        "节点 'a': condition 引用的 'x' 不是参数键或上游依赖节点",
         "循环节点 'a': 需要非空的 'body' 映射",
     ]
     assert validate_nodes({"nodes": {"a": {"type": "loop", "body": {"b": {"type": "cfg_fetch"}}}}}) == [
@@ -679,7 +679,7 @@ def test_review_unknown_key_rejected() -> None:
     async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"approve": True}
 
-    with pytest.raises(ValueError, match="review 引用了未声明的键 ttile"):
+    with pytest.raises(ValueError, match="不是参数键或上游依赖节点"):
         load_dag(
             {
                 "inputs": {},
@@ -687,7 +687,7 @@ def test_review_unknown_key_rejected() -> None:
                     "work": {"type": "cfg_fetch"},
                     "gate": {
                         "type": "human", "depends_on": ["work"],
-                        "review": {"ttile": {"label": "标题"}},
+                        "inputs": {"_review": {"ttile": "标题"}},
                     },
                 },
             },
@@ -706,7 +706,7 @@ def test_review_param_key_allowed() -> None:
             "nodes": {
                 "gate": {
                     "type": "human", "depends_on": [],
-                    "review": {"q": {"label": "查询"}, "opt": {"label": "可选参数"}},
+                    "inputs": {"_review": {"q": "查询", "opt": "可选参数"}},
                 },
             },
         },
@@ -797,22 +797,17 @@ async def test_condition_boolean_constants() -> None:
     }}) == []
 
 
-def test_condition_ref_must_be_upstream() -> None:
-    """condition 的 $节点 引用与 inputs 接线受同一上游链规则约束。"""
+def test_condition_refs_not_validated() -> None:
+    """condition 只查语法，引用键不做来源校验——求值在接线视图上进行，
+    loop 注入的 iteration 等运行期键无法静态枚举。"""
+    # 未声明依赖的节点 / 拼错的键都不报（运行期取 None 恒 False 跳过）
     assert validate_config({"nodes": {
         "甲": {"type": "cfg_fetch"},
         "乙": {"type": "cfg_fetch", "condition": "$甲.title == x"},  # 未声明依赖
-    }}) == ["节点 '乙': condition 引用的 '甲' 不在 depends_on 上游链中"]
-
-    # 隔代上游可以；参数引用不受此限
-    assert validate_config({"nodes": {
-        "甲": {"type": "cfg_fetch"},
-        "乙": {"type": "cfg_fetch", "depends_on": ["甲"]},
-        "丙": {"type": "cfg_fetch", "depends_on": ["乙"], "condition": "$甲.title == x"},
     }}) == []
     assert validate_config({"nodes": {
-        "甲": {"type": "cfg_fetch", "condition": "$query == x"},
-    }, "inputs": {"query": {}}}) == []
+        "甲": {"type": "cfg_fetch", "condition": "iteration < 3"},
+    }, "inputs": {}}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -891,24 +886,18 @@ def test_condition_expression_validation() -> None:
         "（写法如 ``intent == chat``、``merge``、``not flag``）"
     ]
 
-    # 引用键不存在（拼错）—— 运行期只会静默取 None（恒 False 跳过），必须载入期报出
+    # 引用键不做来源校验（求值在接线视图上，loop 注入键无法静态枚举）：
+    # 拼错 / $ 前缀 / iteration 均不报，运行期取 None 恒 False 跳过
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": "pick2 == a"},
-    }}) == ["节点 'a': condition 引用的 'pick2' 不是参数键、节点名或 inputs 本地键"]
-
-    # $ 引用前缀：剥掉后核对根键（报 typo 不报 $typo）；根键存在即合法
+    }}) == []
     assert validate_config({"nodes": {
         "a": {"type": "cfg_fetch", "condition": "$typo.field == x"},
-    }}) == ["节点 'a': condition 引用的 'typo' 不是参数键、节点名或 inputs 本地键"]
+    }}) == []
+    assert validate_config({"nodes": {
+        "a": {"type": "cfg_fetch", "condition": "iteration < 3"},
+    }}) == []
     assert validate_config({"nodes": {
         "data": {"type": "cfg_fetch"},
         "gold": {"type": "cfg_fetch", "depends_on": ["data"], "condition": "$data.title == gold"},
     }}) == []
-
-    # loop 的条件里 iteration 可用，其余键同样核对
-    assert validate_config({"nodes": {
-        "l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "iteration < 3"},
-    }}) == []
-    assert validate_config({"nodes": {
-        "l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": "rounds < 3"},
-    }}) == ["节点 'l': condition 引用的 'rounds' 不是参数键、节点名或 inputs 本地键"]

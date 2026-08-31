@@ -16,11 +16,12 @@ registry，协议放这里才不会成环；``HumanRejected`` 在拒绝分支运
 import logging
 from typing import Any
 
-from app.registry.core import REGISTRY, NodeType
+from app.registry.core import node_type
 
 logger = logging.getLogger(__name__)
 
 
+@node_type(label="人工审核", description="人工审核节点，暂停等待审批", name="human")
 async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。
     """
@@ -50,11 +51,3 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     reason = f"人工审核拒绝：{decision.get("reason")}"
     logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
     raise HumanRejected(reason, output={"payload": payload, "decision": decision})
-
-
-REGISTRY["human"] = NodeType(
-    name="human",
-    func=human_review,
-    label="人工审核",
-    description="人工审核节点，暂停等待审批",
-)

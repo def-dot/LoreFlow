@@ -1,11 +1,15 @@
 """共享校验实现 —— 一项检查一个实现、多层调用。
 
-布局：字段白名单 → 图结构 → 数据流接线 → 单项校验 → 汇总（validate_config）。
+布局：字段白名单 → 图结构 → 单项校验 → 汇总（validate_config）。
+
+引用类声明（inputs 的 ``$`` 接线、condition 表达式、review 卡片声明）不校验
+内容与来源——缺失/畸形由运行期兜底（接线取 None、条件恒 False、卡片字段
+显示「未提供」）。
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.registry import REGISTRY
@@ -25,7 +29,7 @@ _NODE_FIELDS = {"type", "label", "depends_on", "inputs", "retry", "timeout", "co
 
 
 # ------------------------------------------------------------------
-# 图结构（依赖存在 / 环 / 上游闭包）
+# 图结构（依赖存在 / 环）
 # ------------------------------------------------------------------
 
 
@@ -90,109 +94,40 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
     return errors
 
 
-def _ancestors(name: str, edges: Mapping[str, Any]) -> set[str]:
-    """depends_on 闭包（直接上游及其全部祖先）。"""
-    seen: set[str] = set()
-    stack = [name]
-    while stack:
-        for dep in edges.get(stack.pop()) or []:
-            if dep not in seen:
-                seen.add(dep)
-                stack.append(dep)
-    return seen
-
-
-def _validate_wiring(wiring: Any, name: str, available: set[str]) -> list[str]:
-    """节点 inputs 接线校验：必须是映射，``$`` 引用根键 ∈ 节点名 ∪ 参数键。"""
-    if not isinstance(wiring, dict):
-        return [f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射"]
-    errors: list[str] = []
-    for local, source in wiring.items():
-        if not (isinstance(source, str) and source.startswith("$")):
-            continue  # 字面量不校验来源
-        root = source[1:].partition(".")[0]  # $node.field → node
-        if root not in available:
-            errors.append(f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不是节点名或参数键")
-    return errors
-
-
-def _validate_wiring_upstream(
-    wirings: Mapping[str, Mapping[str, Any]], edges: Mapping[str, Any]
-) -> list[str]:
-    """接线来源若是节点，必须在声明者的 depends_on 上游链中"""
-    errors: list[str] = []
-    for name, wiring in wirings.items():
-        ancestors = _ancestors(name, edges)
-        for local, source in wiring.items():
-            if not (isinstance(source, str) and source.startswith("$")):
-                continue  # 字面量不校验来源
-            root = source[1:].partition(".")[0]  # $node.field → node
-            if root in edges and root not in ancestors:
-                errors.append(
-                    f"节点 {name!r}: inputs.{local} 引用的 {root!r} 不在 depends_on 上游链中"
-                )
-    return errors
-
-
 # ------------------------------------------------------------------
-# 单项校验（review / condition / 运行输入）
+# 单项校验（condition / 运行输入）
 # ------------------------------------------------------------------
-
-
-def validate_review(review: Any, available: Iterable[str]) -> list[str]:
-    """review 声明校验（顶层类型 + 非空 + 键域 + 标签形状 ``{key: 文本}``）
-
-    键 = 卡片字段（同名取值，来源不同才需要接线条目）；标签是裸字符串。
-    """
     if not isinstance(review, dict):
         return [f"review 必须是映射，实际是 {type(review).__name__}"]
     if not review:
         return ["review 声明不能为空映射"]
 
     errors: list[str] = []
-    unknown = [k for k in review if k not in available]
-    if unknown:
-        errors.append(f"review 引用了未声明的键 {', '.join(unknown)}")
-
     for key, val in review.items():
         if not isinstance(val, str):
             errors.append(f"review 字段 {key!r}: 标签必须是字符串")
     return errors
 
 
-def _validate_condition(
-    condition: Any, name: str, available: set[str] | None = None
-) -> list[str]:
+def _validate_condition(condition: Any, name: str) -> list[str]:
     """condition 声明校验：布尔常量（``true``/``false`` 开关）或表达式字符串。
+
+    只查语法；引用键不做来源校验（求值在接线视图上进行，loop 注入的
+    iteration 等运行期键无法静态枚举）。
     """
     if isinstance(condition, bool):
         return []  # 未声明（YAML ``condition:`` 空值）/ true-false 常量开关
-    
+
     if not isinstance(condition, str) or not condition.strip():
         return [
             f"节点 {name!r}: condition 必须是非空表达式字符串"
             f"（如 intent == chat / merge / not flag），实际是 {condition!r}"
         ]
     try:
-        root = _parse(condition)[1].split(".")[0]  # 根键 = 引用键的点路径首段
+        _parse(condition)
     except ValueError as exc:
         return [f"节点 {name!r}: {exc}"]
-    if root not in available:
-        return [
-            f"节点 {name!r}: condition 引用的 {root!r} 不是参数键、节点名或 inputs 本地键"
-        ]
     return []
-
-
-def _validate_condition_upstream(
-    cond_roots: Mapping[str, str], edges: Mapping[str, Any]
-) -> list[str]:
-    """condition 的 $节点 引用必须在声明者的 depends_on 上游链中。"""
-    errors: list[str] = []
-    for name, root in cond_roots.items():
-        if root in edges and root not in _ancestors(name, edges):
-            errors.append(f"节点 {name!r}: condition 引用的 {root!r} 不在 depends_on 上游链中")
-    return errors
 
 
 def validate_inputs(
@@ -212,7 +147,8 @@ def validate_inputs(
         if not spec.get("required"):
             continue
         value = (inputs or {}).get(name)
-        if not value:
+        # 未提供 = None / 空串 / 纯空白串；0/False 是填了的合法值
+        if value is None or (isinstance(value, str) and not value.strip()):
             missing.append(name)
     if missing:
         errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
@@ -258,12 +194,7 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         return [f"nodes 必须是映射(dict)，实际是 {type(nodes).__name__}"]
 
     errors: list[str] = []
-    params = config.get("inputs") or {}  # YAML ``inputs:`` 空值 → None
-    available_ref = set(params) | set(nodes)  # 接线/条件/review 可引用的键
-
     edges: dict[str, Any] = {}
-    wirings: dict[str, dict[str, Any]] = {}
-    cond_roots: dict[str, str] = {}  # 节点名 → condition 根键，上游链检查与接线同规则
 
     for name, spec in nodes.items():
         if not isinstance(spec, dict):
@@ -282,46 +213,20 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         edges[name] = spec.get("depends_on")
 
         wiring = spec.get("inputs")
-        if wiring:
-            errors.extend(_validate_wiring(wiring, name, available_ref))
-            if isinstance(wiring, dict):
-                wirings[name] = wiring
+        if wiring and not isinstance(wiring, dict):
+            errors.append(f"节点 {name!r}: inputs 必须是「本地键: 来源键或字面量」的映射")
 
         condition = spec.get("condition")
         if condition:
-            cond_available = available_ref | (set(wiring) if isinstance(wiring, dict) else set())
-            errors.extend(_validate_condition(condition, name, cond_available))
-            if isinstance(condition, str):
-                try:
-                    cond_roots[name] = _parse(condition)[1].split(".")[0]
-                except ValueError:
-                    pass
+            # condition 只查语法（布尔常量/表达式可解析）；
+            errors.extend(_validate_condition(condition, name))
 
-        # 类型特定校验（membership → human 的 _review 声明）
-        if type_key not in REGISTRY:
-            if not type_key:
-                errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
-            else:
-                errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
-        elif type_key == "human":
-            # 审核视图经 inputs._review 声明（声明即卡片）：键 = 卡片字段
-            # （同名取值，值已在 ctx），标签是裸字符串；来源不同才需要接线
-            # 条目。卡片键直引节点名时并入接线表，受同一上游链规则约束；
-            # 卡片字段平铺进决策，不得占用协议键
-            review_spec = wiring.get("_review") if isinstance(wiring, dict) else None
-            if isinstance(review_spec, dict) and review_spec:
-                domain = available_ref | set(wiring)
-                errors.extend(
-                    f"审核节点 {name!r}: {msg}" for msg in validate_review(review_spec, domain)
-                )
-                clash = {"approve", "reason"} & set(review_spec)
-                if clash:
-                    errors.append(f"审核节点 {name!r}: 卡片字段不得占用协议键 {sorted(clash)}")
-                wirings[name] = {**wiring, **{k: f"${k}" for k in review_spec}}
+        if not type_key:
+            errors.append(f"节点 {name!r}: 需要 'type'（函数键）")
+        elif type_key not in REGISTRY:
+            errors.append(f"节点 {name!r}: 类型函数 {type_key!r} 未注册")
 
     errors.extend(validate_graph(edges))
-    errors.extend(_validate_wiring_upstream(wirings, edges))
-    errors.extend(_validate_condition_upstream(cond_roots, edges))
     return errors
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import settings
-from app.registry.core import node
+from app.registry.core import node_type
 from app.utils.http import http_client
 
 
@@ -32,7 +32,7 @@ async def _ollama_chat(
     return str(content)
 
 
-@node(
+@node_type(
     label="LLM 对话",
     description=(
         "读取 ctx['prompt'] 调用本地 Ollama 生成回答"
@@ -51,7 +51,7 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
     return await _ollama_chat(model, messages)
 
 
-@node(
+@node_type(
     label="意图识别",
     description="LLM 判断 ctx['prompt'] 是闲聊（chat）还是知识类问题（rag），输出 {intent, raw}；提示词包含「人工」直接判 human（转人工，无需模型）",
 )
@@ -79,7 +79,7 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"intent": intent, "raw": raw.strip()}
 
 
-@node(
+@node_type(
     label="知识库问答",
     description="结合检索片段回答 ctx['prompt']；检索结果 chunks ← rag_retrieve 类节点（YAML inputs 接线，未接线或上游被跳过视为未检索到）",
 )
@@ -103,7 +103,7 @@ async def llm_rag_reply(ctx: dict[str, Any]) -> str:
     )
 
 
-@node(
+@node_type(
     label="最终答复",
     description=(
         "互斥分支汇合：按 depends_on 声明顺序取第一个非空上游输出（视图保留键 "

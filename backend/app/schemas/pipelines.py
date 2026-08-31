@@ -32,15 +32,14 @@ class PipelineNodeOut(BaseModel):
     """一个节点的展示元信息（YAML spec + 注册表元数据合成）。"""
 
     name: str
-    kind: str  # 由 type 推导：human | node（前端标签用，YAML 无此字段）
-    type: str | None = None          # 注册表函数键（kind=node 才有）
+    type: str | None = None          # 注册表函数键（human 是注册类型；YAML 无 kind 字段）
     type_label: str | None = None    # 注册表 label；human=人工审核，loop=循环
     type_description: str | None = None  # node=注册表描述；human=审核提示；loop=循环体摘要
     depends_on: list[str] = []
     retry: str | None = None         # 中文摘要，如 "重试 3 次，退避 0.05s×2（≤0.5s）"
     condition: str | dict[str, Any] | None = None  # 条件谓词：注册表键（无参）或 {函数名: 实参}（带参）
     condition_label: str | None = None
-    review: dict[str, dict[str, str]] | None = None  # (kind=human) 审核视图原文 {key: {label}}；None=全量上下文
+    review: dict[str, str] | None = None  # (human) 审核视图声明原文 {key: 标签文本}；None=全量上下文
 
 
 class PipelineDetail(PipelineListItem):

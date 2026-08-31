@@ -73,7 +73,6 @@ def load_dag(
             Node(
                 name=name,
                 func=node_type.func,
-                node_type=node_type,
                 label=spec.get("label"), 
                 inputs=spec.get("inputs"),
                 depends_on=deps,

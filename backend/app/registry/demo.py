@@ -12,38 +12,38 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.registry.core import node
+from app.registry.core import node_type
 
 
-@node(label="抓取原始数据", description="拉取文章标题与正文，输出 {title, body}")
+@node_type(label="抓取原始数据", description="拉取文章标题与正文，输出 {title, body}")
 async def cfg_fetch(ctx: dict[str, Any]) -> dict[str, Any]:
     await asyncio.sleep(0.05)
     return {"title": "DAG Flow v0.1", "body": "  declarative config rocks  "}
 
 
-@node(label="清洗正文", description="去除 body 首尾空白")
+@node_type(label="清洗正文", description="去除 body 首尾空白")
 async def cfg_clean(ctx: dict[str, Any]) -> str:
     return str(ctx["fetch"]["body"]).strip()
 
 
-@node(label="富化标题", description="给标题加 [ENRICHED] 前缀")
+@node_type(label="富化标题", description="给标题加 [ENRICHED] 前缀")
 async def cfg_enrich(ctx: dict[str, Any]) -> str:
     await asyncio.sleep(0.05)
     return f"[ENRICHED] {ctx['fetch']['title']}"
 
 
-@node(label="合并字段", description="合并 enrich 与 clean 的输出为 {title, body}")
+@node_type(label="合并字段", description="合并 enrich 与 clean 的输出为 {title, body}")
 async def cfg_merge(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"title": ctx["enrich"], "body": ctx["clean"]}
 
 
-@node(label="发布", description="发布人工审核通过的内容")
+@node_type(label="发布", description="发布人工审核通过的内容")
 async def cfg_publish(ctx: dict[str, Any]) -> str:
     """发布审核生效值：title/content 由接线注入（``$审核节点.decision.键``）。"""
     return f"Published: {ctx.get('title') or '(untitled)'}"
 
 
-@node(label="生成报告", description="基于 merge 输出生成报告文本")
+@node_type(label="生成报告", description="基于 merge 输出生成报告文本")
 async def cfg_report(ctx: dict[str, Any]) -> str:
     return f"Report generated for {ctx['merge']['title']}"
 
@@ -54,7 +54,7 @@ async def cfg_report(ctx: dict[str, Any]) -> str:
 _flaky_calls = 0
 
 
-@node(label="演示重试", description="前两次调用失败、第三次成功，演示 retry/backoff")
+@node_type(label="演示重试", description="前两次调用失败、第三次成功，演示 retry/backoff")
 async def demo_flaky(ctx: dict[str, Any]) -> str:
     """前两次调用失败、第三次成功 — 演示 retry/backoff。
 
@@ -67,7 +67,7 @@ async def demo_flaky(ctx: dict[str, Any]) -> str:
     return "flaky succeeded after 2 failures"
 
 
-@node(label="演示循环计数", description="每轮迭代 tick+1，结果累积在共享上下文")
+@node_type(label="演示循环计数", description="每轮迭代 tick+1，结果累积在共享上下文")
 async def demo_tick(ctx: dict[str, Any]) -> int:
     """循环体：每轮迭代把 tick 计数 +1（结果累积在共享上下文）。"""
     return int(ctx.get("tick", 0)) + 1

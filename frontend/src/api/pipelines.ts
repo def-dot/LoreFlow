@@ -2,7 +2,6 @@ import { api } from './request'
 
 export interface PipelineNodeInfo {
   name: string
-  kind: 'node' | 'human' | 'loop'
   type: string | null
   type_label: string | null
   type_description: string | null

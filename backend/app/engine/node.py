@@ -59,8 +59,8 @@ class Node:
 
     Attributes:
         name: Unique identifier for this node within the DAG.
-        func: Async callable that receives the shared context dict (may be wrapped with input wiring).
-        node_type: Optional NodeType containing the original function and metadata for this node.
+        func: Async callable that receives the shared context dict (may be
+              wrapped with input wiring).
         label: Human-readable label for this node.
         inputs: Optional input wiring mapping from parameter names to node outputs or values.
         depends_on: Names of upstream nodes that must complete first.
@@ -69,13 +69,10 @@ class Node:
                    on the wiring view by the executor.
         retry: Retry policy, or ``None`` for no retries.
         timeout: Per-node timeout in seconds, or ``None`` for no limit.
-        metadata: 引擎内部标记（如 loop 直用共享上下文的旗标、无注册表
-                  引用类型的 type/type_label 展示回退）。
     """
 
     name: str
     func: NodeFunc
-    node_type: NodeType | None = None
     label: str = ""
     inputs: dict[str, Any] | None = None
     depends_on: list[str] = field(default_factory=list)
@@ -83,6 +80,10 @@ class Node:
     retry: RetryPolicy | None = None
     timeout: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def node_type(self) -> NodeType | None:
+        return getattr(self.func, "__node_type__", None)
 
     def __repr__(self) -> str:
         deps = ",".join(self.depends_on) if self.depends_on else "root"

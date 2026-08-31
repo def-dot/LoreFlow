@@ -5,16 +5,16 @@
 使用示例见 app/pipelines/07_plugin_demo.yaml。
 """
 
-from app.registry import node
+from app.registry import node_type
 
 
-@node(label="生成通知", description="插件节点：基于 merge 输出生成通知文本")
+@node_type(label="生成通知", description="插件节点：基于 merge 输出生成通知文本")
 async def notify_message(ctx: dict) -> str:
     merge = ctx["merge"]
     return f"[通知] {merge['title']}（正文 {len(merge['body'])} 字符）已就绪"
 
 
-@node(label="长文通知", description="插件条件：正文超过 20 字符才生成通知")
+@node_type(label="长文通知", description="插件条件：正文超过 20 字符才生成通知")
 def notify_long_body(ctx: dict) -> bool:
     merge = ctx.get("merge")
     return bool(merge) and len(str(merge.get("body", ""))) > 20

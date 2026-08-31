@@ -86,18 +86,14 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
 
 
 def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
-    """把 YAML 节点 spec 合成展示行：type 是唯一判别字段，label/描述来自注册表。
-
-    kind 由 type 推导（结构化类型 human，其余为 node）供前端标签使用；
-    human 的 type_description 放审核提示（inputs._prompt 字面量）。
+    """把 YAML 节点 spec 合成展示行：type 是唯一判别字段，label/描述来自注册表
+    （human 也是注册类型）；human 的 type_description 放审核提示（inputs._prompt）。
     """
     type_val = spec.get("type")
-    kind = "human" if type_val == "human" else "node"
     cond_spec = spec.get("condition")
     row: dict[str, Any] = {
         "name": name,
-        "kind": kind,
-        "type": None,
+        "type": type_val,
         "type_label": None,
         "type_description": None,
         "depends_on": list(spec.get("depends_on") or []),
@@ -106,14 +102,11 @@ def _node_row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "condition_label": None,
         "review": None,
     }
-    if kind == "node":
-        row["type"] = type_val
-        node_type = REGISTRY.get(type_val) if type_val else None
-        if node_type:
-            row["type_label"] = node_type.label
-            row["type_description"] = node_type.description
-    elif kind == "human":
-        row["type_label"] = "人工审核"
+    node_type = REGISTRY.get(type_val) if type_val else None
+    if node_type:
+        row["type_label"] = node_type.label
+        row["type_description"] = node_type.description
+    if type_val == "human":
         wiring = spec.get("inputs") or {}
         row["type_description"] = wiring.get("_prompt")
         # 审核视图声明（inputs._review 字面量 {key: {label}}）直通前端；格式已由 validate 校验

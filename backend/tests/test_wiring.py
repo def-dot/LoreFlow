@@ -1,6 +1,6 @@
 """YAML ``inputs`` 数据流接线 — 校验与注入视图的单元测试（不经 HTTP）。
 
-值语义："$键" = 引用（去前缀取 ctx 键，校验存在 + 上游链）；其余
+值语义："$键" = 引用（去前缀取 ctx 键；引用不做来源校验）；其余
 （裸字符串/数字/布尔等）= 字面量原样注入。
 """
 
@@ -10,14 +10,14 @@ import pytest
 
 from app.engine.declarative import load_dag
 from app.engine.validate import validate_config
-from app.registry.core import node, unregister
+from app.registry.core import node_type, unregister
 
 
 @pytest.fixture(autouse=True)
 def probe():
     """临时注册探针节点：回显 ctx['document']。"""
 
-    @node(label="接线探针", description="回显 ctx['document']", name="wire_probe")
+    @node_type(label="接线探针", description="回显 ctx['document']", name="wire_probe")
     async def wire_probe(ctx: dict[str, Any]) -> dict[str, Any]:
         return {"seen_document": ctx.get("document")}
 
@@ -104,21 +104,17 @@ async def test_wiring_non_string_literal() -> None:
     assert results["节点"].output == {"seen_document": 5}
 
 
-def test_validate_unknown_source() -> None:
-    """@ 引用的来源既不是节点名也不是参数键 → 加载期报错。"""
-    cfg = {"nodes": {"甲": {"type": "wire_probe"}, "乙": {"type": "wire_probe", "inputs": {"x": "$不存在"}}}}
-    assert any("不是节点名或参数键" in e for e in validate_config(cfg))
-
-
-def test_validate_source_must_be_upstream() -> None:
-    """来源节点不在 depends_on 上游链 → 报错（数据只能来自已声明的上游）。"""
+def test_validate_inputs_refs_not_checked() -> None:
+    """inputs 的 $ 引用不做来源校验：拼错 / 非上游节点都不报——
+    解析（wired_ctx）对缺失键返回 None，由运行期数据流兜底。"""
     cfg = {
         "nodes": {
             "甲": {"type": "wire_probe"},
-            "乙": {"type": "wire_probe", "inputs": {"x": "$甲"}},  # 未声明依赖
+            "乙": {"type": "wire_probe", "inputs": {"x": "$不存在"}},
+            "丙": {"type": "wire_probe", "inputs": {"y": "$甲"}},  # 未声明依赖
         }
     }
-    assert any("不在 depends_on 上游链中" in e for e in validate_config(cfg))
+    assert validate_config(cfg) == []
 
 
 def test_validate_transitive_upstream_allowed() -> None:
@@ -144,7 +140,7 @@ def test_validate_human_accepts_inputs() -> None:
     cfg = {
         "nodes": {
             "甲": {"type": "wire_probe"},
-            "审核": {"kind": "human", "depends_on": ["甲"], "inputs": {"x": "$甲"}},
+            "审核": {"type": "human", "depends_on": ["甲"], "inputs": {"x": "$甲"}},
         }
     }
     assert not any("不支持的字段" in e for e in validate_config(cfg))

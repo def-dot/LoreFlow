@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from app.registry.core import node
+from app.registry.core import node_type
 from app.utils.http import http_client
 
 _URL_RE = re.compile(r"""https?://[^\s<>"')\]]+""")
@@ -58,7 +58,7 @@ async def _fetch_page(url: str) -> dict[str, str]:
     return {"url": url, "text": _html_to_text(html)[:_MAX_CHARS]}
 
 
-@node(
+@node_type(
     label="抓取链接正文",
     description="从 ctx['prompt'] 提取 http(s) 链接并发抓取网页正文",
 )

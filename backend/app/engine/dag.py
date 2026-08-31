@@ -28,6 +28,8 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
+from app.registry import NodeType
+
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, Node, NodeFunc
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
@@ -255,20 +257,22 @@ class DAG:
             # Circular reference detected，run 卡死在 running
             return dict(ctx)
 
+        # 类型身份绑在函数上（同注册装饰器 @node 的做法，但 loop_func 是
+        # 每次调用的闭包，不进全局 REGISTRY）—— to_mermaid 经 node_type 派生读取
+        setattr(
+            loop_func,
+            "__node_type__",
+            NodeType(name="loop", func=loop_func, label="循环", description="循环执行 body 子图直至条件不满足"),
+        )
+
         node = Node(
             name=name,
             func=loop_func,
             depends_on=depends_on or [],
             retry=retry,
             timeout=timeout,
-            # loop 标记供 executor 直用共享上下文；
-            # type/type_label 供 to_mermaid 小字行（无注册表引用的类型）
-            metadata={
-                "loop": True,
-                "max_iterations": max_iterations,
-                "type": "loop",
-                "type_label": "循环",
-            },
+            # loop 标记供 executor 直用共享上下文
+            metadata={"loop": True, "max_iterations": max_iterations},
         )
         self.add_node(node)
         return node
@@ -379,10 +383,6 @@ class DAG:
 
     def to_mermaid(self) -> str:
         """Render the DAG as a Mermaid flowchart (for docs / debugging).
-
-        节点文案：大字行 = 节点 label（未声明回退节点名）；小字行 = 类型名 ·
-        类型 label（经 node_type 引用读取；无引用的类型回退 metadata），
-        再加条件 [?] 与重试 [Rn] 角标。
         """
         lines = ["graph TD"]
         for node in self._nodes.values():
@@ -390,10 +390,8 @@ class DAG:
             main_text = node.label or node.name
 
             small = []
-            # 类型身份经 node_type 引用（定义—实例）；无引用的类型（程序化
-            # loop_node 等）回退 metadata
-            type_name = node.node_type.name if node.node_type else node.metadata.get("type")
-            type_label = node.node_type.label if node.node_type else node.metadata.get("type_label")
+            type_name = node.node_type.name if node.node_type else None
+            type_label = node.node_type.label if node.node_type else None
             if type_name:
                 small.append(f"{type_name} · {type_label}" if type_label else type_name)
             if node.condition:

@@ -1,12 +1,16 @@
 """
-注册表核心 — NodeType 数据类、``@node`` 注册装饰器与全局注册表。
+注册表核心 — NodeType 数据类、``@node_type`` 注册装饰器与全局注册表。
 
 本模块是叶子模块（不 import 应用内其他模块），供 ``functions.py``
 在函数定义处声明元信息；``__init__.py`` 只做纯再导出。
 human 结构化类型在 :mod:`app.registry.human` 注册（协议函数本体）。
 
 ``REGISTRY`` 是唯一的注册表本体（``name -> NodeType``），其余模块
-直接读写该字典：``@node`` 装饰器负责注册，插件加载器负责清理。
+直接读写该字典：``@node_type`` 装饰器负责注册，插件加载器负责清理。
+
+命名区分：``@node_type``（本模块）声明可复用的节点**类型**进全局
+注册表；``@dag.node``（engine.DAG）把函数挂进某个 DAG **实例**——
+后者不注册、函数可带 ``__node_type__`` 身份复用。
 """
 
 from __future__ import annotations
@@ -34,29 +38,29 @@ class NodeType:
 REGISTRY: dict[str, NodeType] = {}
 
 
-def node(
+def node_type(
     label: str,
     description: str,
     name: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """节点函数注册装饰器：在函数定义处声明元信息并自动注册。
+    """节点类型注册装饰器：在函数定义处声明元信息并注册为 NodeType。
 
     返回原函数本身（仅附加 ``__node_type__`` 属性），因此对
     async 函数、docstring、``__name__`` 均无影响。
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        node_name = name or func.__name__
-        node_type = NodeType(
-            name=node_name,
+        type_name = name or func.__name__
+        nt = NodeType(
+            name=type_name,
             func=func,
             label=label,
             description=description,
         )
         # 1. 自动注册到全局注册表
-        REGISTRY[node_name] = node_type
+        REGISTRY[type_name] = nt
         # 2. 元数据绑定到函数对象本身，便于从函数侧反查
-        setattr(func, "__node_type__", node_type)
+        setattr(func, "__node_type__", nt)
         return func
 
     return decorator

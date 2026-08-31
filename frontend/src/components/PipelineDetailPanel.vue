@@ -5,8 +5,8 @@ import MermaidDiagram from './MermaidDiagram.vue'
 
 const props = defineProps<{ detail: PipelineDetail }>()
 
-function kindTagType(kind: string) {
-  return kind === 'human' ? 'warning' : kind === 'loop' ? 'info' : 'primary'
+function typeTagType(type: string | null) {
+  return type === 'human' ? 'warning' : type === 'loop' ? 'info' : 'primary'
 }
 
 // 输入参数声明（归一化行）：有任一才渲染整块，避免无参数流水线多一块空白
@@ -58,16 +58,12 @@ function reviewView(review: Record<string, string>): string {
         <h2>节点</h2>
         <el-table :data="detail.nodes" size="small" max-height="420">
           <el-table-column prop="name" label="节点" width="90" />
-          <el-table-column label="种类" width="80">
-            <template #default="{ row }">
-              <el-tag :type="kindTagType(row.kind)" size="small" disable-transitions>
-                {{ row.kind }}
-              </el-tag>
-            </template>
-          </el-table-column>
           <el-table-column label="类型" min-width="130">
             <template #default="{ row }">
-              <div>{{ row.type_label ?? '—' }}</div>
+              <el-tag v-if="row.type" :type="typeTagType(row.type)" size="small" disable-transitions>
+                {{ row.type_label ?? row.type }}
+              </el-tag>
+              <span v-else>—</span>
               <div v-if="row.type" class="muted">{{ row.type }}</div>
             </template>
           </el-table-column>
