@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from html import unescape
 from typing import Any
 
 import httpx
+from tavily import AsyncTavilyClient
 
 from app.registry.core import node_type
 from app.utils.http import http_client
@@ -63,38 +65,31 @@ async def _fetch_page(url: str) -> dict[str, str]:
 
 @node_type(
     label="网络搜索",
-    description="根据 ctx['prompt'] 调用 DuckDuckGo 搜索，返回 [{title, url, snippet}]",
+    description="根据 ctx['prompt'] 调用 Tavily 搜索，返回 [{title, url, snippet}]",
 )
 async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         return []
 
-    url = "https://html.duckduckgo.com/html/"
-    try:
-        resp = await http_client().post(url, data={"q": prompt}, timeout=15.0)
-        resp.raise_for_status()
-        html = resp.text
-    except Exception as exc:
-        logger.warning("DuckDuckGo 搜索失败: %s", exc)
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        logger.warning("未设置 TAVILY_API_KEY 环境变量，跳过搜索")
         return []
 
-    results: list[dict[str, str]] = []
-    # 解析搜索结果：DuckDuckGo HTML 版返回结构化的 result 标签
-    for match in re.finditer(
-        r'<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
-        r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
-        html,
-        re.DOTALL,
-    ):
-        link = unescape(match.group(1))
-        title = unescape(_TAG_RE.sub("", match.group(2))).strip()
-        snippet = unescape(_TAG_RE.sub("", match.group(3))).strip()
-        if title and snippet:
-            results.append({"title": title, "url": link, "snippet": snippet})
-        if len(results) >= 5:
-            break
-    return results
+    client = AsyncTavilyClient(api_key=api_key)
+
+    try:
+        response = await client.search(query=prompt, max_results=5)
+    except Exception as exc:
+        logger.warning("Tavily 搜索失败: %s", exc)
+        return []
+
+    return [
+        {"title": r["title"], "url": r["url"], "snippet": r.get("content", "")}
+        for r in response.get("results", [])
+        if r.get("title") and r.get("url")
+    ]
 
 
 @node_type(
