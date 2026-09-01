@@ -98,6 +98,21 @@ async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
 
 
 @node_type(
+    label="搜索结果格式化",
+    description="读取 ctx['search']（web_search 输出），格式化为可读文本写入 ctx['context']",
+)
+async def search_format(ctx: dict[str, Any]) -> str:
+    results = ctx.get("search")
+    if not isinstance(results, list) or not results:
+        return ""
+    return "\n\n".join(
+        f"[{i}] {r.get('title', '')}\n{r.get('url', '')}\n{r.get('snippet', '')}"
+        for i, r in enumerate(results, 1)
+        if isinstance(r, dict)
+    )
+
+
+@node_type(
     label="抓取链接正文",
     description="从 ctx['prompt'] 提取 http(s) 链接并发抓取网页正文",
 )

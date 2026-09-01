@@ -24,23 +24,33 @@ nodes:
 
   search:
     type: web_search
+    label: 网络搜索
     description: 根据用户问题搜索互联网
+    depends_on: [classify]
     condition: $classify.intent == "search"
 
-  search_reply:
-    type: search_summarize
-    label: 搜索汇总回复
-    description: 将搜索结果与原始问题一起交给 LLM 总结
+  format_search:
+    type: search_format
+    label: 格式化搜索结果
+    description: 将搜索结果格式化为可读文本
     depends_on: [search]
-    condition: $classify.intent == "search"
     inputs:
       search: $search
+
+  search_reply:
+    type: llm_chat
+    label: 搜索汇总回复
+    description: 将搜索结果与原始问题一起交给 LLM 总结
+    depends_on: [format_search]
+    inputs:
+      context: $format_search
     timeout: 300
 
   direct_reply:
     type: llm_chat
     label: 直接回复
     description: 无需搜索，LLM 直接回答
+    depends_on: [classify]
     condition: $classify.intent != "search"
     timeout: 300
 

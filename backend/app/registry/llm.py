@@ -35,7 +35,8 @@ async def _ollama_chat(
 @node_type(
     label="LLM 对话",
     description=(
-        "读取 ctx['prompt'] 调用本地 Ollama 生成回答"
+        "读取 ctx['prompt'] 调用本地 Ollama 生成回答；"
+        "若 ctx['context'] 非空则附在问题后一并交给 LLM"
     ),
 )
 async def llm_chat(ctx: dict[str, Any]) -> str:
@@ -44,6 +45,9 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
     messages: list[dict[str, str]] = []
     system = ctx.get("system")
+    context = ctx.get("context")
+    if isinstance(context, str) and context.strip():
+        prompt = f"参考资料：\n{context}\n\n用户问题：{prompt}"
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
@@ -106,31 +110,6 @@ async def llm_rag_reply(ctx: dict[str, Any]) -> str:
         settings.OLLAMA_MODEL,
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
     )
-
-
-@node_type(
-    label="搜索汇总",
-    description="读取 ctx['prompt'] 和 ctx['search']（web_search 输出），将搜索结果附在问题后交给 LLM 总结回复",
-)
-async def search_summarize(ctx: dict[str, Any]) -> str:
-    prompt = ctx.get("prompt")
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("缺少提示词：prompt 必须是非空字符串")
-    results = ctx.get("search") or []
-    if not results:
-        return await llm_chat(ctx)
-    refs = "\n\n".join(
-        f"[{i}] {r.get('title', '')}\n{r.get('url', '')}\n{r.get('snippet', '')}"
-        for i, r in enumerate(results, 1)
-        if isinstance(r, dict)
-    )
-    system = "你是一个有帮助的助手。根据搜索结果回答用户问题；如果搜索结果不足以回答，基于你的知识回答并说明。"
-    user = f"搜索结果：\n{refs}\n\n用户问题：{prompt}"
-    model = str(ctx.get("model") or settings.OLLAMA_MODEL)
-    return await _ollama_chat(model, [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ])
 
 
 @node_type(
