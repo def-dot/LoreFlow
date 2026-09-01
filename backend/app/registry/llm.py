@@ -84,7 +84,7 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         fmt={"type": "string", "enum": labels},
     )
-    text = raw.strip().lower()
+    text = raw.strip().strip('"').lower()
     return {"intent": text, "raw": raw.strip()}
 
 
