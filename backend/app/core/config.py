@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     DOCKER_FRONTEND_REPOSITORY: str = ""
     DOCKER_FRONTEND_TAG: str = ""
 
+    TAVILY_API_KEY: str = ""
+
     model_config = {"env_file": "../.env", "env_file_encoding": "utf-8"}
 
 
