@@ -10,6 +10,7 @@ trust_env），与本地 Ollama 的绕代理策略相反。
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from html import unescape
 from typing import Any
@@ -18,6 +19,8 @@ import httpx
 
 from app.registry.core import node_type
 from app.utils.http import http_client
+
+logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"""https?://[^\s<>"')\]]+""")
 
@@ -56,6 +59,42 @@ async def _fetch_page(url: str) -> dict[str, str]:
         return {"url": url, "text": f"（抓取失败：{type(exc).__name__} {exc}）"}
 
     return {"url": url, "text": _html_to_text(html)[:_MAX_CHARS]}
+
+
+@node_type(
+    label="网络搜索",
+    description="根据 ctx['prompt'] 调用 DuckDuckGo 搜索，返回 [{title, url, snippet}]",
+)
+async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
+    prompt = ctx.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return []
+
+    url = "https://html.duckduckgo.com/html/"
+    try:
+        resp = await http_client().post(url, data={"q": prompt}, timeout=15.0)
+        resp.raise_for_status()
+        html = resp.text
+    except Exception as exc:
+        logger.warning("DuckDuckGo 搜索失败: %s", exc)
+        return []
+
+    results: list[dict[str, str]] = []
+    # 解析搜索结果：DuckDuckGo HTML 版返回结构化的 result 标签
+    for match in re.finditer(
+        r'<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
+        r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+        html,
+        re.DOTALL,
+    ):
+        link = unescape(match.group(1))
+        title = unescape(_TAG_RE.sub("", match.group(2))).strip()
+        snippet = unescape(_TAG_RE.sub("", match.group(3))).strip()
+        if title and snippet:
+            results.append({"title": title, "url": link, "snippet": snippet})
+        if len(results) >= 5:
+            break
+    return results
 
 
 @node_type(

@@ -12,6 +12,13 @@ nodes:
   intent_recognition:
     type: llm_classify
     label: 意图识别
+    inputs:
+      classify_system: >-
+        你是客服意图分类器，只允许输出 chat、rag 两个单词之一，
+        禁止输出其他任何内容（包括标点、解释或其他语言）：
+        chat —— 问候、闲聊、创作、翻译等无需查询资料的请求；
+        rag —— 需要查询知识库/设定资料才能回答的问题；
+      classify_labels: [chat, rag]
 
   llm_chat:
     type: llm_chat

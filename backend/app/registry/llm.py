@@ -53,30 +53,35 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
 
 @node_type(
     label="意图识别",
-    description="LLM 判断 ctx['prompt'] 是闲聊（chat）还是知识类问题（rag），输出 {intent, raw}；提示词包含「人工」直接判 human（转人工，无需模型）",
+    description="通用意图分类器",
 )
 async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
-    # 关键词短路：用户点名「人工」直接转人工——优先级最高且确定性，不必过模型
-    if "人工" in prompt:
-        return {"intent": "human", "raw": "关键词命中：人工"}
-    system = (
-        "你是客服意图分类器，只允许输出 chat 或 rag 两个单词之一，"
-        "禁止输出其他任何内容（包括标点、解释或其他语言）：\n"
-        "chat —— 问候、闲聊、创作、翻译等无需查询资料的请求\n"
-        "rag —— 需要查询知识库/设定资料才能回答的问题"
-    )
+        raise ValueError("缺少提示词：prompt 必须是非空字符串")
+
+    system = ctx.get("classify_system")
+    if not isinstance(system, str) or not system.strip():
+        system = (
+            "你是意图分类器，只允许输出以下标签之一，"
+            "禁止输出其他任何内容（包括标点、解释或其他语言）：\n"
+            "chat —— 问候、闲聊、创作、翻译等无需查询资料的请求\n"
+            "rag —— 需要查询知识库/设定资料才能回答的问题\n"
+            "search —— 需要联网搜索最新信息才能回答（时事新闻、实时数据等）\n"
+            "human —— 需要转人工客服"
+        )
+
+    labels = ctx.get("classify_labels")
+    if not isinstance(labels, list) or not labels:
+        labels = ["chat", "rag", "search", "human"]
+
     raw = await _ollama_chat(
         settings.OLLAMA_MODEL,
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        # 硬约束：服务端按 schema 采样，只会吐出 enum 里的词
-        fmt={"type": "string", "enum": ["chat", "rag"]},
+        fmt={"type": "string", "enum": labels},
     )
-    text = raw.lower()
-    intent = "rag" if any(k in text for k in ("rag", "知识", "检索", "问答")) else "chat"
-    return {"intent": intent, "raw": raw.strip()}
+    text = raw.strip().lower()
+    return {"intent": text, "raw": raw.strip()}
 
 
 @node_type(
@@ -101,6 +106,31 @@ async def llm_rag_reply(ctx: dict[str, Any]) -> str:
         settings.OLLAMA_MODEL,
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
     )
+
+
+@node_type(
+    label="搜索汇总",
+    description="读取 ctx['prompt'] 和 ctx['search']（web_search 输出），将搜索结果附在问题后交给 LLM 总结回复",
+)
+async def search_summarize(ctx: dict[str, Any]) -> str:
+    prompt = ctx.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("缺少提示词：prompt 必须是非空字符串")
+    results = ctx.get("search") or []
+    if not results:
+        return await llm_chat(ctx)
+    refs = "\n\n".join(
+        f"[{i}] {r.get('title', '')}\n{r.get('url', '')}\n{r.get('snippet', '')}"
+        for i, r in enumerate(results, 1)
+        if isinstance(r, dict)
+    )
+    system = "你是一个有帮助的助手。根据搜索结果回答用户问题；如果搜索结果不足以回答，基于你的知识回答并说明。"
+    user = f"搜索结果：\n{refs}\n\n用户问题：{prompt}"
+    model = str(ctx.get("model") or settings.OLLAMA_MODEL)
+    return await _ollama_chat(model, [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ])
 
 
 @node_type(

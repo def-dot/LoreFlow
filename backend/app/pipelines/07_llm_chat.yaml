@@ -1,18 +1,51 @@
-name: LLM 对话
-description: 用户输入提示词；如果包含链接会先抓取网页正文，再一起交给 Ollama 生成回答。
+name: LLM 智能对话
+description: LLM 判断是否需要联网搜索——需要时先检索再汇总回复，不需要时直接回复。
 
 inputs:
   prompt:
     required: true
     multiline: true
     label: 提示词
-    description: 发给 LLM 的内容；含 http(s) 链接时自动抓取网页正文作参考
+    description: 用户输入的问题
 
 nodes:
-  网页抓取:
-    type: web_fetch
+  classify:
+    type: llm_classify
+    label: 意图识别
+    description: 识别用户意图：chat（直接回复）或 search（需要联网搜索）
+    inputs:
+      classify_system: >-
+        你是意图分类器，只允许输出 chat 或 search 两个单词之一，
+        禁止输出其他任何内容（包括标点、解释或其他语言）：
+        chat —— 问候、闲聊、创作、翻译、一般知识问答等；
+        search —— 需要联网搜索最新信息才能回答（时事新闻、实时数据、
+        股价、天气、最新发布等你知识截止日期之后的内容）
+      classify_labels: [chat, search]
 
-  LLM回答:
-    type: llm_chat
-    depends_on: [网页抓取]
+  search:
+    type: web_search
+    description: 根据用户问题搜索互联网
+    condition: $classify.intent == "search"
+
+  search_reply:
+    type: search_summarize
+    label: 搜索汇总回复
+    description: 将搜索结果与原始问题一起交给 LLM 总结
+    depends_on: [search]
+    condition: $classify.intent == "search"
+    inputs:
+      search: $search
     timeout: 300
+
+  direct_reply:
+    type: llm_chat
+    label: 直接回复
+    description: 无需搜索，LLM 直接回答
+    condition: $classify.intent != "search"
+    timeout: 300
+
+  answer:
+    type: final_answer
+    label: 最终答复
+    description: 取搜索汇总或直接回复中实际产出的那一条
+    depends_on: [search_reply, direct_reply]
