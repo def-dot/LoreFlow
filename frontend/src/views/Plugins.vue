@@ -42,7 +42,7 @@ onMounted(fetchAll)
     <header class="page-head">
       <div class="head-info">
         <h1>节点类型</h1>
-        <span class="muted">YAML 中 type:/condition: 可引用的全部类型；修改插件文件后数秒内自动生效。</span>
+        <span class="muted">可在 YAML 流程定义中使用的全部节点类型；插件修改后自动热加载。</span>
       </div>
       <span v-if="loadError" class="load-error">加载失败，请检查后端是否可用</span>
       <el-button plain :loading="loading" @click="fetchAll">↻ 刷新</el-button>
@@ -51,7 +51,7 @@ onMounted(fetchAll)
     <main class="panel">
       <section class="card">
         <div class="card-head">
-          <h2>内置节点</h2>
+          <h2>内置节点类型</h2>
           <span class="muted">框架自带，只读 · {{ builtinNodes.length }}</span>
         </div>
         <div v-loading="loading" class="tag-cloud">
@@ -62,8 +62,7 @@ onMounted(fetchAll)
             placement="top"
           >
             <el-tag
-              :type="t.kind === 'condition' ? 'warning' : 'primary'"
-              class="node-tag"
+              :class="['node-tag', t.name === 'human' ? 'node-tag--human' : 'node-tag--func']"
               disable-transitions
             >
               {{ t.name }} · {{ t.label }}
@@ -76,18 +75,18 @@ onMounted(fetchAll)
       <section class="card">
         <div class="card-head">
           <h2>插件</h2>
-          <span class="muted">settings.PLUGINS_DIR（默认 backend/custom_plugins/）</span>
+          <span class="muted">默认目录 custom_plugins/</span>
         </div>
         <el-table v-loading="loading" :data="plugins" empty-text="暂无已加载插件">
           <el-table-column prop="filename" label="文件" min-width="160" />
           <el-table-column prop="module" label="模块" min-width="200" />
-          <el-table-column label="注册节点" min-width="240">
+          <el-table-column label="注册节点类型" min-width="240">
             <template #default="{ row }">
               <el-tag
                 v-for="name in row.node_names"
                 :key="name"
+                class="node-tag node-tag--plugin"
                 size="small"
-                class="node-tag"
                 disable-transitions
               >
                 {{ name }}
@@ -168,5 +167,21 @@ onMounted(fetchAll)
 .node-tag {
   margin: 2px 4px 2px 0;
   font-family: var(--font-mono);
+}
+/* 三种节点类型颜色 */
+.node-tag--func {
+  --el-tag-bg-color: rgba(64, 158, 255, 0.15);
+  --el-tag-border-color: rgba(64, 158, 255, 0.4);
+  --el-tag-text-color: #79bbff;
+}
+.node-tag--human {
+  --el-tag-bg-color: rgba(230, 162, 60, 0.15);
+  --el-tag-border-color: rgba(230, 162, 60, 0.4);
+  --el-tag-text-color: #e6a23c;
+}
+.node-tag--plugin {
+  --el-tag-bg-color: rgba(103, 194, 58, 0.15);
+  --el-tag-border-color: rgba(103, 194, 58, 0.4);
+  --el-tag-text-color: #67c23a;
 }
 </style>
