@@ -38,11 +38,6 @@ async def cfg_publish(ctx: dict[str, Any]) -> str:
     return f"Published: {ctx.get('title') or '(untitled)'}"
 
 
-@node_type(label="生成报告", description="基于 merge 输出生成报告文本")
-async def cfg_report(ctx: dict[str, Any]) -> str:
-    return f"Report generated for {ctx['merge']['title']}"
-
-
 # ---- 特性示例辅助 — 重试/循环示例引用的函数 ----
 
 
