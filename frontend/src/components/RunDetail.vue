@@ -70,7 +70,7 @@ const inputFields = computed<FieldValue[]>(() => {
         </template>
         <FieldValues :fields="inputFields" />
       </el-popover>
-      <el-button size="small" plain @click="emit('viewConfig', detail.config_file, detail.id)">查看配置</el-button>
+      <el-button size="small" plain @click="emit('viewConfig', detail.config_file, detail.id)">查看运行配置</el-button>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
     <div class="panels">
