@@ -13,6 +13,8 @@ export interface RunListItem {
 
 export interface NodeSnapshot {
   status: string
+  label?: string
+  description?: string | null
   output: unknown
   error: string | null
   attempts: number

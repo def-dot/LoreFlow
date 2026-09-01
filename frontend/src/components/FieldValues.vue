@@ -7,6 +7,7 @@ export interface FieldValue {
   key: string
   label: string
   value: unknown
+  required?: boolean
 }
 
 const props = defineProps<{
@@ -43,8 +44,9 @@ function jsonTitle(field: RenderedField): string {
   <div class="fields">
     <div v-for="field in rendered" :key="field.key" class="field">
       <div class="field-head">
-        <span class="field-label">{{ field.label }}</span>
-        <code v-if="field.label !== field.key" class="field-key">{{ field.key }}</code>
+        <span class="field-label">
+          {{ field.label }}<span v-if="field.required" class="field-star">*</span>
+        </span>
       </div>
       <div v-if="field.kind === 'empty'" class="field-empty">未提供</div>
       <!-- 审核场景：文本字段可就地修改（改动随「通过」提交，改过的高亮） -->
@@ -83,6 +85,9 @@ function jsonTitle(field: RenderedField): string {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink-2);
+}
+.field-star {
+  color: #ff8f8a;
 }
 .field-key {
   font-family: var(--font-mono);

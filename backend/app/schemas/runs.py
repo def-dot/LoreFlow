@@ -42,21 +42,10 @@ class RunListResponse(BaseModel):
     summary: RunListSummary = RunListSummary()
 
 
-class NodeSnapshot(BaseModel):
-    """一个节点的状态快照（NodeResult.to_dict 的形状，人工审核节点附 payload）。"""
-
-    status: str
-    output: Any = None
-    error: str | None = None
-    attempts: int = 0
-    duration_ms: float = 0
-    payload: Any = None
-
-
 class RunDetail(RunListItem):
     config_file: str
     mermaid: str
-    nodes: dict[str, NodeSnapshot]
+    nodes: dict[str, Any]
     inputs: dict[str, Any] = {}  # 创建时的运行时输入快照
 
     @field_validator("inputs", mode="before")

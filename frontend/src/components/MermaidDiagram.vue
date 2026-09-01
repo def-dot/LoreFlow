@@ -102,7 +102,7 @@ async function render() {
     const { svg } = await mermaid.render(`mermaid-${renderSeq}`, source)
     graphEl.value.innerHTML = svg
   } catch (e) {
-    graphEl.value.textContent = String(e)
+    if (graphEl.value) graphEl.value.textContent = String(e)
   }
 }
 

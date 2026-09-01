@@ -633,8 +633,10 @@ async def test_human_review_view_payload(registered: Any) -> None:
                 "gate": {
                     "type": "human",
                     "depends_on": ["work"],
-                    "prompt": "重点核对工作成果",
-                    "review": {"work": {"label": "工作成果"}, "opt": {"label": "可选参数"}},
+                    "description": "重点核对工作成果",
+                    "inputs": {
+                        "_review": {"work": {"label": "工作成果"}, "opt": {"label": "可选参数"}},
+                    },
                 },
             },
         },
@@ -642,7 +644,6 @@ async def test_human_review_view_payload(registered: Any) -> None:
     )
     results = await dag.run()
     assert seen == {
-        "_prompt": "重点核对工作成果",
         # _review 原样携带声明富映射（前端按 {key: {label: 文本}} 取标签）
         "_review": {"work": {"label": "工作成果"}, "opt": {"label": "可选参数"}},
         "work": "done",

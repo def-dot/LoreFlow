@@ -5,19 +5,6 @@ from typing import Any
 from pydantic import BaseModel
 
 
-class PipelineParamOut(BaseModel):
-    """一个运行时输入参数的声明行（YAML 顶层 ``inputs`` 声明归一化后）。"""
-
-    name: str                    # ctx 里的键
-    label: str                   # 展示名（未声明 label 时退化为键名）
-    description: str | None = None  # 参数说明，YAML 未写则为空
-    default: Any = None          # 默认值（has_default=False 时无意义）
-    has_default: bool = False    # 是否声明了默认值（区分 default: null）
-    required: bool = False       # 创建运行时必须提供（前端据此判断必填）
-    multiline: bool = False      # 多行文本（前端渲染 textarea，如文章正文）
-    file: bool = False           # 文件上传（前端渲染上传控件，值 = {filename, content}）
-
-
 class PipelineListItem(BaseModel):
     """列表条目：文件名 + 元信息，不含图/源码（详情接口才给）。"""
 
@@ -25,21 +12,22 @@ class PipelineListItem(BaseModel):
     name: str
     description: str = ""
     node_count: int  # 顶层节点数（loop 的 body 子节点不计）
-    params: list[PipelineParamOut] = []  # 参数声明行（驱动前端参数表单）
+    params: dict[str, Any] = {}  # YAML inputs 原始结构
 
 
 class PipelineNodeOut(BaseModel):
     """一个节点的展示元信息（YAML spec + 注册表元数据合成）。"""
 
     name: str
-    type: str | None = None          # 注册表函数键（human 是注册类型；YAML 无 kind 字段）
-    type_label: str | None = None    # 注册表 label；human=人工审核，loop=循环
-    type_description: str | None = None  # node=注册表描述；human=审核提示；loop=循环体摘要
+    label: str | None = None
+    type: str | None = None
+    type_label: str | None = None
+    description: str | None = None
+    type_description: str | None = None
     depends_on: list[str] = []
-    retry: str | None = None         # 中文摘要，如 "重试 3 次，退避 0.05s×2（≤0.5s）"
-    condition: str | dict[str, Any] | None = None  # 条件谓词：注册表键（无参）或 {函数名: 实参}（带参）
-    condition_label: str | None = None
-    review: dict[str, str] | None = None  # (human) 审核视图声明原文 {key: 标签文本}；None=全量上下文
+    inputs: dict[str, Any] | None = None
+    retry: str | None = None
+    condition: str | dict[str, Any] | None = None
 
 
 class PipelineDetail(PipelineListItem):

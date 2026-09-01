@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.response import UnifiedResponseRoute
@@ -59,11 +60,16 @@ async def get_run(run_id: int) -> RunDetail:
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
     data = record.model_dump()
-    # mermaid 读取时从钉住的 definition 现渲染：渲染格式改进能追上存量
-    # run（record.mermaid 只是创建时刻的快照，失败时回退它）
     fresh = pipeline_service.mermaid_from_definition(record)
     if fresh is not None:
         data["mermaid"] = fresh
+    cfg = yaml.safe_load(record.definition) if record.definition else {} 
+    nodes_cfg = cfg.get("nodes") or {}
+    for name, node in data.get("nodes", {}).items():
+        spec = nodes_cfg.get(name)
+        if isinstance(spec, dict) and isinstance(node, dict):
+            node["label"] = spec.get("label") or name
+            node["description"] = spec.get("description")
     return RunDetail(**data)
 
 
@@ -73,8 +79,6 @@ async def get_run_config(run_id: int) -> PipelineDetail:
     record = await run_service.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
-    if not record.definition:
-        raise HTTPException(status_code=404, detail="该运行没有配置快照（创建于旧版本，无 definition）")
     return PipelineDetail(**pipeline_service.get_run_definition_detail(record))
 
 

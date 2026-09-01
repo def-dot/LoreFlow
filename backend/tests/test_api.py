@@ -699,11 +699,9 @@ async def test_dual_review_with_required_title_content(client: AsyncClient) -> N
     # 初审
     data = await _wait_node_reviewing(client, run_id, "编辑初审")
     payload = data["nodes"]["编辑初审"]["output"]["payload"]
-    # 声明式审核视图：payload 只含声明键 + 两个保留键
-    #（_prompt=把关指引、_review=字段标签富映射，均置前）
-    assert set(payload) == {"_prompt", "_review", "title", "content"}
+    # 声明式审核视图：payload 只含声明键 + 保留键 _review
+    assert set(payload) == {"_review", "title", "content"}
     assert payload["_review"] == {"title": {"label": "标题"}, "content": {"label": "正文"}}
-    assert payload["_prompt"]
     assert payload["title"] == "自定义标题"
     # 初审通过并就地修订标题（"改了再通过"）
     resp = await client.post(
@@ -728,7 +726,7 @@ async def test_dual_review_with_required_title_content(client: AsyncClient) -> N
     data = await _wait_node_reviewing(client, run_id, "主编终审")
     assert data["nodes"]["主编终审"]["status"] == "reviewing"
     # 终审视图同样只有 title/content —— 一审的决策记录不进视图
-    assert set(data["nodes"]["主编终审"]["output"]["payload"]) == {"_prompt", "_review", "title", "content"}
+    assert set(data["nodes"]["主编终审"]["output"]["payload"]) == {"_review", "title", "content"}
     # 修订已写回上下文：终审卡片显示初审修订后的标题，而非原始输入
     assert data["nodes"]["主编终审"]["output"]["payload"]["title"] == "修订后的标题"
     resp = await client.post(f"/api/v1/runs/{run_id}/approve/主编终审", json={"approve": True})

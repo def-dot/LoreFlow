@@ -7,10 +7,15 @@ const props = defineProps<{ detail: RunDetail }>()
 
 interface Row extends NodeSnapshot {
   name: string
+  displayLabel: string
 }
 
 const rows = computed<Row[]>(() =>
-  Object.entries(props.detail.nodes).map(([name, node]) => ({ name, ...node })),
+  Object.entries(props.detail.nodes).map(([name, node]) => ({
+    name,
+    ...node,
+    displayLabel: node.label || name,
+  })),
 )
 
 // 与旧 UI 一致：completed 显示输出，否则显示 error / 跳过说明
@@ -40,7 +45,7 @@ function isCellError(row: Row): boolean {
 
 <template>
   <el-table :data="rows" size="small" max-height="420">
-    <el-table-column prop="name" label="节点" min-width="120" />
+    <el-table-column prop="displayLabel" label="节点" min-width="120" />
     <el-table-column label="状态" width="110">
       <template #default="{ row }">
         <el-tag :type="statusTagType(row.status)" size="small" disable-transitions>{{ statusLabel(row.status) }}</el-tag>

@@ -25,7 +25,7 @@ from .condition import _parse
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "file"}
 
 #: 注册函数类型接受的默认字段集（human 同样使用，无特殊字段）。
-_NODE_FIELDS = {"type", "label", "depends_on", "inputs", "retry", "timeout", "condition"}
+_NODE_FIELDS = {"type", "label", "description", "depends_on", "inputs", "retry", "timeout", "condition"}
 
 
 # ------------------------------------------------------------------

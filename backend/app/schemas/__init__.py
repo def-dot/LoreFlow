@@ -3,7 +3,6 @@
 from .runs import (
     ApproveRequest,
     ApproveResponse,
-    NodeSnapshot,
     RunCreateResponse,
     RunDetail,
     RunListItem,
@@ -12,7 +11,6 @@ from .runs import (
 __all__ = [
     "ApproveRequest",
     "ApproveResponse",
-    "NodeSnapshot",
     "RunCreateResponse",
     "RunDetail",
     "RunListItem",

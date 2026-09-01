@@ -16,8 +16,8 @@ nodes:
   first_review:
     type: human
     label: 编辑初审
+    description: "初审把关：标题达意、正文完整可读再通过。"
     inputs:
-      _prompt: "初审把关：标题达意、正文完整可读再通过。"
       _review:
         $title: 标题
         $content: 正文
@@ -26,8 +26,8 @@ nodes:
     type: human
     label: 主编终审
     depends_on: [first_review]
+    description: "终审把关：确认可对外发布再通过。"
     inputs:
-      _prompt: "终审把关：确认可对外发布再通过。"
       title: $first_review.decision.title
       content: $first_review.decision.content
       _review:

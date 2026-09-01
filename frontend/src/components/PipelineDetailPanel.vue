@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { PipelineDetail } from '@/api/pipelines'
+import { toParamSpecs } from '@/api/pipelines'
 import MermaidDiagram from './MermaidDiagram.vue'
 
 const props = defineProps<{ detail: PipelineDetail }>()
@@ -9,19 +10,21 @@ function typeTagType(type: string | null) {
   return type === 'human' ? 'warning' : type === 'loop' ? 'info' : 'primary'
 }
 
-// 输入参数声明（归一化行）：有任一才渲染整块，避免无参数流水线多一块空白
-const hasParams = computed(() => props.detail.params.length > 0)
+// 节点 name → label 映射（依赖列显示 label 用）
+const nodeLabelMap = computed(() =>
+  Object.fromEntries(props.detail.nodes.map((n) => [n.name, n.label ?? n.name])),
+)
+function dependLabels(names: string[]): string {
+  return names.map((n) => nodeLabelMap.value[n] ?? n).join(', ')
+}
+
+// 输入参数声明：YAML 原始结构转为数组
+const paramSpecs = computed(() => toParamSpecs(props.detail.params))
+const hasParams = computed(() => paramSpecs.value.length > 0)
 // 默认值短预览：过长截断（完整值在 YAML 源码里）
 function defaultPreview(value: unknown): string {
   const text = JSON.stringify(value) ?? ''
   return text.length > 40 ? `${text.slice(0, 40)}…` : text
-}
-// 审核视图文本：标签(键)；未声明时节点行 review=null 不渲染
-// review 是 YAML 声明原文 {key: 标签文本} 直通
-function reviewView(review: Record<string, string>): string {
-  return Object.entries(review)
-    .map(([key, label]) => (label === key || label === '' ? key : `${label}(${key})`))
-    .join('、')
 }
 </script>
 
@@ -36,14 +39,13 @@ function reviewView(review: Record<string, string>): string {
          与新建运行的参数表单同一套必填/可选语言 -->
     <section v-if="hasParams" class="panel params-panel">
       <h2>运行时参数</h2>
-      <div v-for="p in detail.params" :key="p.name" class="param">
+      <div v-for="p in paramSpecs" :key="p.name" class="param">
         <div class="param-head">
           <span class="param-label">
-            {{ p.label }}<span v-if="p.required" class="param-star">*</span>
+            {{ p.label ?? p.name }}<span v-if="p.required" class="param-star">*</span>
             <span v-else class="param-optional">可选</span>
           </span>
-          <code class="param-key">{{ p.name }}</code>
-          <span v-if="p.has_default" class="param-default">默认 {{ defaultPreview(p.default) }}</span>
+          <span v-if="p.default != null" class="param-default">默认 {{ defaultPreview(p.default) }}</span>
           <span v-else-if="!p.required" class="param-default">不填则不传</span>
         </div>
         <p v-if="p.description" class="param-desc">{{ p.description }}</p>
@@ -57,32 +59,35 @@ function reviewView(review: Record<string, string>): string {
       <section class="panel">
         <h2>节点</h2>
         <el-table :data="detail.nodes" size="small" max-height="420">
-          <el-table-column prop="name" label="节点" width="90" />
+          <el-table-column label="节点" width="90">
+            <template #default="{ row }">{{ row.label ?? row.name }}</template>
+          </el-table-column>
           <el-table-column label="类型" min-width="130">
             <template #default="{ row }">
-              <el-tag v-if="row.type" :type="typeTagType(row.type)" size="small" disable-transitions>
-                {{ row.type_label ?? row.type }}
-              </el-tag>
+              <template v-if="row.type">
+                <span class="type-label" :class="`type-${typeTagType(row.type)}`">
+                  {{ row.type_label ?? row.type }}
+                </span>
+                <el-tooltip v-if="row.type_description" :content="row.type_description" placement="top">
+                  <span class="type-help">?</span>
+                </el-tooltip>
+              </template>
               <span v-else>—</span>
-              <div v-if="row.type" class="muted">{{ row.type }}</div>
             </template>
           </el-table-column>
           <el-table-column label="依赖" min-width="90">
             <template #default="{ row }">
-              {{ row.depends_on.length ? row.depends_on.join(', ') : '—' }}
+              {{ row.depends_on.length ? dependLabels(row.depends_on) : '—' }}
             </template>
           </el-table-column>
           <el-table-column label="重试" min-width="110">
             <template #default="{ row }">{{ row.retry ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="条件" min-width="100">
-            <template #default="{ row }">{{ row.condition_label ?? '—' }}</template>
+            <template #default="{ row }">{{ row.condition ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="说明" min-width="130">
-            <template #default="{ row }">
-              <div>{{ row.type_description ?? '—' }}</div>
-              <div v-if="row.review" class="muted review-view">审核视图: {{ reviewView(row.review) }}</div>
-            </template>
+            <template #default="{ row }">{{ row.description ?? '—' }}</template>
           </el-table-column>
         </el-table>
       </section>
@@ -114,10 +119,26 @@ function reviewView(review: Record<string, string>): string {
   line-height: 1.7;
   color: var(--ink-2);
 }
-/* human 节点说明下方的审核视图行 */
-.review-view {
+/* 节点类型描述问号图标 */
+/* 节点类型标签：无背景，纯文字 */
+.type-label {
   font-size: 12px;
-  margin-top: 2px;
+  font-weight: 500;
+}
+/* 节点类型描述问号图标 */
+.type-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  cursor: help;
+  vertical-align: middle;
 }
 /* 运行时参数：与图/节点同级的 panel；行式规格表，发丝线分行 */
 .params-panel {

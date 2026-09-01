@@ -26,8 +26,6 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {**fields, "_review": {k.removeprefix("$"): v for k, v in review.items()}}
     else:
         payload = {k: v for k, v in ctx.items() if not k.startswith("_")}
-    if isinstance(ctx.get("_prompt"), str):
-        payload["_prompt"] = ctx["_prompt"]
 
     logger.info(f"\n  [REVIEW] node {name!r} is waiting for human approval")
 

@@ -74,12 +74,12 @@ class Node:
     name: str
     func: NodeFunc
     label: str = ""
+    description: str | None = None
     inputs: dict[str, Any] | None = None
     depends_on: list[str] = field(default_factory=list)
     condition: str | bool | None = None
     retry: RetryPolicy | None = None
     timeout: float | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def node_type(self) -> NodeType | None:

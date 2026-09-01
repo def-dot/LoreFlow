@@ -65,7 +65,6 @@ async def test_pipeline_detail_human(client: AsyncClient) -> None:
     assert review["type_label"] == "人工审核"
     assert review["type_description"] == "请审核合并结果。"
     assert review["condition"] == "demo_needs_review"
-    assert review["condition_label"] == "演示按需审核"
     # 声明式审核视图原文直通：{key: {label}}（未声明 → None = 全量上下文）
     assert review["review"] == {"merge": {"label": "合并结果"}}
 
@@ -82,7 +81,6 @@ async def test_pipeline_detail_loop(client: AsyncClient) -> None:
     assert batch["type"] == "loop"
     assert batch["type_label"] == "循环"
     assert batch["condition"] == "demo_keep_iterating"
-    assert batch["condition_label"] == "演示循环条件"
     assert batch["type_description"] == "循环体 1 个节点，上限 5 轮"
 
 
@@ -104,7 +102,6 @@ async def test_pipeline_detail_plugin(client: AsyncClient) -> None:
     assert notify["type"] == "notify_message"
     assert notify["type_label"] == "生成通知"
     assert notify["condition"] == "notify_long_body"
-    assert notify["condition_label"] == "长文通知"
 
 
 async def test_pipeline_unknown_404(client: AsyncClient) -> None:

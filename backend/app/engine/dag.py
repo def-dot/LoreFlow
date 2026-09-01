@@ -267,8 +267,6 @@ class DAG:
             depends_on=depends_on or [],
             retry=retry,
             timeout=timeout,
-            # loop 标记供 executor 直用共享上下文
-            metadata={"loop": True, "max_iterations": max_iterations},
         )
         self.add_node(node)
         return node
@@ -384,10 +382,9 @@ class DAG:
             main_text = node.label or node.name
 
             small = []
-            type_name = node.node_type.name if node.node_type else None
             type_label = node.node_type.label if node.node_type else None
-            if type_name:
-                small.append(f"{type_name} · {type_label}" if type_label else type_name)
+            if type_label:
+                small.append(type_label)
             if node.condition:
                 small.append("[?]")
             if node.retry and node.retry.max_retries:

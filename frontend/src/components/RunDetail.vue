@@ -27,7 +27,12 @@ const reviewing = computed(() => {
   if (props.detail.status !== 'reviewing') return []
   return Object.entries(props.detail.nodes)
     .filter(([, node]) => node.status === 'reviewing')
-    .map(([name, node]) => ({ name, payload: (node.output as { payload?: unknown } | null)?.payload }))
+    .map(([name, node]) => ({
+      name,
+      label: node.label || name,
+      description: node.description ?? null,
+      payload: (node.output as { payload?: unknown } | null)?.payload,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name))
 })
 
@@ -42,7 +47,7 @@ const inputFields = computed<FieldValue[]>(() => {
   const declared = props.params ?? []
   const fields = declared
     .filter((spec) => spec.name in inputs)
-    .map((spec) => ({ key: spec.name, label: spec.label, value: inputs[spec.name] }))
+    .map((spec) => ({ key: spec.name, label: spec.label || spec.name, value: inputs[spec.name], required: spec.required }))
   const declaredNames = new Set(declared.map((spec) => spec.name))
   for (const [key, value] of Object.entries(inputs)) {
     if (!declaredNames.has(key)) fields.push({ key, label: key, value })

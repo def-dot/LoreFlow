@@ -5,6 +5,7 @@ import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
 import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
+import { toParamSpecs } from '@/api/pipelines'
 import { getRunConfig } from '@/api/runs'
 import { uploadFile, type UploadOut } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
@@ -52,16 +53,16 @@ const parsedInputs = computed<{ value?: Record<string, unknown>; error: string |
 const selectedPipeline = computed(() =>
   pipelinesStore.pipelines.find((p) => p.filename === configFile.value),
 )
-const paramSpecs = computed(() => selectedPipeline.value?.params ?? [])
+const paramSpecs = computed(() => toParamSpecs(selectedPipeline.value?.params ?? {}))
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 config_file 取
 // （与创建下拉的选中无关 —— 看旧 run 时下拉可能停在别的流水线上）
 const detailParams = computed(() =>
-  pipelinesStore.pipelines.find((p) => p.filename === store.detail?.config_file)?.params ?? [],
+  toParamSpecs(pipelinesStore.pipelines.find((p) => p.filename === store.detail?.config_file)?.params ?? {}),
 )
 // 必填键/默认值从参数行派生（声明行是单一事实源，后端不再单独输出）
 const requiredInputs = computed(() => paramSpecs.value.filter((p) => p.required).map((p) => p.name))
 const defaultInputs = computed(() =>
-  Object.fromEntries(paramSpecs.value.filter((p) => p.has_default).map((p) => [p.name, p.default])),
+  Object.fromEntries(paramSpecs.value.filter((p) => p.default != null).map((p) => [p.name, p.default])),
 )
 const hasDefaults = computed(() => Object.keys(defaultInputs.value).length > 0)
 const defaultsJson = computed(() => JSON.stringify(defaultInputs.value, null, 2))
@@ -79,7 +80,7 @@ watch(
   () => {
     paramValues.value = Object.fromEntries(
       paramSpecs.value
-        .filter((s) => s.has_default && s.default != null && (typeof s.default === 'string' || !s.multiline))
+        .filter((s) => s.default != null && (typeof s.default === 'string' || !s.multiline))
         .map((s) => [s.name, defaultToText(s.default)]),
     )
     fileNames.value = {}
@@ -174,7 +175,7 @@ const jsonPlaceholder = computed(() => {
 // 参数字段的 placeholder：只放「默认值预览」——留空的后果是唯一别处没有的信息；
 // 必填/可选已在 label 行（*/可选）、说明在字段下方常驻，不再重复进 placeholder
 function paramPlaceholder(spec: ParamSpec): string {
-  if (!spec.has_default) return ''
+  if (spec.default == null) return ''
   const text = JSON.stringify(spec.default) ?? ''
   return `默认: ${text.length > 32 ? `${text.slice(0, 32)}…` : text}`
 }
@@ -342,7 +343,6 @@ async function select(id: number) {
   } else {
     stopDetailPolling()
   }
-  store.fetchRuns().catch(() => {})
 }
 
 async function startNewRun() {

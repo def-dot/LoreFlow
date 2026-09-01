@@ -1,0 +1,17 @@
+name: 环形依赖（反例）
+description: |
+  演示循环依赖检测：节点 A 依赖 B，节点 B 又依赖 A，形成环。
+  校验阶段会报错「检测到循环依赖: A → B」，流水线无法执行。
+  此文件仅用于展示校验拦截效果，不是可运行的流水线。
+
+nodes:
+  fetch:
+    type: cfg_fetch
+    label: 抓取数据
+    depends_on: [clean]
+
+  clean:
+    type: cfg_clean
+    label: 清洗正文
+    depends_on: [fetch]
+    inputs: {fetch: $fetch}
