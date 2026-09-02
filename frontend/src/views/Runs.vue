@@ -16,6 +16,8 @@ const pipelinesStore = usePipelinesStore()
 
 // 新建 run 时运行的流水线配置（下拉来自 /pipelines，默认主演示流水线）
 const configFile = ref('pipeline.yaml')
+// 任务名称（可选，不传则用配置文件名）
+const runName = ref('')
 // 防止「新建运行」按钮重复点击导致并发创建
 const creating = ref(false)
 
@@ -357,7 +359,8 @@ async function startNewRun() {
   }
   creating.value = true
   try {
-    await store.startNewRun(configFile.value, submitInputs.value.value)
+    await store.startNewRun(configFile.value, submitInputs.value.value, runName.value || undefined)
+    runName.value = '' // 创建成功后清空
     startDetailPolling()
     startRunsPolling()
   } finally {
@@ -448,6 +451,12 @@ onUnmounted(() => {
           :label="p.name"
         />
       </el-select>
+      <el-input
+        v-model="runName"
+        placeholder="任务名称（可选）"
+        style="width: 180px"
+        clearable
+      />
       <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">
         👁 预览
       </el-button>

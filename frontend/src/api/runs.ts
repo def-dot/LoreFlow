@@ -80,9 +80,12 @@ export function cancelRun(runId: number): Promise<{ data: RunDetail }> {
 export function startRun(
   configFile: string,
   inputs?: Record<string, unknown>,
+  name?: string,
 ): Promise<{ run_id: number }> {
   // inputs 非空才带上：不传时后端行为与旧版一致（只用 YAML 默认 inputs）
-  const body = inputs && Object.keys(inputs).length ? { config_file: configFile, inputs } : { config_file: configFile }
+  const body: Record<string, unknown> = { config_file: configFile }
+  if (name) body.name = name
+  if (inputs && Object.keys(inputs).length) body.inputs = inputs
   return api.post('/runs', body)
 }
 
