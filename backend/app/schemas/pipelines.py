@@ -1,4 +1,4 @@
-"""Pydantic 响应模型 — /api/v1/pipelines（demo 流水线只读浏览）"""
+"""Pydantic 响应模型 — /api/v1/pipelines"""
 
 from typing import Any
 
@@ -6,9 +6,8 @@ from pydantic import BaseModel
 
 
 class PipelineListItem(BaseModel):
-    """列表条目：文件名 + 元信息，不含图/源码（详情接口才给）。"""
+    """列表条目：name 作为唯一标识，不含图/源码（详情接口才给）。"""
 
-    filename: str
     name: str
     description: str = ""
     node_count: int  # 顶层节点数（loop 的 body 子节点不计）
@@ -38,3 +37,13 @@ class PipelineDetail(PipelineListItem):
 
 class PipelineListResponse(BaseModel):
     pipelines: list[PipelineListItem]
+
+
+class PipelineDefinitionRequest(BaseModel):
+    """创建/更新工作流请求体。"""
+
+    definition: str  # YAML 原文（必填）
+
+
+class PipelineCreateResponse(BaseModel):
+    name: str

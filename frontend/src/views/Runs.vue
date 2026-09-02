@@ -13,8 +13,8 @@ import { usePipelinesStore } from '@/stores/pipelines'
 const store = useRunsStore()
 const pipelinesStore = usePipelinesStore()
 
-// 新建 run 时运行的流水线配置（下拉来自 /pipelines，默认主演示流水线）
-const configFile = ref('pipeline.yaml')
+// 新建 run 时运行的流水线（下拉来自 /pipelines，值为 YAML name）
+const configName = ref('')
 // 任务名称（可选，不传则用配置文件名）
 const runName = ref('')
 // 防止「新建运行」按钮重复点击导致并发创建
@@ -54,7 +54,7 @@ const parsedInputs = computed<{ value?: Record<string, unknown>; error: string |
 
 // 所选流水线的参数声明（列表接口已带 params，无需再取详情）
 const selectedPipeline = computed(() =>
-  pipelinesStore.pipelines.find((p) => p.filename === configFile.value),
+  pipelinesStore.pipelines.find((p) => p.name === configName.value),
 )
 const paramSpecs = computed(() => toParamSpecs(selectedPipeline.value?.params ?? {}))
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
@@ -79,7 +79,7 @@ const defaultsJson = computed(() => JSON.stringify(defaultInputs.value, null, 2)
 // （前者提交时不解析 JSON 会把值变字符串，后者预填文本 "null" 同样变味，
 // 留空 = 不传 = 后端按声明默认执行）。
 watch(
-  () => selectedPipeline.value?.filename ?? '',
+  () => selectedPipeline.value?.name ?? '',
   () => {
     paramValues.value = Object.fromEntries(
       paramSpecs.value
@@ -220,26 +220,27 @@ function clearFile(spec: ParamSpec) {
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
-const previewFile = ref<string | null>(null)
+const previewName = ref<string | null>(null)
 
 // 标题里的流水线中文名：详情未加载时从列表兜底，打开即可见
 const previewItem = computed(() =>
-  pipelinesStore.pipelines.find((p) => p.filename === previewFile.value),
+  pipelinesStore.pipelines.find((p) => p.name === previewName.value),
 )
 
-// 抽屉实际渲染的详情：走 store（含 SWR 缓存）
-const previewDetail = computed<PipelineDetail | null>(() => pipelinesStore.detail)
+// 抽屉实际渲染的详情：走 store 缓存
+const previewDetail = computed<PipelineDetail | null>(() =>
+  previewName.value ? (pipelinesStore.detailCache[previewName.value] ?? null) : null,
+)
 
 async function loadPreview() {
-  if (!previewFile.value) return
+  if (!previewName.value) return
   previewError.value = null
   // 无缓存才转圈；有缓存先秒显旧内容，后台重取静默更新
-  previewLoading.value = !pipelinesStore.detailCache[previewFile.value]
+  previewLoading.value = !pipelinesStore.detailCache[previewName.value]
   try {
-    await pipelinesStore.select(previewFile.value)
+    await pipelinesStore.select(previewName.value)
   } catch {
-    // 首次加载失败才报错；已有内容时后台重取失败不打扰
-    if (!pipelinesStore.detail) {
+    if (!previewDetail.value) {
       previewError.value = '加载流水线失败，请检查后端是否可用。'
     }
   } finally {
@@ -247,8 +248,8 @@ async function loadPreview() {
   }
 }
 
-async function openPreview(filename: string) {
-  previewFile.value = filename
+async function openPreview(name: string) {
+  previewName.value = name
   previewOpen.value = true
   await loadPreview()
 }
@@ -330,7 +331,7 @@ async function startNewRun() {
   }
   creating.value = true
   try {
-    await store.startNewRun(configFile.value, submitInputs.value.value, runName.value || undefined)
+    await store.startNewRun(configName.value, submitInputs.value.value, runName.value || undefined)
     runName.value = '' // 创建成功后清空
     createDrawerOpen.value = false
     startDetailPolling()
@@ -396,9 +397,8 @@ onMounted(async () => {
   pipelinesStore
     .fetchPipelines()
     .then(() => {
-      // 默认项不在目录里时退到列表第一项（后端缺省仍是 pipeline.yaml）
-      if (!pipelinesStore.pipelines.some((p) => p.filename === configFile.value)) {
-        configFile.value = pipelinesStore.pipelines[0]?.filename ?? configFile.value
+      if (!pipelinesStore.pipelines.some((p) => p.name === configName.value)) {
+        configName.value = pipelinesStore.pipelines[0]?.name ?? configName.value
       }
     })
     .catch(() => {})
@@ -448,7 +448,7 @@ onUnmounted(() => {
         <div class="drawer-title">
           <span class="name">{{ previewDetail?.name ?? previewItem?.name ?? '流水线详情' }}</span>
           <span class="muted file">
-            {{ previewFile }}
+            {{ previewName }}
             <template v-if="previewDetail?.node_count ?? previewItem?.node_count">
               · {{ previewDetail?.node_count ?? previewItem?.node_count }} 节点
             </template>
@@ -471,19 +471,19 @@ onUnmounted(() => {
           <label class="create-label">流水线</label>
           <div class="create-select-group">
             <el-select
-              v-model="configFile"
+              v-model="configName"
               :disabled="!pipelinesStore.pipelines.length"
               placeholder="选择流水线"
               style="flex: 1"
             >
               <el-option
                 v-for="p in pipelinesStore.pipelines"
-                :key="p.filename"
-                :value="p.filename"
+                :key="p.name"
+                :value="p.name"
                 :label="p.name"
               />
             </el-select>
-            <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">
+            <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configName)">
               👁 预览
             </el-button>
           </div>

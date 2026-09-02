@@ -13,7 +13,6 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core import database
-from app.core.config import settings
 from app.core.logging import get_logger
 
 from app.engine import (
@@ -23,12 +22,12 @@ from app.engine import (
     SuspendExecution,
     load_dag,
 )
-from app.engine.declarative import read_yaml
 from app.engine.node import ApproverFunc
 from app.engine.types import NodeEventFunc
 from app.engine.validate import validate_inputs
 from app.models.run import RunRecord, RunStatus
 from app.services import runs
+from app.services.pipelines import get_pipeline
 
 logger = get_logger(__name__)
 
@@ -136,22 +135,16 @@ async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: 
 
 
 async def create_run(
-    config_file: str | None = None,
+    pipeline: str | None = None,
     name: str | None = None,
     inputs: dict[str, Any] | None = None,
 ) -> int:
-    """校验配置并落库一个新 run，返回 run_id。
-    """
-    if not config_file:
-        raise ValueError("config_file 必填")
-    path = settings.PIPELINES_DIR / config_file
-    if not path.is_file():
-        raise ValueError(f"未知的流水线配置 {config_file!r}")
+    """校验配置并落库一个新 run，返回 run_id。"""
+    if not pipeline:
+        raise ValueError("pipeline 必填")
     inputs = dict(inputs) if inputs else {}
-    text, config = read_yaml(path)
-    dag = load_dag(
-        config,
-    )
+    text, config = get_pipeline(pipeline)
+    dag = load_dag(config)
     record = RunRecord(
         name=name or dag.name,  # 用户自定义或用工作流名称
         pipeline=dag.name,  # 工作流名称（YAML 的 name 字段）

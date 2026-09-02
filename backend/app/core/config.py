@@ -52,6 +52,12 @@ class Settings(BaseSettings):
 
     TAVILY_API_KEY: str = ""
 
+    # 邮箱服务器
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASS: str = ""
+
     model_config = {"env_file": "../.env", "env_file_encoding": "utf-8"}
 
 

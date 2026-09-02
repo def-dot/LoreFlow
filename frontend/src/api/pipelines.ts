@@ -25,7 +25,6 @@ export interface ParamSpec {
 }
 
 export interface PipelineListItem {
-  filename: string
   name: string
   description: string
   node_count: number
@@ -47,6 +46,26 @@ export function listPipelines(): Promise<{ pipelines: PipelineListItem[] }> {
   return api.get('/pipelines')
 }
 
-export function getPipeline(filename: string): Promise<PipelineDetail> {
-  return api.get(`/pipelines/${encodeURIComponent(filename)}`)
+export function getPipeline(name: string): Promise<PipelineDetail> {
+  return api.get(`/pipelines/${encodeURIComponent(name)}`)
+}
+
+/** 创建用户自定义 pipeline（name 从 YAML 自动生成） */
+export function createPipeline(data: {
+  definition: string
+}): Promise<{ name: string }> {
+  return api.post('/pipelines', data)
+}
+
+/** 更新用户自定义 pipeline（name 变了会自动重命名，返回最终 name） */
+export function updatePipeline(
+  name: string,
+  data: { definition: string },
+): Promise<{ name: string }> {
+  return api.put(`/pipelines/${encodeURIComponent(name)}`, data)
+}
+
+/** 删除用户自定义 pipeline */
+export function deletePipeline(name: string): Promise<{ deleted: string }> {
+  return api.delete(`/pipelines/${encodeURIComponent(name)}`)
 }

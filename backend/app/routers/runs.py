@@ -28,7 +28,7 @@ router = APIRouter(prefix="/runs", route_class=UnifiedResponseRoute, tags=["runs
 @router.post("", response_model=RunCreateResponse, status_code=201)
 async def create_run(body: RunCreateRequest | None = None) -> RunCreateResponse:
     run_id = await orchestrator.create_run(
-        config_file=body.config_file if body else None,
+        pipeline=body.pipeline if body else None,
         name=body.name if body else None,
         inputs=body.inputs if body else None,
     )
@@ -80,7 +80,10 @@ async def get_run_config(run_id: int) -> PipelineDetail:
     record = await run_service.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
-    return PipelineDetail(**pipeline_service.get_run_definition_detail(record))
+    config = yaml.safe_load(record.definition)
+    if not isinstance(config, dict):
+        raise HTTPException(status_code=500, detail="run 配置快照解析失败：顶层不是映射")
+    return PipelineDetail(**pipeline_service.detail_from_config(raw=record.definition, config=config))
 
 
 @router.delete("/{run_id}")

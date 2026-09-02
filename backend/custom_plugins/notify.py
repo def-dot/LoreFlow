@@ -1,51 +1,71 @@
-"""示例插件 — 文本统计与摘要：演示插件节点的两种常见模式。
-
-放在 PLUGINS_DIR（默认 custom_plugins/）下的 .py 文件会被自动加载：
-唯一要求是用 @node_type 装饰器定义函数，导入即注册，无需任何额外接线。
-
-本插件提供两个节点：
-  - text_stats    ：动作节点，读取上游输出并返回结构化统计
-  - text_long_enough：条件节点，判断文本是否达到最小长度
-"""
-
-from __future__ import annotations
+import os
+import smtplib
+from email.mime.text import MIMEText
 
 from app.registry import node_type
 
 
-@node_type(label="文本统计", description="统计文本的字数、字符数，截取首句作为摘要")
-async def text_stats(ctx: dict) -> dict:
-    """动作节点示例：从 ctx 读取上游数据，返回结构化结果。
+@node_type(label="发送邮件", description="通过 SMTP 发送邮件")
+async def send_email(ctx: dict) -> str:
+    """动作节点：从 ctx 读取收件人、主题、正文，发送邮件。
 
-    在 YAML 中可通过 inputs 接线将上游节点的输出注入到 ctx['text']，
-    例如  inputs: { text: $llm_chat } 。
+    YAML 接线示例：
+        inputs:
+          to: "user@example.com"
+          subject: "审核结果通知"
+          body: $llm_chat
     """
-    text = str(ctx.get("text", ""))
-    words = len(text.split())
-    chars = len(text)
-    # 取第一个句号/问号/感叹号之前的内容作为摘要
-    first_sentence = text
-    for sep in ("。", ".", "？", "?", "！", "!"):
-        idx = text.find(sep)
-        if idx > 0:
-            first_sentence = text[: idx + 1]
-            break
-    return {
-        "word_count": words,
-        "char_count": chars,
-        "summary": first_sentence[:200],  # 摘要最多 200 字符
-    }
+    to = str(ctx.get("to", ""))
+    subject = str(ctx.get("subject", "(无主题)"))
+    body = str(ctx.get("body", ""))
+
+    host = os.getenv("SMTP_HOST", "smtp.example.com")
+    port = int(os.getenv("SMTP_PORT", "465"))
+    user = os.getenv("SMTP_USER", "")
+    password = os.getenv("SMTP_PASS", "")
+    sender = os.getenv("SMTP_SENDER", user)
+
+    if not user:
+        raise RuntimeError("未配置 SMTP_USER 环境变量，无法发送邮件")
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = to
+
+    with smtplib.SMTP_SSL(host, port) as server:
+        server.login(user, password)
+        server.sendmail(sender, [to], msg.as_string())
+
+    return f"邮件已发送至 {to}"
 
 
-@node_type(label="文本足够长", description="条件节点：文本超过指定字符数时返回 True")
-def text_long_enough(ctx: dict) -> bool:
-    """条件节点示例：配合 YAML 中的 condition 字段实现分支。
+@node_type(label="发送短信", description="通过 HTTP API 发送短信")
+async def send_message(ctx: dict) -> str:
+    """动作节点：从 ctx 读取手机号和内容，调用短信 API。
 
-    用法：condition: $text_stats.char_count > 0
-    或者直接用本节点做门控：
-        depends_on: [text_stats]
-        condition: $text_long_enough
+    YAML 接线示例：
+        inputs:
+          phone: "13800138000"
+          content: $llm_chat
     """
-    text = str(ctx.get("text", ""))
-    min_chars = int(ctx.get("min_chars", 10))
-    return len(text) >= min_chars
+    import httpx
+
+    phone = str(ctx.get("phone", ""))
+    content = str(ctx.get("content", ""))
+
+    api_url = os.getenv("SMS_API_URL", "")
+    api_key = os.getenv("SMS_API_KEY", "")
+
+    if not api_url:
+        raise RuntimeError("未配置 SMS_API_URL 环境变量，无法发送短信")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            api_url,
+            json={"phone": phone, "content": content, "api_key": api_key},
+            timeout=10,
+        )
+        resp.raise_for_status()
+
+    return f"短信已发送至 {phone}"

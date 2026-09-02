@@ -9,6 +9,9 @@ const loading = ref(false)
 // 后端未启动时置位，页头给提示，可点「刷新」重试
 const loadError = ref(false)
 
+// name → NodeTypeInfo 快速查找，供插件节点展示 label / description
+const nodeTypeMap = computed(() => new Map(nodeTypes.value.map((t) => [t.name, t])))
+
 // 内置节点 = 全量类型目录减去插件注册的名字（框架自带，只读展示）
 const builtinNodes = computed(() => {
   const pluginNames = new Set(plugins.value.flatMap((p) => p.node_names))
@@ -80,17 +83,22 @@ onMounted(fetchAll)
         <el-table v-loading="loading" :data="plugins" empty-text="暂无已加载插件">
           <el-table-column prop="filename" label="文件" min-width="160" />
           <el-table-column prop="module" label="模块" min-width="200" />
-          <el-table-column label="注册节点类型" min-width="240">
+          <el-table-column label="注册节点类型" min-width="280">
             <template #default="{ row }">
-              <el-tag
+              <el-tooltip
                 v-for="name in row.node_names"
                 :key="name"
-                class="node-tag node-tag--plugin"
-                size="small"
-                disable-transitions
+                :content="nodeTypeMap.get(name)?.description || name"
+                placement="top"
               >
-                {{ name }}
-              </el-tag>
+                <el-tag
+                  class="node-tag node-tag--plugin"
+                  size="small"
+                  disable-transitions
+                >
+                  {{ name }} · {{ nodeTypeMap.get(name)?.label || '' }}
+                </el-tag>
+              </el-tooltip>
               <span v-if="!row.node_names.length" class="muted">—</span>
             </template>
           </el-table-column>

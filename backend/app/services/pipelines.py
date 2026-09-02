@@ -1,4 +1,4 @@
-"""Demo 流水线只读浏览 — 枚举 app/pipelines/*.yaml 并合成列表/详情。
+"""流水线浏览与 CRUD（pipelines/*.yaml）。
 
 列表只做轻量解析（快、容错：单个文件坏了跳过并告警，不让整个
 目录 500）；详情走 load_dag 的完整校验与图构建（mermaid/拓扑序）。
@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -16,25 +17,28 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
-from app.engine.declarative import read_yaml
 from app.engine.resolve import parse_retry
+from app.engine.validate import validate_config
 from app.models.run import RunRecord
 from app.registry import REGISTRY
 
 logger = get_logger(__name__)
 
+PIPELINES_DIR = settings.PIPELINES_DIR
+
 
 def list_pipelines() -> list[dict[str, Any]]:
-    """枚举 pipelines 目录全部 .yaml；单个文件解析失败跳过并告警。"""
+    """枚举目录下全部 .yaml；单个文件解析失败跳过并告警。"""
     entries: list[dict[str, Any]] = []
-    for path in sorted(settings.PIPELINES_DIR.glob("*.yaml")):
+    if not PIPELINES_DIR.is_dir():
+        return entries
+    for path in sorted(PIPELINES_DIR.glob("*.yaml")):
         try:
-            _, config = read_yaml(path)
-        except ValueError as exc:
-            logger.warning("Skip demo pipeline %s: %s", path.name, exc)
+            _, config = get_pipeline(path.stem)
+        except Exception as exc:
+            logger.warning("Skip pipeline %s: %s", path.name, exc)
             continue
         entries.append({
-            "filename": path.name,
             "name": str(config.get("name") or path.stem),
             "description": str(config.get("description") or ""),
             "node_count": len(config.get("nodes") or {}),
@@ -59,21 +63,26 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
     return "，".join(parts)
 
 
-def get_pipeline_detail(filename: str) -> dict[str, Any]:
-    """单个流水线的完整展示数据：图、节点行、YAML 原文；未知文件名 404。"""
-    path = settings.PIPELINES_DIR / filename
+
+def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
+    """根据 pipeline name 获取 YAML 原文和解析后的 config。不存在 404。"""
+    path = PIPELINES_DIR / (name + ".yaml")
     if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"流水线 {filename!r} 不存在")
-    raw, config = read_yaml(path)
-    return _detail_from_config(path.name, raw, config)
-
-
-def get_run_definition_detail(record: RunRecord) -> dict[str, Any]:
-    """run 钉住的 definition 快照 → 展示数据（与 get_pipeline_detail 同构）。"""
-    config = yaml.safe_load(record.definition)
+        raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"无法读取配置文件 {path!r}: {exc}") from exc
+    try:
+        config = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"配置文件 {path!r} 的 YAML 无效: {exc}") from exc
+    if config is None:
+        config = {}
     if not isinstance(config, dict):
-        raise HTTPException(status_code=500, detail="run 配置快照解析失败：顶层不是映射")
-    return _detail_from_config(record.pipeline, record.definition, config)
+        raise ValueError("顶层必须是映射(dict)")
+    return raw, config
+
 
 
 def mermaid_from_definition(record: RunRecord) -> str | None:
@@ -95,7 +104,10 @@ def mermaid_from_definition(record: RunRecord) -> str | None:
         return None
 
 
-def _detail_from_config(filename: str, raw: str, config: dict[str, Any]) -> dict[str, Any]:
+def detail_from_config(
+    raw: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
     """已解析的 YAML 配置 → 详情展示数据（图、节点行、YAML 原文）。"""
     dag = load_dag(config)
     nodes_cfg = config.get("nodes") or {}
@@ -121,7 +133,6 @@ def _detail_from_config(filename: str, raw: str, config: dict[str, Any]) -> dict
         rows.append(row)
 
     return {
-        "filename": filename,
         "name": dag.name,
         "description": str(config.get("description") or ""),
         "node_count": len(dag.node_names),
@@ -130,3 +141,64 @@ def _detail_from_config(filename: str, raw: str, config: dict[str, Any]) -> dict
         "nodes": rows,
         "params": config.get("inputs") or {},
     }
+
+
+# ---------------------------------------------------------------------------
+# Pipeline CRUD
+# ---------------------------------------------------------------------------
+
+
+def _parse_and_validate(definition: str) -> dict[str, Any]:
+    """解析 YAML 并校验 DAG 配置；失败抛 ValueError。"""
+    try:
+        config = yaml.safe_load(definition)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"YAML 解析失败: {exc}") from exc
+    if not isinstance(config, dict):
+        raise ValueError("YAML 顶层必须是映射(dict)")
+    if not config.get("name"):
+        raise ValueError("YAML 必须包含 name 字段")
+    errors = validate_config(config)
+    if errors:
+        raise ValueError("配置校验失败:\n  " + "\n  ".join(errors))
+    return config
+
+
+def create_pipeline(definition: str) -> str:
+    """创建 pipeline 文件：校验 YAML → 写入目录。返回 name。"""
+    config = _parse_and_validate(definition)
+    PIPELINES_DIR.mkdir(parents=True, exist_ok=True)
+    dest = PIPELINES_DIR / f"{config['name']}.yaml"
+    if dest.is_file():
+        raise HTTPException(status_code=409, detail=f"工作流 {config['name']!r} 已存在")
+    dest.write_text(definition, encoding="utf-8")
+    return str(config["name"])
+
+
+def update_pipeline(name: str, definition: str) -> str:
+    """更新 pipeline 文件。如果 YAML name 变了，自动重命名文件。返回最终 name。"""
+    filename = name + ".yaml"
+    path = PIPELINES_DIR / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
+    config = _parse_and_validate(definition)
+    new_name = str(config["name"])
+    new_filename = new_name + ".yaml"
+    new_path = PIPELINES_DIR / new_filename
+    if new_path != path:
+        if new_path.is_file():
+            raise HTTPException(status_code=409, detail=f"工作流 {new_name!r} 已存在")
+        new_path.write_text(definition, encoding="utf-8")
+        path.unlink()
+        return new_name
+    path.write_text(definition, encoding="utf-8")
+    return name
+
+
+def delete_pipeline(name: str) -> bool:
+    """删除 pipeline 文件。不存在返回 False。"""
+    path = PIPELINES_DIR / (name + ".yaml")
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True

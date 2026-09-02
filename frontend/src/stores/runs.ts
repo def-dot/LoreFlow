@@ -86,8 +86,8 @@ export const useRunsStore = defineStore('runs', {
       }
     },
 
-    async startNewRun(configFile: string, inputs?: Record<string, unknown>, name?: string) {
-      const { run_id } = await startRun(configFile, inputs, name)
+    async startNewRun(pipeline: string, inputs?: Record<string, unknown>, name?: string) {
+      const { run_id } = await startRun(pipeline, inputs, name)
       await this.select(run_id)
       await this.fetchRuns()
     },
