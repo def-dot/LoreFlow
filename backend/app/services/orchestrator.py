@@ -146,9 +146,8 @@ async def create_run(
     text, config = get_pipeline(pipeline)
     dag = load_dag(config)
     record = RunRecord(
-        name=name or dag.name,  # 用户自定义或用工作流名称
-        pipeline=dag.name,  # 工作流名称（YAML 的 name 字段）
-        mermaid="",
+        name=name or dag.name,
+        pipeline=dag.name,
         created_at=datetime.now().isoformat(timespec="seconds"),
         status=RunStatus.RUNNING,
     )
