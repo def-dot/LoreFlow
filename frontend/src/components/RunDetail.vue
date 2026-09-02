@@ -64,6 +64,7 @@ const inputFields = computed<FieldValue[]>(() => {
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
         {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
+      <span class="run-config" :title="detail.config_file">📋 {{ detail.config_file }}</span>
       <el-popover v-if="inputCount" placement="bottom-start" :width="360" trigger="click">
         <template #reference>
           <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
@@ -111,6 +112,19 @@ const inputFields = computed<FieldValue[]>(() => {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-3);
+}
+/* 流水线配置文件名 */
+.run-config {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 8px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 运行时输入快照 chip：与 run-meta 同级弱化展示，点击弹层逐字段查看 */
 .run-inputs {
