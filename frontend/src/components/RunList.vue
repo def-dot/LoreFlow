@@ -10,9 +10,7 @@ const props = defineProps<{
   loadingMore: boolean
   /** 筛选值（'' = 全部），由 store 持有 */
   status: string
-  configFile: string
-  /** 流水线下拉选项（来自 pipelines 目录） */
-  pipelineOptions: { filename: string; name: string }[]
+  pipeline: string
 }>()
 
 const emit = defineEmits<{
@@ -21,7 +19,7 @@ const emit = defineEmits<{
   cancel: [id: number]
   more: []
   'set-status': [v: string]
-  'set-config': [v: string]
+  'set-pipeline': [v: string]
 }>()
 
 // 可取消状态：running 或 reviewing；其余（终态）可删，后端同样按此拒绝
@@ -33,8 +31,14 @@ const STATUS_OPTIONS = ['running', 'reviewing', 'completed', 'failed', 'cancelle
   label: statusLabel(v),
 }))
 
+// 从 runs 列表中提取不重复的工作流名称作为筛选选项
+const pipelineOptions = computed(() => {
+  const names = new Set(props.runs.map((r) => r.pipeline).filter(Boolean))
+  return [...names].sort()
+})
+
 // 有筛选时空态文案不同：不是"没有运行"，是"没有匹配的运行"
-const hasFilter = computed(() => props.status !== '' || props.configFile !== '')
+const hasFilter = computed(() => props.status !== '' || props.pipeline !== '')
 
 // 侧栏时间只留一小格（MM-DD HH:mm），完整时间放 title 悬停查看
 function fmtShort(iso: string | null): string {
@@ -68,13 +72,13 @@ function fmtFull(iso: string | null): string {
         <el-option v-for="o in STATUS_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
       <el-select
-        :model-value="configFile"
+        :model-value="pipeline"
         size="small"
         :disabled="!pipelineOptions.length"
-        @update:model-value="emit('set-config', $event ?? '')"
+        @update:model-value="emit('set-pipeline', $event ?? '')"
       >
-        <el-option label="全部流水线" value="" />
-        <el-option v-for="p in pipelineOptions" :key="p.filename" :label="p.name" :value="p.filename" />
+        <el-option label="全部工作流" value="" />
+        <el-option v-for="name in pipelineOptions" :key="name" :label="name" :value="name" />
       </el-select>
     </div>
     <div class="run-list">

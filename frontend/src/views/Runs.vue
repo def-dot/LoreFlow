@@ -4,9 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
-import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
+import type { ParamSpec } from '@/api/pipelines'
 import { toParamSpecs } from '@/api/pipelines'
-import { getRunConfig } from '@/api/runs'
 import { uploadFile, type UploadOut } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
 import { usePipelinesStore } from '@/stores/pipelines'
@@ -56,10 +55,10 @@ const selectedPipeline = computed(() =>
   pipelinesStore.pipelines.find((p) => p.filename === configFile.value),
 )
 const paramSpecs = computed(() => toParamSpecs(selectedPipeline.value?.params ?? {}))
-// run 详情「⚙ 参数」弹层的声明标签：按该 run 的 config_file 取
+// run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
 // （与创建下拉的选中无关 —— 看旧 run 时下拉可能停在别的流水线上）
 const detailParams = computed(() =>
-  toParamSpecs(pipelinesStore.pipelines.find((p) => p.filename === store.detail?.config_file)?.params ?? {}),
+  toParamSpecs(pipelinesStore.pipelines.find((p) => p.name === store.detail?.pipeline)?.params ?? {}),
 )
 // 必填键/默认值从参数行派生（声明行是单一事实源，后端不再单独输出）
 const requiredInputs = computed(() => paramSpecs.value.filter((p) => p.required).map((p) => p.name))
@@ -216,44 +215,22 @@ function clearFile(spec: ParamSpec) {
 // 看该 run 跑的配置 —— 同一个 drawer，标题区分来源。详情按文件名缓存
 // 并后台重取（SWR）：重复打开秒显，改过 YAML 也会自动跟上，无需刷新按钮
 // ---------------------------------------------------------------------------
-// 打开来源：selection = 顶部预览所选流水线；run = 查看 run 钉住的配置快照
-type PreviewSource = { kind: 'selection' } | { kind: 'run'; runId: number }
-
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
 const previewFile = ref<string | null>(null)
-const previewFrom = ref<PreviewSource>({ kind: 'selection' })
-// run 来源的详情（查 run 的 definition 快照，不经 store：按文件名缓存会
-// 被当前文件污染，快照也不可变、无需 SWR）
-const runPreviewDetail = ref<PipelineDetail | null>(null)
 
 // 标题里的流水线中文名：详情未加载时从列表兜底，打开即可见
 const previewItem = computed(() =>
   pipelinesStore.pipelines.find((p) => p.filename === previewFile.value),
 )
 
-// 抽屉实际渲染的详情：run 来源用快照，选中来源走 store（含 SWR 缓存）
-const previewDetail = computed<PipelineDetail | null>(() =>
-  previewFrom.value.kind === 'run' ? runPreviewDetail.value : pipelinesStore.detail,
-)
+// 抽屉实际渲染的详情：走 store（含 SWR 缓存）
+const previewDetail = computed<PipelineDetail | null>(() => pipelinesStore.detail)
 
 async function loadPreview() {
   if (!previewFile.value) return
   previewError.value = null
-  if (previewFrom.value.kind === 'run') {
-    previewLoading.value = !runPreviewDetail.value
-    try {
-      runPreviewDetail.value = await getRunConfig(previewFrom.value.runId)
-    } catch {
-      if (!runPreviewDetail.value) {
-        previewError.value = '加载运行配置快照失败，请检查后端是否可用。'
-      }
-    } finally {
-      previewLoading.value = false
-    }
-    return
-  }
   // 无缓存才转圈；有缓存先秒显旧内容，后台重取静默更新
   previewLoading.value = !pipelinesStore.detailCache[previewFile.value]
   try {
@@ -268,18 +245,10 @@ async function loadPreview() {
   }
 }
 
-async function openPreview(filename: string, from: PreviewSource = { kind: 'selection' }) {
+async function openPreview(filename: string) {
   previewFile.value = filename
-  previewFrom.value = from
   previewOpen.value = true
   await loadPreview()
-}
-
-// run 详情「查看配置」：看该 run 创建时钉住的 definition 快照，而非当前
-// 文件（文件可能在 run 创建后已被修改甚至删除）
-function viewRunConfig(configFileOfRun: string, runId: number) {
-  runPreviewDetail.value = null
-  openPreview(configFileOfRun, { kind: 'run', runId })
 }
 
 // ---------------------------------------------------------------------------
@@ -579,10 +548,9 @@ onUnmounted(() => {
         :selected-id="store.selectedId"
         :loading-more="store.loadingMore"
         :status="store.filters.status"
-        :config-file="store.filters.configFile"
-        :pipeline-options="pipelinesStore.pipelines"
+        :pipeline="store.filters.pipeline"
         @set-status="store.setFilters({ status: $event })"
-        @set-config="store.setFilters({ configFile: $event })"
+        @set-pipeline="store.setFilters({ pipeline: $event })"
         @select="select"
         @delete="removeRun"
         @cancel="cancelRun"
@@ -594,7 +562,6 @@ onUnmounted(() => {
         :deciding="store.deciding"
         :params="detailParams"
         @decide="decide"
-        @view-config="viewRunConfig"
       />
       <div v-else class="muted">选择或创建一条运行查看执行状态。</div>
     </main>
@@ -608,7 +575,6 @@ onUnmounted(() => {
               · {{ previewDetail?.node_count ?? previewItem?.node_count }} 节点
             </template>
           </span>
-          <el-tag v-if="previewFrom.kind === 'run'" size="small" type="info">运行 #{{ previewFrom.runId }} · 配置快照</el-tag>
         </div>
       </template>
       <div v-loading="previewLoading" class="drawer-body">

@@ -40,10 +40,10 @@ async def list_runs(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     status: RunStatus | None = Query(None, description="按 run 状态筛选"),
-    config_file: str | None = Query(None, max_length=200, description="按流水线文件名筛选"),
+    pipeline: str | None = Query(None, max_length=200, description="按工作流名称筛选"),
 ) -> RunListResponse:
     rows, total = await run_service.list_runs(
-        offset=offset, limit=limit, status=status, config_file=config_file
+        offset=offset, limit=limit, status=status, pipeline=pipeline
     )
     counts = await run_service.run_counts()
     return RunListResponse(
@@ -64,7 +64,7 @@ async def get_run(run_id: int) -> RunDetail:
     fresh = pipeline_service.mermaid_from_definition(record)
     if fresh is not None:
         data["mermaid"] = fresh
-    cfg = yaml.safe_load(record.definition) if record.definition else {} 
+    cfg = yaml.safe_load(record.definition) if record.definition else {}
     nodes_cfg = cfg.get("nodes") or {}
     for name, node in data.get("nodes", {}).items():
         spec = nodes_cfg.get(name)

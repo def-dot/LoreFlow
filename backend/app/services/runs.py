@@ -28,7 +28,7 @@ async def list_runs(
     offset: int = 0,
     limit: int | None = None,
     status: RunStatus | None = None,
-    config_file: str | None = None,
+    pipeline: str | None = None,
 ) -> tuple[list[RunRecord], int]:
     """分页取 run（新在前），支持按状态/流水线筛选；total 为**筛选后**总数。
 
@@ -38,8 +38,8 @@ async def list_runs(
     cond = []
     if status is not None:
         cond.append(RunRecord.status == status)
-    if config_file is not None:
-        cond.append(RunRecord.config_file == config_file)
+    if pipeline is not None:
+        cond.append(RunRecord.pipeline == pipeline)
 
     async with database.AsyncSessionLocal() as session:
         stmt = select(RunRecord)

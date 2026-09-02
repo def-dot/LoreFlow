@@ -73,7 +73,7 @@ def get_run_definition_detail(record: RunRecord) -> dict[str, Any]:
     config = yaml.safe_load(record.definition)
     if not isinstance(config, dict):
         raise HTTPException(status_code=500, detail="run 配置快照解析失败：顶层不是映射")
-    return _detail_from_config(record.config_file, record.definition, config)
+    return _detail_from_config(record.pipeline, record.definition, config)
 
 
 def mermaid_from_definition(record: RunRecord) -> str | None:

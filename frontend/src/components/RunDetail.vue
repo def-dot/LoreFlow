@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { RunDetail } from '@/api/runs'
-import type { ParamSpec } from '@/api/pipelines'
+import { getRunConfig } from '@/api/runs'
+import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
 import { statusLabel, statusTagType } from '@/utils/status'
 import MermaidDiagram from './MermaidDiagram.vue'
 import NodeStatusTable from './NodeStatusTable.vue'
 import ReviewCards from './ReviewCards.vue'
 import FieldValues, { type FieldValue } from './FieldValues.vue'
+import PipelineDetailPanel from './PipelineDetailPanel.vue'
 
 const props = defineProps<{ detail: RunDetail; deciding: boolean; params?: ParamSpec[] }>()
 
 const emit = defineEmits<{
   decide: [node: string, approve: boolean, reason: string | null, values: Record<string, string> | null]
-  viewConfig: [configFile: string, runId: number]
 }>()
 
 // 节点名 → 状态，供 MermaidDiagram 按状态给图里的节点上色
@@ -54,6 +55,26 @@ const inputFields = computed<FieldValue[]>(() => {
   }
   return fields
 })
+
+// 工作流定义弹窗（点击 pipeline 名称加载配置详情）
+const definitionVisible = ref(false)
+const definitionLoading = ref(false)
+const definitionDetail = ref<PipelineDetail | null>(null)
+const definitionError = ref<string | null>(null)
+
+async function openDefinition() {
+  definitionVisible.value = true
+  if (definitionDetail.value) return // 已加载过，直接复用
+  definitionLoading.value = true
+  definitionError.value = null
+  try {
+    definitionDetail.value = await getRunConfig(props.detail.id)
+  } catch {
+    definitionError.value = '加载工作流配置失败'
+  } finally {
+    definitionLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -64,14 +85,13 @@ const inputFields = computed<FieldValue[]>(() => {
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
         {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
-      <span class="run-config" :title="detail.config_file">📋 {{ detail.config_file }}</span>
+      <span class="run-pipeline" :title="detail.pipeline" @click="openDefinition">📋 {{ detail.pipeline }}</span>
       <el-popover v-if="inputCount" placement="bottom-start" :width="360" trigger="click">
         <template #reference>
           <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
         </template>
         <FieldValues :fields="inputFields" />
       </el-popover>
-      <el-button size="small" plain @click="emit('viewConfig', detail.config_file, detail.id)">查看运行配置</el-button>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
     <div class="panels">
@@ -92,6 +112,20 @@ const inputFields = computed<FieldValue[]>(() => {
         </template>
       </section>
     </div>
+
+    <!-- 工作流定义 drawer -->
+    <el-drawer v-model="definitionVisible" size="min(920px, 94vw)">
+      <template #title>
+        <div class="drawer-title">
+          <span class="name">{{ definitionDetail?.name ?? detail.pipeline }}</span>
+          <el-tag size="small" type="info">运行 #{{ detail.id }} · 配置快照</el-tag>
+        </div>
+      </template>
+      <div v-loading="definitionLoading" class="definition-body">
+        <div v-if="definitionError" class="muted">{{ definitionError }}</div>
+        <PipelineDetailPanel v-else-if="definitionDetail" :detail="definitionDetail" />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -113,8 +147,8 @@ const inputFields = computed<FieldValue[]>(() => {
   font-size: 12px;
   color: var(--ink-3);
 }
-/* 流水线配置文件名 */
-.run-config {
+/* 工作流名称（可点击） */
+.run-pipeline {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-3);
@@ -125,6 +159,12 @@ const inputFields = computed<FieldValue[]>(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.run-pipeline:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
 }
 /* 运行时输入快照 chip：与 run-meta 同级弱化展示，点击弹层逐字段查看 */
 .run-inputs {
@@ -163,6 +203,25 @@ h2.review-title::before {
 }
 .review-title {
   margin-top: 16px;
+}
+/* 工作流定义 drawer */
+:deep(.el-drawer__header) {
+  margin-bottom: 0;
+}
+.drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 15px;
+}
+.drawer-title .name {
+  font-weight: 600;
+  color: var(--ink);
+}
+.definition-body {
+  padding: 20px;
+  min-height: 160px;
 }
 @media (max-width: 900px) {
   .panels {

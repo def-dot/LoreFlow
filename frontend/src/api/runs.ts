@@ -8,7 +8,7 @@ export interface RunListItem {
   finished_at: string | null
   status: string
   error: string | null
-  config_file: string
+  pipeline: string
 }
 
 export interface NodeSnapshot {
@@ -24,8 +24,8 @@ export interface NodeSnapshot {
 }
 
 export interface RunDetail extends RunListItem {
-  config_file: string
   mermaid: string
+  definition: string | null
   nodes: Record<string, NodeSnapshot>
   inputs: Record<string, unknown>
 }
@@ -48,13 +48,13 @@ export interface RunListPage {
 /** 列表筛选条件；空字符串表示不筛（api 层按 truthy 判断） */
 export interface RunFilters {
   status: string
-  configFile: string
+  pipeline: string
 }
 
 export function listRuns(offset = 0, limit = 50, filters?: RunFilters): Promise<RunListPage> {
   const params: Record<string, string> = { offset: String(offset), limit: String(limit) }
   if (filters?.status) params.status = filters.status
-  if (filters?.configFile) params.config_file = filters.configFile
+  if (filters?.pipeline) params.pipeline = filters.pipeline
   return api.get('/runs', { params })
 }
 

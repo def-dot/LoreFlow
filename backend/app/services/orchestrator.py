@@ -148,19 +148,19 @@ async def create_run(
     if not path.is_file():
         raise ValueError(f"未知的流水线配置 {config_file!r}")
     inputs = dict(inputs) if inputs else {}
+    text, config = read_yaml(path)
+    dag = load_dag(
+        config,
+    )
     record = RunRecord(
-        name=name or path.stem,  # 用户自定义或用配置文件名（不含扩展名）
-        config_file=path.name,
+        name=name or dag.name,  # 用户自定义或用工作流名称
+        pipeline=dag.name,  # 工作流名称（YAML 的 name 字段）
         mermaid="",
         created_at=datetime.now().isoformat(timespec="seconds"),
         status=RunStatus.RUNNING,
     )
-    text, config = read_yaml(path)
-    dag = load_dag(
-        config,
-        approver=make_approver(record),
-        on_event=make_event_sink(record),
-    )
+    dag.approver = make_approver(record)
+    dag.on_event = make_event_sink(record)
     record.definition = text
 
     errors = validate_inputs(inputs, dag.params)

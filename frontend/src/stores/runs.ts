@@ -11,7 +11,7 @@ export const useRunsStore = defineStore('runs', {
     runs: [] as RunListItem[],
     total: 0,
     // 列表筛选（'' = 不筛）；total 语义为筛选后总数
-    filters: { status: '', configFile: '' },
+    filters: { status: '', pipeline: '' },
     // 全局执行计数（后端 summary，不受筛选影响）：轮询与电流的真值来源
     summary: { running: 0, active: 0 },
     detail: null as RunDetail | null,
@@ -57,7 +57,7 @@ export const useRunsStore = defineStore('runs', {
 
     /** 切换筛选：清空已加载页回到第一页（顺带让 fetchRuns 的自适应
      * limit 归零），再按新条件取数。 */
-    async setFilters(partial: Partial<{ status: string; configFile: string }>) {
+    async setFilters(partial: Partial<{ status: string; pipeline: string }>) {
       this.filters = { ...this.filters, ...partial }
       this.runs = []
       await this.fetchRuns()

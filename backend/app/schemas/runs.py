@@ -16,7 +16,7 @@ class RunListItem(BaseModel):
     finished_at: str | None = None
     status: RunStatus
     error: str | None = None
-    config_file: str = ""  # 流水线文件名：列表筛选/展示用
+    pipeline: str = ""  # 工作流名称（YAML 的 name 字段）
 
     @field_serializer("created_at", "finished_at")
     def _format_dt(self, value: str | None) -> str | None:
@@ -43,8 +43,8 @@ class RunListResponse(BaseModel):
 
 
 class RunDetail(RunListItem):
-    config_file: str
     mermaid: str
+    definition: str | None = None  # YAML 定义快照
     nodes: dict[str, Any]
     inputs: dict[str, Any] = {}  # 创建时的运行时输入快照
 
