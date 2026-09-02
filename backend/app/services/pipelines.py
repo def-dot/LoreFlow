@@ -19,7 +19,6 @@ from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
 from app.engine.resolve import parse_retry
 from app.engine.validate import validate_config
-from app.models.run import RunRecord
 from app.registry import REGISTRY
 
 logger = get_logger(__name__)
@@ -83,25 +82,6 @@ def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
         raise ValueError("顶层必须是映射(dict)")
     return raw, config
 
-
-
-def mermaid_from_definition(record: RunRecord) -> str | None:
-    """definition 快照 → 当前渲染格式的 mermaid；解析/构建失败返回 None。
-
-    存储的 record.mermaid 是创建时刻的渲染快照——渲染格式改进后存量
-    run 不会跟上；definition 本身钉住不变，读取时现渲染既忠实又始终
-    是最新格式。失败（旧记录无快照、注册表缺类型等）由调用方回退存储值。
-    """
-    if not record.definition:
-        return None
-    try:
-        config = yaml.safe_load(record.definition)
-        if not isinstance(config, dict):
-            return None
-        return load_dag(config).to_mermaid()
-    except Exception as exc:
-        logger.warning("[run %s] definition 现渲染 mermaid 失败，回退存储快照: %s", record.id, exc)
-        return None
 
 
 def detail_from_config(

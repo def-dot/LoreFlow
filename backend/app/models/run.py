@@ -27,7 +27,6 @@ class RunRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)  # 自增
     name: str = ""  # 任务名称（用户自定义或配置文件名）
     pipeline: str = ""  # 工作流名称（YAML 的 name 字段）
-    mermaid: str = ""  # pipeline 图源码（创建 run 时快照进记录）
     created_at: str | None = None
     finished_at: str | None = None
     # native_enum=False + values_callable：沿用 VARCHAR 列按 value 存取，兼容存量库

@@ -6,7 +6,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.response import UnifiedResponseRoute
-from app.engine import NodeStatus
+from app.engine import NodeStatus, load_dag
 from app.models.run import RunStatus
 from app.schemas.pipelines import PipelineDetail
 from app.schemas.runs import (
@@ -61,9 +61,14 @@ async def get_run(run_id: int) -> RunDetail:
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
     data = record.model_dump()
-    fresh = pipeline_service.mermaid_from_definition(record)
-    if fresh is not None:
-        data["mermaid"] = fresh
+    # 从 definition 实时生成 mermaid（渲染格式改进后存量 run 自动跟上）
+    if record.definition:
+        try:
+            config = yaml.safe_load(record.definition)
+            if isinstance(config, dict):
+                data["mermaid"] = load_dag(config).to_mermaid()
+        except Exception:
+            data["mermaid"] = ""
     cfg = yaml.safe_load(record.definition) if record.definition else {}
     nodes_cfg = cfg.get("nodes") or {}
     for name, node in data.get("nodes", {}).items():

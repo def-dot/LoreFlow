@@ -161,7 +161,6 @@ async def create_run(
         raise ValueError("\n".join(errors))
 
     record.inputs = {**dag.default_inputs, **inputs}
-    record.mermaid = dag.to_mermaid()
 
     await runs.create(record)
     task = asyncio.create_task(run_pipeline(record, dag))
