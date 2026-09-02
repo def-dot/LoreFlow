@@ -29,6 +29,7 @@ router = APIRouter(prefix="/runs", route_class=UnifiedResponseRoute, tags=["runs
 async def create_run(body: RunCreateRequest | None = None) -> RunCreateResponse:
     run_id = await orchestrator.create_run(
         config_file=body.config_file if body else None,
+        name=body.name if body else None,
         inputs=body.inputs if body else None,
     )
     return RunCreateResponse(run_id=run_id)

@@ -137,6 +137,7 @@ async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: 
 
 async def create_run(
     config_file: str | None = None,
+    name: str | None = None,
     inputs: dict[str, Any] | None = None,
 ) -> int:
     """校验配置并落库一个新 run，返回 run_id。
@@ -148,7 +149,7 @@ async def create_run(
         raise ValueError(f"未知的流水线配置 {config_file!r}")
     inputs = dict(inputs) if inputs else {}
     record = RunRecord(
-        name=path.name,
+        name=name or path.stem,  # 用户自定义或用配置文件名（不含扩展名）
         config_file=path.name,
         mermaid="",
         created_at=datetime.now().isoformat(timespec="seconds"),
@@ -161,15 +162,14 @@ async def create_run(
         on_event=make_event_sink(record),
     )
     record.definition = text
-    
+
     errors = validate_inputs(inputs, dag.params)
     if errors:
         raise ValueError("\n".join(errors))
-    
+
     record.inputs = {**dag.default_inputs, **inputs}
-    record.name = dag.name
     record.mermaid = dag.to_mermaid()
-    
+
     await runs.create(record)
     task = asyncio.create_task(run_pipeline(record, dag))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))

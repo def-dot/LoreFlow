@@ -60,6 +60,7 @@ class RunCreateRequest(BaseModel):
     inputs（运行时输入，必须与 YAML inputs 声明的键一致；多传或错传会被拒绝）。"""
 
     config_file: str | None = None
+    name: str | None = None  # 任务名称，不传则自动生成
     inputs: dict[str, Any] | None = None
 
 

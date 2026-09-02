@@ -16,7 +16,6 @@ import re
 from html import unescape
 from typing import Any
 
-import httpx
 from tavily import AsyncTavilyClient
 
 from app.registry.core import node_type

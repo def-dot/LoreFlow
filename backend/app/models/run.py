@@ -25,7 +25,7 @@ class RunRecord(SQLModel, table=True):
     __tablename__ = "runs"
 
     id: int | None = Field(default=None, primary_key=True)  # 自增
-    name: str = ""  # yaml 里的 name 字段（如 content_pipeline）
+    name: str = ""  # 任务名称（用户自定义或配置文件名）
     config_file: str = ""  # yaml 文件名（如 pipeline.yaml）
     mermaid: str = ""  # pipeline 图源码（创建 run 时快照进记录）
     created_at: str | None = None
