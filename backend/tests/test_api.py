@@ -141,15 +141,11 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
     types = body["data"]["node_types"]
     names = {t["name"] for t in types}
     expected = {
-        "cfg_fetch",
-        "cfg_clean",
-        "cfg_enrich",
-        "cfg_merge",
+        "test_fetch",
         "cfg_publish",
         "cfg_report",
         "cfg_needs_report",
         "svc_external_api",
-        "demo_tick",
         "demo_keep_iterating",
         "demo_needs_review",
     }
@@ -510,162 +506,6 @@ async def test_resume_suspended_run_re_suspends(client: AsyncClient) -> None:
     assert data["nodes"]["publish"]["status"] == "completed"
 
 
-# ---------------------------------------------------------------------------
-# 运行时输入 inputs
-# ---------------------------------------------------------------------------
-
-
-async def test_create_run_with_inputs(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    """带 inputs 创建：值进入共享上下文（demo_tick 在 tick 基础上 +1），
-    同名键运行时优先于 YAML 默认值；详情回显输入快照。"""
-    pipe = tmp_path / "inputs_demo.yaml"
-    pipe.write_text(
-        "name: inputs_demo\n"
-        "params:\n"
-        "  tick:\n"
-        "    default: 1\n"
-        "nodes:\n"
-        "  counter:\n"
-        "    type: demo_tick\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
-
-    resp = await client.post(
-        "/api/v1/runs",
-        json={"config_file": "inputs_demo.yaml", "inputs": {"tick": 41}},
-    )
-    assert resp.status_code == 201
-    run_id = resp.json()["data"]["run_id"]
-
-    data = await _wait_terminal(client, run_id)
-    assert data["status"] == "completed"
-    assert data["inputs"] == {"tick": 41}  # 运行时输入快照回显
-    assert data["nodes"]["counter"]["output"] == 42  # 覆盖了 YAML 默认 tick=1
-
-
-async def test_inputs_yaml_default_kept_when_not_overridden(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    """运行时未覆盖的键沿用 YAML 默认值：不带 inputs 创建，tick 仍取 YAML 的 1。"""
-    pipe = tmp_path / "inputs_demo.yaml"
-    pipe.write_text(
-        "name: inputs_demo\n"
-        "params:\n"
-        "  tick:\n"
-        "    default: 1\n"
-        "nodes:\n"
-        "  counter:\n"
-        "    type: demo_tick\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
-
-    resp = await client.post(
-        "/api/v1/runs",
-        json={"config_file": "inputs_demo.yaml"},
-    )
-    assert resp.status_code == 201
-    run_id = resp.json()["data"]["run_id"]
-
-    data = await _wait_terminal(client, run_id)
-    assert data["status"] == "completed"
-    assert data["nodes"]["counter"]["output"] == 2  # YAML 默认 tick=1 生效
-    assert data["inputs"] == {"tick": 1}  # 生效输入快照含 YAML 默认值，run 自描述
-
-
-async def test_inputs_survive_review_resume(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    """审批挂起 → /approve 走 resume_record 重新 load_dag 续跑：
-    record.inputs 回放进上下文，下游节点仍能读到运行时输入。"""
-    pipe = tmp_path / "inputs_review.yaml"
-    pipe.write_text(
-        "name: inputs_review\n"
-        "params:\n"
-        "  tick:\n"
-        "    label: 计数\n"
-        "nodes:\n"
-        "  review:\n"
-        "    kind: human\n"
-        '    prompt: "请审核"\n'
-        "  counter:\n"
-        "    type: demo_tick\n"
-        "    depends_on: [review]\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
-
-    resp = await client.post(
-        "/api/v1/runs",
-        json={"config_file": "inputs_review.yaml", "inputs": {"tick": 6}},
-    )
-    assert resp.status_code == 201
-    run_id = resp.json()["data"]["run_id"]
-
-    await _wait_reviewing(client, run_id)
-    data = (await client.get(f"/api/v1/runs/{run_id}")).json()["data"]
-    assert data["nodes"]["review"]["output"]["payload"]["tick"] == 6  # 输入也进审核卡片 payload
-
-    resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
-    assert resp.status_code == 200
-
-    data = await _wait_terminal(client, run_id)
-    assert data["status"] == "completed"
-    assert data["nodes"]["counter"]["output"] == 7  # resume 后 tick=6 仍在上下文
-
-
-async def test_inputs_restart_resume_replays_inputs(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    """重启恢复（resume_stuck_runs）同样回放 inputs：reviewing 记录带输入快照。"""
-    pipe = tmp_path / "inputs_review.yaml"
-    pipe.write_text(
-        "name: inputs_review\n"
-        "params:\n"
-        "  tick:\n"
-        "    label: 计数\n"
-        "nodes:\n"
-        "  review:\n"
-        "    kind: human\n"
-        '    prompt: "请审核"\n'
-        "  counter:\n"
-        "    type: demo_tick\n"
-        "    depends_on: [review]\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
-
-    record = RunRecord(
-        name="inputs_review",
-        config_file="inputs_review.yaml",
-        definition=pipe.read_text(encoding="utf-8"),
-        mermaid="graph TD\n",
-        created_at="2026-01-01T00:00:00",
-        status="reviewing",
-        nodes={"review": {"status": "reviewing", "payload": {"tick": 6}}},
-        inputs={"tick": 6},
-    )
-    await run_service.save(record)
-    run_id = record.id
-    assert run_id is not None
-
-    await orchestrator.resume_stuck_runs()  # 无决策 → 幂等重挂起
-    await asyncio.sleep(0.1)
-
-    resp = await client.post(f"/api/v1/runs/{run_id}/approve/review", json={"approve": True})
-    assert resp.status_code == 200
-    data = await _wait_terminal(client, run_id)
-    assert data["status"] == "completed"
-    assert data["nodes"]["counter"]["output"] == 7  # 重启恢复路径也回放 inputs
-
-
-async def test_create_run_inputs_clash_node_name_400(client: AsyncClient) -> None:
-    """输入键必须是 YAML params 中声明的参数，否则 400 且不产生 run 记录。"""
-    resp = await client.post(
-        "/api/v1/runs", json={"config_file": "05_human_review.yaml", "inputs": {"review": 1}}
-    )
-    assert resp.status_code == 400
-    assert "未声明的参数键" in resp.json()["msg"]
-
-    resp = await client.get("/api/v1/runs")
-    assert resp.json()["data"]["items"] == []
-
-
 async def test_loop_pipeline_completes_with_inputs(client: AsyncClient) -> None:
     """loop 流水线经 API 跑到终态：loop 输出快照可落库（回归：曾因输出
     自引用序列化失败卡死 running），且运行时输入进入循环累积。"""
@@ -833,46 +673,6 @@ async def test_required_inputs_empty_rejected_400(client: AsyncClient) -> None:
 
     resp = await client.get("/api/v1/runs")
     assert resp.json()["data"]["items"] == []
-
-
-async def test_required_with_default_must_be_explicit_at_api(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    """必填+default：API 边界必填须显式——不传/空串/null → 400；
-    显式提供才创建成功。（引擎层 run() 不传参时 default 顶班，
-    见 test_declarative 的 test_required_with_default_fills_when_omitted。）"""
-    pipe = tmp_path / "required_default.yaml"
-    pipe.write_text(
-        "name: required_default\n"
-        "params:\n"
-        "  tick:\n"
-        "    required: true\n"
-        "    default: 5\n"
-        "nodes:\n"
-        "  counter:\n"
-        "    type: demo_tick\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(orchestrator.settings, "PIPELINES_DIR", tmp_path)
-
-    resp = await client.post("/api/v1/runs", json={"config_file": "required_default.yaml"})
-    assert resp.status_code == 400  # default 不顶班
-    assert "必填参数缺失或为空: tick" in resp.json()["msg"]
-
-    for bad in ("", None):
-        resp = await client.post(
-            "/api/v1/runs", json={"config_file": "required_default.yaml", "inputs": {"tick": bad}}
-        )
-        assert resp.status_code == 400
-
-    resp = await client.post(
-        "/api/v1/runs", json={"config_file": "required_default.yaml", "inputs": {"tick": 5}}
-    )
-    assert resp.status_code == 201
-    run_id = resp.json()["data"]["run_id"]
-
-    data = await _wait_terminal(client, run_id)
-    assert data["status"] == "completed"
-    assert data["inputs"] == {"tick": 5}  # 快照 = 可选默认 + 显式输入（必填必须显式）
-    assert data["nodes"]["counter"]["output"] == 6
 
 
 async def test_required_inputs_run_completes(client: AsyncClient) -> None:

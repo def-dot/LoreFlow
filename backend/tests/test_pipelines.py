@@ -40,50 +40,6 @@ async def test_pipelines_list(client: AsyncClient) -> None:
     assert params_08["content"]["multiline"] is True and params_08["title"]["multiline"] is False
 
 
-async def test_pipeline_detail_human(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/pipelines/06_human_conditional.yaml")
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert set(data) == {
-        "filename", "name", "description", "node_count", "mermaid", "source", "nodes", "params",
-    }
-    assert data["name"] == "按需审核"
-    assert data["mermaid"].startswith("graph TD")
-    # 节点名做主行、注册表类型键+label 以小字附后（[?] 是 condition 标记）
-    assert 'fetch["fetch<br/><i>cfg_fetch · 抓取原始数据</i>"]' in data["mermaid"]
-    assert 'review["review<br/><i>人工审核 [?]</i>"]' in data["mermaid"]
-    assert "name: 按需审核" in data["source"]
-
-    nodes = {n["name"]: n for n in data["nodes"]}
-    fetch = nodes["fetch"]
-    assert fetch["type"] == "cfg_fetch"
-    assert fetch["type_label"] == "抓取原始数据"
-    assert fetch["type_description"]
-
-    review = nodes["review"]
-    assert review["type"] == "human"
-    assert review["type_label"] == "人工审核"
-    assert review["type_description"] == "请审核合并结果。"
-    assert review["condition"] == "demo_needs_review"
-    # 声明式审核视图原文直通：{key: {label}}（未声明 → None = 全量上下文）
-    assert review["review"] == {"merge": {"label": "合并结果"}}
-
-    report = nodes["report"]
-    assert report["depends_on"] == ["merge"]  # 不依赖 review：审核被跳过时照常执行
-
-
-async def test_pipeline_detail_loop(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/pipelines/11_loop_iteration.yaml")
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert 'batch["batch<br/><i>循环</i>"]' in data["mermaid"]
-    batch = {n["name"]: n for n in data["nodes"]}["batch"]
-    assert batch["type"] == "loop"
-    assert batch["type_label"] == "循环"
-    assert batch["condition"] == "demo_keep_iterating"
-    assert batch["type_description"] == "循环体 1 个节点，上限 5 轮"
-
-
 async def test_pipeline_detail_retry(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/pipelines/03_retry_successed.yaml")
     assert resp.status_code == 200
@@ -124,7 +80,7 @@ async def test_pipeline_traversal_404(client: AsyncClient) -> None:
 async def test_list_skips_broken_yaml(monkeypatch, tmp_path) -> None:
     """单个坏文件不影响列表：跳过并继续枚举其余文件。"""
     good = tmp_path / "good.yaml"
-    good.write_text("name: good\nnodes:\n  a:\n    type: cfg_fetch\n", encoding="utf-8")
+    good.write_text("name: good\nnodes:\n  a:\n    type: test_fetch\n", encoding="utf-8")
     broken = tmp_path / "broken.yaml"
     broken.write_text("nodes: [unclosed", encoding="utf-8")
     monkeypatch.setattr(pipeline_service.settings, "PIPELINES_DIR", tmp_path)

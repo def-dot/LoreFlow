@@ -31,12 +31,17 @@ def registered() -> Any:
         REGISTRY.pop(name, None)
 
 
-async def test_load_dag_from_dict_runs() -> None:
+async def test_load_dag_from_dict_runs(registered: Any) -> None:
+    async def clean(ctx: dict[str, Any]) -> str:
+        return str(ctx["fetch"]["body"]).strip()
+
+    registered("clean", clean)
+
     config = {
         "name": "cfg_demo",
         "nodes": {
-            "fetch": {"type": "cfg_fetch"},
-            "clean": {"type": "cfg_clean", "depends_on": ["fetch"]},
+            "fetch": {"type": "test_fetch"},
+            "clean": {"type": "clean", "depends_on": ["fetch"]},
         },
     }
     dag = load_dag(config)
@@ -51,7 +56,7 @@ async def test_load_dag_with_human_node() -> None:
 
     config = {
         "nodes": {
-            "data": {"type": "cfg_fetch"},
+            "data": {"type": "test_fetch"},
             "review": {"type": "human", "depends_on": ["data"], "prompt": "check it"},
         },
     }
@@ -71,7 +76,7 @@ async def test_load_dag_human_with_condition() -> None:
     config = {
         "inputs": {"approved": {"default": False}},
         "nodes": {
-            "data": {"type": "cfg_fetch"},
+            "data": {"type": "test_fetch"},
             "review": {"type": "human", "depends_on": ["data"], "condition": "$approved == true"},
         },
     }
@@ -104,12 +109,12 @@ async def test_load_dag_loop(registered: Any) -> None:
 
 def test_registry_only_lookup() -> None:
     # type 只能引用注册表中的名字，没有 functions 参数可传
-    dag = load_dag({"nodes": {"a": {"type": "cfg_fetch"}}})
+    dag = load_dag({"nodes": {"a": {"type": "test_fetch"}}})
     assert "a" in dag.nodes
 
     # 点路径不是注册名字，同样被拒绝
     with pytest.raises(ValueError, match="未注册"):
-        load_dag({"nodes": {"b": {"type": "app.registry.demo.cfg_fetch"}}})
+        load_dag({"nodes": {"b": {"type": "app.registry.demo.test_fetch"}}})
 
 
 def test_parse_retry_forms() -> None:
@@ -137,26 +142,26 @@ def test_validation_errors() -> None:
     with pytest.raises(ValueError, match="不支持的字段"):
         load_dag({"nodes": {"a": {"kind": "human"}}})  # kind 已废除，只有 type
     with pytest.raises(ValueError, match="不支持的字段"):
-        load_dag({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}})
+        load_dag({"nodes": {"a": {"type": "test_fetch", "bogus": 1}}})
     with pytest.raises(ValueError, match="需要 'type'"):
         load_dag({"nodes": {"a": {}}})
     with pytest.raises(ValueError, match="类型函数 'no_such_fn' 未注册"):
         load_dag({"nodes": {"a": {"type": "no_such_fn"}}})
     with pytest.raises(ValueError, match="不在 DAG 中"):
-        load_dag({"nodes": {"a": {"type": "cfg_fetch", "depends_on": ["ghost"]}}})
+        load_dag({"nodes": {"a": {"type": "test_fetch", "depends_on": ["ghost"]}}})
     with pytest.raises(ValueError, match="循环依赖"):
         load_dag(
             {
                 "nodes": {
-                    "a": {"type": "cfg_fetch", "depends_on": ["b"]},
-                    "b": {"type": "cfg_fetch", "depends_on": ["a"]},
+                    "a": {"type": "test_fetch", "depends_on": ["b"]},
+                    "b": {"type": "test_fetch", "depends_on": ["a"]},
                 }
             }
         )
     with pytest.raises(ValueError, match="非空的 'body'"):
         load_dag({"nodes": {"l": {"type": "loop", "condition": "$x"}}})
     with pytest.raises(ValueError, match="需要 'condition'"):
-        load_dag({"nodes": {"l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}}}})
+        load_dag({"nodes": {"l": {"type": "loop", "body": {"t": {"type": "test_fetch"}}}}})
     with pytest.raises(ValueError, match="必须提供 approver"):
         load_dag({"nodes": {"r": {"type": "human"}}})
     with pytest.raises(ValueError, match="必须是 dict"):
@@ -166,7 +171,7 @@ def test_validation_errors() -> None:
 def test_load_dag_from_yaml(tmp_path) -> None:
     p = tmp_path / "pipeline.yaml"
     p.write_text(
-        "name: tiny\nnodes:\n  fetch:\n    type: cfg_fetch\n    retry: 2\n",
+        "name: tiny\nnodes:\n  fetch:\n    type: test_fetch\n    retry: 2\n",
         encoding="utf-8",
     )
     dag = load_dag(str(p))
@@ -299,7 +304,7 @@ def test_input_keys_clash_node_names_rejected() -> None:
     with pytest.raises(ValueError, match="参数键与节点名冲突"):
         load_dag(
             {
-                "nodes": {"only": {"type": "cfg_fetch"}},
+                "nodes": {"only": {"type": "test_fetch"}},
                 "inputs": {"only": {"required": True}},
             }
         )
@@ -319,7 +324,7 @@ def test_params_rich_form() -> None:
         "limit": {"default": 5},  # 可选、无 label → 展示层 label 退化为键名
         "body": {"required": True, "multiline": True},  # 多行文本（前端 textarea）
     }
-    dag = load_dag({"nodes": {"only": {"type": "cfg_fetch"}}, "inputs": params})
+    dag = load_dag({"nodes": {"only": {"type": "test_fetch"}}, "inputs": params})
     assert dag.params == params  # 声明原样保留
     assert dag.default_inputs == {"topic": "默认主题", "limit": 5}
     assert dag.required_inputs == ["query", "body"]
@@ -396,7 +401,7 @@ def test_review_declaration_not_validated() -> None:
     """review 卡片声明不校验内容与来源（运行期兜底：字段取不到显示「未提供」）。"""
     # 拼错键 / 参数键 / 上游节点名 / 协议键——载入期一律放行
     assert validate_config({"inputs": {"title": {}}, "nodes": {
-        "work": {"type": "cfg_fetch"},
+        "work": {"type": "test_fetch"},
         "gate": {"type": "human", "depends_on": ["work"],
                  "inputs": {"_review": {"title": "标题", "work": "产出", "ttile": "拼错", "approve": "协议键"}}},
     }}) == []
@@ -410,8 +415,8 @@ def test_review_declaration_not_validated() -> None:
 def test_validate_nodes_accepts() -> None:
     """validate_nodes 接受合法的节点配置"""
     # node 类型节点
-    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch"}}}) == []
-    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": []}}}) == []
+    assert validate_nodes({"nodes": {"a": {"type": "test_fetch"}}}) == []
+    assert validate_nodes({"nodes": {"a": {"type": "test_fetch", "depends_on": []}}}) == []
 
     # human 类型节点
     assert validate_nodes({"nodes": {"a": {"type": "human", "prompt": "审核"}}}) == []
@@ -425,7 +430,7 @@ def test_validate_nodes_accepts() -> None:
 def test_validate_nodes_accepts_loop() -> None:
     """loop 节点的 condition 是表达式（iteration 在循环谓词视图可用）"""
     assert validate_nodes({
-        "nodes": {"a": {"type": "loop", "body": {"b": {"type": "cfg_fetch"}}, "condition": "$iteration < 3"}}
+        "nodes": {"a": {"type": "loop", "body": {"b": {"type": "test_fetch"}}, "condition": "$iteration < 3"}}
     }) == []
 
 
@@ -452,8 +457,8 @@ def test_validate_nodes_rejects() -> None:
     ]
 
     # 不支持的字段
-    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "bogus": 1}}}) == [
-        "节点 'a'（cfg_fetch）: 不支持的字段 ['bogus']"
+    assert validate_nodes({"nodes": {"a": {"type": "test_fetch", "bogus": 1}}}) == [
+        "节点 'a'（test_fetch）: 不支持的字段 ['bogus']"
     ]
 
     # node 类型缺少 type
@@ -467,15 +472,15 @@ def test_validate_nodes_rejects() -> None:
     ]
 
     # depends_on 类型错误 / 依赖缺失 / 循环依赖（已并入 validate_nodes）
-    assert validate_nodes({"nodes": {"a": {"type": "cfg_fetch", "depends_on": "fetch"}}}) == [
+    assert validate_nodes({"nodes": {"a": {"type": "test_fetch", "depends_on": "fetch"}}}) == [
         "节点 'a': depends_on 必须是字符串列表"
     ]
     assert validate_nodes(
-        {"nodes": {"a": {"type": "cfg_fetch", "depends_on": ["ghost"]}}}
+        {"nodes": {"a": {"type": "test_fetch", "depends_on": ["ghost"]}}}
     ) == ["节点 'a' 依赖的 'ghost' 不在 DAG 中"]
     assert validate_nodes({"nodes": {
-        "a": {"type": "cfg_fetch", "depends_on": ["b"]},
-        "b": {"type": "cfg_fetch", "depends_on": ["a"]},
+        "a": {"type": "test_fetch", "depends_on": ["b"]},
+        "b": {"type": "test_fetch", "depends_on": ["a"]},
     }}) == ["检测到循环依赖: a → b"]
 
     # loop 类型缺少 body / condition、condition 引用未知键（condition 校验先于 body 检查）
@@ -483,7 +488,7 @@ def test_validate_nodes_rejects() -> None:
         "节点 'a': condition 引用的 'x' 不是参数键或上游依赖节点",
         "循环节点 'a': 需要非空的 'body' 映射",
     ]
-    assert validate_nodes({"nodes": {"a": {"type": "loop", "body": {"b": {"type": "cfg_fetch"}}}}}) == [
+    assert validate_nodes({"nodes": {"a": {"type": "loop", "body": {"b": {"type": "test_fetch"}}}}}) == [
         "循环节点 'a': 需要 'condition' 表达式"
     ]
 
@@ -499,8 +504,8 @@ def test_validate_nodes_collects_errors_across_nodes() -> None:
     errors = validate_nodes({
         "nodes": {
             "a": {},                                   # 缺 type
-            "b": {"type": "cfg_fetch", "bogus": 1},    # 不支持的字段
-            "c": {"type": "cfg_fetch"},                # 合法
+            "b": {"type": "test_fetch", "bogus": 1},    # 不支持的字段
+            "c": {"type": "test_fetch"},                # 合法
         }
     })
     assert len(errors) == 2
@@ -516,12 +521,12 @@ def test_validate_nodes_collects_errors_across_nodes() -> None:
 def test_validate_config_accepts() -> None:
     """validate_config 接受合法的完整配置（结构检查要求至少一个节点）"""
     # 只有 nodes（params 可选）
-    assert validate_config({"nodes": {"a": {"type": "cfg_fetch"}}}) == []
+    assert validate_config({"nodes": {"a": {"type": "test_fetch"}}}) == []
 
     # 完整配置
     assert validate_config({
         "inputs": {"query": {"required": True}},
-        "nodes": {"fetch": {"type": "cfg_fetch"}},
+        "nodes": {"fetch": {"type": "test_fetch"}},
     }) == []
 
 
@@ -536,13 +541,13 @@ def test_validate_config_rejects_bad_structure() -> None:
 
     # 依赖缺失
     assert validate_config(
-        {"nodes": {"a": {"type": "cfg_fetch", "depends_on": ["ghost"]}}}
+        {"nodes": {"a": {"type": "test_fetch", "depends_on": ["ghost"]}}}
     ) == ["节点 'a' 依赖的 'ghost' 不在 DAG 中"]
 
     # 循环依赖
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "depends_on": ["b"]},
-        "b": {"type": "cfg_fetch", "depends_on": ["a"]},
+        "a": {"type": "test_fetch", "depends_on": ["b"]},
+        "b": {"type": "test_fetch", "depends_on": ["a"]},
     }}) == ["检测到循环依赖: a → b"]
 
     # loop body 是独立命名空间：body 内依赖缺失带循环节点名前缀
@@ -550,7 +555,7 @@ def test_validate_config_rejects_bad_structure() -> None:
         "l": {
             "type": "loop",
             "condition": "$iteration < 3",
-            "body": {"b": {"type": "cfg_fetch", "depends_on": ["ghost"]}},
+            "body": {"b": {"type": "test_fetch", "depends_on": ["ghost"]}},
         },
     }}) == ["循环节点 'l': 节点 'b' 依赖的 'ghost' 不在 DAG 中"]
 
@@ -559,7 +564,7 @@ def test_validate_config_rejects_param_node_clash() -> None:
     """validate_config 拒绝参数键与节点名冲突"""
     config = {
         "inputs": {"query": {"required": True}},
-        "nodes": {"query": {"type": "cfg_fetch"}},
+        "nodes": {"query": {"type": "test_fetch"}},
     }
     assert validate_config(config) == ["输入参数键与节点名冲突: query"]
 
@@ -597,7 +602,7 @@ def test_validate_config_collects_all_errors() -> None:
         },
         "nodes": {
             "a": {},                                 # 缺 type
-            "b": {"type": "cfg_fetch", "bogus": 1},  # 不支持的字段
+            "b": {"type": "test_fetch", "bogus": 1},  # 不支持的字段
         },
     }
     errors = validate_config(config)
@@ -662,7 +667,7 @@ def test_review_unknown_key_not_checked() -> None:
         {
             "inputs": {},
             "nodes": {
-                "work": {"type": "cfg_fetch"},
+                "work": {"type": "test_fetch"},
                 "gate": {
                     "type": "human", "depends_on": ["work"],
                     "inputs": {"_review": {"ttile": "标题"}},
@@ -704,8 +709,8 @@ async def test_condition_expression_runs_and_skips() -> None:
     config = {
         "inputs": {"pick": {}},
         "nodes": {
-            "a": {"type": "cfg_fetch", "condition": "$pick == a"},
-            "b": {"type": "cfg_fetch", "condition": "$pick == b"},
+            "a": {"type": "test_fetch", "condition": "$pick == a"},
+            "b": {"type": "test_fetch", "condition": "$pick == b"},
         },
     }
     results = await load_dag(config).run(inputs={"pick": "a"})
@@ -721,9 +726,9 @@ async def test_condition_expression_on_wired_key() -> None:
     """条件在接线视图上求值：$node.field 点路径取字段后直接比较。"""
     config = {
         "nodes": {
-            "data": {"type": "cfg_fetch"},
+            "data": {"type": "test_fetch"},
             "gold": {
-                "type": "cfg_fetch",
+                "type": "test_fetch",
                 "depends_on": ["data"],
                 "condition": "$tier == gold",
                 "inputs": {"tier": "$data.title"},  # title = "DAG Flow v0.1" ≠ gold
@@ -738,9 +743,9 @@ async def test_condition_expression_dollar_reference() -> None:
     """$ 引用前缀：condition 直接引用上游输出字段，无需 inputs 接线中转。"""
     config = {
         "nodes": {
-            "data": {"type": "cfg_fetch"},
+            "data": {"type": "test_fetch"},
             "gold": {
-                "type": "cfg_fetch",
+                "type": "test_fetch",
                 "depends_on": ["data"],
                 "condition": "$data.title == 'DAG Flow v0.1'",
             },
@@ -758,8 +763,8 @@ async def test_condition_boolean_constants() -> None:
     """condition: true/false 布尔常量 —— false 当开关恒跳过，true 恒执行。"""
     config = {
         "nodes": {
-            "off": {"type": "cfg_fetch", "condition": False},
-            "on": {"type": "cfg_fetch", "condition": True},
+            "off": {"type": "test_fetch", "condition": False},
+            "on": {"type": "test_fetch", "condition": True},
         },
     }
     assert validate_config(config) == []
@@ -769,10 +774,10 @@ async def test_condition_boolean_constants() -> None:
 
     # loop 的 condition: false 合法（body 一轮不跑）；condition: null 等同未声明
     assert validate_config({"nodes": {
-        "l": {"type": "loop", "body": {"t": {"type": "cfg_fetch"}}, "condition": False},
+        "l": {"type": "loop", "body": {"t": {"type": "test_fetch"}}, "condition": False},
     }}) == []
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": None},
+        "a": {"type": "test_fetch", "condition": None},
     }}) == []
 
 
@@ -781,11 +786,11 @@ def test_condition_refs_not_validated() -> None:
     loop 注入的 iteration 等运行期键无法静态枚举。"""
     # 未声明依赖的节点 / 拼错的键都不报（运行期取 None 恒 False 跳过）
     assert validate_config({"nodes": {
-        "甲": {"type": "cfg_fetch"},
-        "乙": {"type": "cfg_fetch", "condition": "$甲.title == x"},  # 未声明依赖
+        "甲": {"type": "test_fetch"},
+        "乙": {"type": "test_fetch", "condition": "$甲.title == x"},  # 未声明依赖
     }}) == []
     assert validate_config({"nodes": {
-        "甲": {"type": "cfg_fetch", "condition": "$iteration < 3"},
+        "甲": {"type": "test_fetch", "condition": "$iteration < 3"},
     }, "inputs": {}}) == []
 
 
@@ -851,7 +856,7 @@ def test_condition_expression_validation() -> None:
     """表达式的载入期校验：类型、语法、引用键存在性、loop 的 iteration。"""
     # 旧的单键映射形式（函数调用）不再支持
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": {"t_eq": "a"}},
+        "a": {"type": "test_fetch", "condition": {"t_eq": "a"}},
     }}) == [
         "节点 'a': condition 必须是非空表达式字符串"
         "（如 $intent == chat / $merge / not $flag），实际是 {'t_eq': 'a'}"
@@ -859,7 +864,7 @@ def test_condition_expression_validation() -> None:
 
     # 语法错误：缺键
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": "== chat"},
+        "a": {"type": "test_fetch", "condition": "== chat"},
     }}) == [
         "节点 'a': 条件表达式 '== chat' 无法解析"
         "（写法如 ``$intent == chat``、``$merge``、``not $flag``）"
@@ -868,15 +873,15 @@ def test_condition_expression_validation() -> None:
     # 引用键不做来源校验（求值在接线视图上，loop 注入键无法静态枚举）：
     # 拼错 / $ 前缀 / iteration 均不报，运行期取 None 恒 False 跳过
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": "$pick2 == a"},
+        "a": {"type": "test_fetch", "condition": "$pick2 == a"},
     }}) == []
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": "$typo.field == x"},
+        "a": {"type": "test_fetch", "condition": "$typo.field == x"},
     }}) == []
     assert validate_config({"nodes": {
-        "a": {"type": "cfg_fetch", "condition": "$iteration < 3"},
+        "a": {"type": "test_fetch", "condition": "$iteration < 3"},
     }}) == []
     assert validate_config({"nodes": {
-        "data": {"type": "cfg_fetch"},
-        "gold": {"type": "cfg_fetch", "depends_on": ["data"], "condition": "$data.title == gold"},
+        "data": {"type": "test_fetch"},
+        "gold": {"type": "test_fetch", "depends_on": ["data"], "condition": "$data.title == gold"},
     }}) == []

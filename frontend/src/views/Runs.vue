@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
-import type { ParamSpec } from '@/api/pipelines'
+import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
 import { toParamSpecs } from '@/api/pipelines'
 import { uploadFile, type UploadOut } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
@@ -19,6 +19,8 @@ const configFile = ref('pipeline.yaml')
 const runName = ref('')
 // 防止「新建运行」按钮重复点击导致并发创建
 const creating = ref(false)
+// 新建运行 drawer
+const createDrawerOpen = ref(false)
 
 // ---------------------------------------------------------------------------
 // 运行时输入参数：流水线声明了 params 时按声明渲染表单（label/说明/默认值
@@ -330,12 +332,16 @@ async function startNewRun() {
   try {
     await store.startNewRun(configFile.value, submitInputs.value.value, runName.value || undefined)
     runName.value = '' // 创建成功后清空
+    createDrawerOpen.value = false
     startDetailPolling()
     startRunsPolling()
   } finally {
     creating.value = false
   }
 }
+
+// drawer 里的新建运行按钮调用
+const handleCreateRun = startNewRun
 
 async function decide(node: string, ok: boolean, reason: string | null, values: Record<string, string> | null) {
   await store.decide(node, ok, reason, values)
@@ -407,139 +413,11 @@ onUnmounted(() => {
 <template>
   <div class="page">
     <header class="page-head">
-      <el-select
-        v-model="configFile"
-        :disabled="!pipelinesStore.pipelines.length"
-        placeholder="选择流水线"
-        style="width: 260px"
-      >
-        <el-option
-          v-for="p in pipelinesStore.pipelines"
-          :key="p.filename"
-          :value="p.filename"
-          :label="p.name"
-        />
-      </el-select>
-      <el-input
-        v-model="runName"
-        placeholder="任务名称（可选）"
-        style="width: 180px"
-        clearable
-      />
-      <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">
-        👁 预览
-      </el-button>
-      <!-- 参数入口按声明出现：流水线声明了参数（任意形式）才有「参数」可言，
-           未声明的流水线不显示空选项（弹层内容只会是「无需填写」） -->
-      <el-popover v-if="paramSpecs.length" placement="bottom-start" :width="380" trigger="click">
-        <template #reference>
-          <el-button plain :disabled="!pipelinesStore.pipelines.length">
-            ⚙ 参数<template v-if="submitInputs.count"> · {{ submitInputs.count }}</template>
-          </el-button>
-        </template>
-        <div class="inputs-pop">
-          <div class="inputs-pop-head">
-            <span class="inputs-pop-title">运行时输入参数</span>
-            <el-button
-              v-if="paramSpecs.length"
-              size="small"
-              text
-              type="primary"
-              @click="jsonMode = !jsonMode"
-            >
-              {{ jsonMode ? '表单模式' : 'JSON 模式' }}
-            </el-button>
-          </div>
-
-          <!-- 表单模式：按流水线声明逐参数渲染，label/说明/默认值/必填直接可见 -->
-          <template v-if="formMode">
-            <div v-for="spec in paramSpecs" :key="spec.name" class="param-field">
-              <div class="param-label">
-                {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
-                <span v-else class="param-optional">可选</span>
-              </div>
-              <!-- file 参数：选文件即上传到服务端，提交时用返回的 {id, filename} 引用 -->
-              <div v-if="spec.file" class="param-file">
-                <label
-                  class="param-file-button"
-                  :class="{ disabled: uploading[spec.name] }"
-                >
-                  {{ uploading[spec.name] ? '上传中…' : '选择文件' }}
-                  <input
-                    type="file"
-                    accept=".txt,.md,.markdown,text/plain"
-                    :disabled="uploading[spec.name]"
-                    @change="onFilePicked(spec, $event)"
-                  />
-                </label>
-                <template v-if="fileNames[spec.name]">
-                  <span class="param-file-name" :title="fileNames[spec.name]">
-                    {{ fileNames[spec.name] }}
-                  </span>
-                  <button class="param-file-clear" title="移除文件" @click="clearFile(spec)">✕</button>
-                </template>
-                <span v-else class="param-file-empty">{{ uploading[spec.name] ? '上传中，请稍候…' : '未选择文件' }}</span>
-              </div>
-              <el-input
-                v-else
-                v-model="paramValues[spec.name]"
-                :type="spec.multiline ? 'textarea' : 'text'"
-                :autosize="spec.multiline ? { minRows: 3, maxRows: 8 } : undefined"
-                size="small"
-                spellcheck="false"
-                :placeholder="paramPlaceholder(spec)"
-              />
-              <div v-if="spec.description" class="param-desc">{{ spec.description }}</div>
-            </div>
-            <div v-if="missingRequired.length" class="inputs-error">
-              缺少必填参数: {{ missingRequiredText }}，「新建运行」将被拦截
-            </div>
-            <div v-else-if="submitInputs.count" class="inputs-hint">
-              已填 {{ submitInputs.count }} 个参数（默认值已预填），随「新建运行」提交；留空字段用默认值或不传。
-            </div>
-            <div v-else class="inputs-hint">留空字段用 YAML 默认值或不传；未填必填项将被拦截。</div>
-          </template>
-
-          <!-- JSON 模式：原始 JSON 文本（声明流水线的高级逃生口） -->
-          <template v-else>
-            <div v-if="requiredInputs.length" class="inputs-required">
-              <span>必填：</span>
-              <el-tag
-                v-for="k in requiredInputs"
-                :key="k"
-                size="small"
-                :type="missingRequired.includes(k) ? 'danger' : 'success'"
-                disable-transitions
-              >
-                {{ keyLabel(k) }}{{ missingRequired.includes(k) ? ' *' : ' ✓' }}
-              </el-tag>
-            </div>
-            <el-input
-              v-model="inputsText"
-              type="textarea"
-              :rows="5"
-              spellcheck="false"
-              :placeholder="jsonPlaceholder"
-            />
-            <div v-if="parsedInputs.error" class="inputs-error">{{ parsedInputs.error }}</div>
-            <div v-else-if="missingRequired.length" class="inputs-error">
-              缺少必填参数: {{ missingRequiredText }}，「新建运行」将被拦截
-            </div>
-            <div v-else-if="parsedInputs.count" class="inputs-hint">
-              已解析 {{ parsedInputs.count }} 个参数，随「新建运行」提交；同名键优先于 YAML 默认 inputs。
-            </div>
-            <div v-else class="inputs-hint">留空则只用流水线 YAML 的默认 inputs。</div>
-            <template v-if="hasDefaults">
-              <div class="inputs-defaults-head">
-                <span class="inputs-defaults-title">默认参数（YAML，只读）</span>
-                <el-button size="small" text type="primary" @click="fillDefaults">填入默认值</el-button>
-              </div>
-              <pre class="inputs-defaults">{{ defaultsJson }}</pre>
-            </template>
-          </template>
-        </div>
-      </el-popover>
-      <el-button type="primary" :loading="creating" @click="startNewRun">▶ 新建运行</el-button>
+      <div class="head-info">
+        <h1>运行</h1>
+        <span class="muted">查看和管理流水线运行</span>
+      </div>
+      <el-button type="primary" @click="createDrawerOpen = true">▶ 新建运行</el-button>
     </header>
     <main class="layout">
       <RunList
@@ -585,6 +463,148 @@ onUnmounted(() => {
         <PipelineDetailPanel v-else-if="previewDetail" :detail="previewDetail" />
       </div>
     </el-drawer>
+
+    <!-- 新建运行 drawer -->
+    <el-drawer v-model="createDrawerOpen" title="新建运行" size="min(480px, 90vw)">
+      <div class="create-form">
+        <div class="create-field">
+          <label class="create-label">流水线</label>
+          <div class="create-select-group">
+            <el-select
+              v-model="configFile"
+              :disabled="!pipelinesStore.pipelines.length"
+              placeholder="选择流水线"
+              style="flex: 1"
+            >
+              <el-option
+                v-for="p in pipelinesStore.pipelines"
+                :key="p.filename"
+                :value="p.filename"
+                :label="p.name"
+              />
+            </el-select>
+            <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configFile)">
+              👁 预览
+            </el-button>
+          </div>
+        </div>
+        <div class="create-field">
+          <label class="create-label">任务名称</label>
+          <el-input
+            v-model="runName"
+            placeholder="可选，不填则用工作流名称"
+            clearable
+          />
+        </div>
+        <div v-if="paramSpecs.length" class="create-field">
+          <label class="create-label">运行时参数</label>
+          <div class="inputs-pop">
+            <div class="inputs-pop-head">
+              <span class="inputs-pop-title">参数配置</span>
+              <el-button
+                v-if="paramSpecs.length"
+                size="small"
+                text
+                type="primary"
+                @click="jsonMode = !jsonMode"
+              >
+                {{ jsonMode ? '表单模式' : 'JSON 模式' }}
+              </el-button>
+            </div>
+
+            <!-- 表单模式 -->
+            <template v-if="formMode">
+              <div v-for="spec in paramSpecs" :key="spec.name" class="param-field">
+                <div class="param-label">
+                  {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
+                  <span v-else class="param-optional">可选</span>
+                </div>
+                <div v-if="spec.file" class="param-file">
+                  <label
+                    class="param-file-button"
+                    :class="{ disabled: uploading[spec.name] }"
+                  >
+                    {{ uploading[spec.name] ? '上传中…' : '选择文件' }}
+                    <input
+                      type="file"
+                      accept=".txt,.md,.markdown,text/plain"
+                      :disabled="uploading[spec.name]"
+                      @change="onFilePicked(spec, $event)"
+                    />
+                  </label>
+                  <template v-if="fileNames[spec.name]">
+                    <span class="param-file-name" :title="fileNames[spec.name]">
+                      {{ fileNames[spec.name] }}
+                    </span>
+                    <button class="param-file-clear" title="移除文件" @click="clearFile(spec)">✕</button>
+                  </template>
+                  <span v-else class="param-file-empty">{{ uploading[spec.name] ? '上传中，请稍候…' : '未选择文件' }}</span>
+                </div>
+                <el-input
+                  v-else
+                  v-model="paramValues[spec.name]"
+                  :type="spec.multiline ? 'textarea' : 'text'"
+                  :autosize="spec.multiline ? { minRows: 3, maxRows: 8 } : undefined"
+                  size="small"
+                  spellcheck="false"
+                  :placeholder="paramPlaceholder(spec)"
+                />
+                <div v-if="spec.description" class="param-desc">{{ spec.description }}</div>
+              </div>
+              <div v-if="missingRequired.length" class="inputs-error">
+                缺少必填参数: {{ missingRequiredText }}
+              </div>
+              <div v-else-if="submitInputs.count" class="inputs-hint">
+                已填 {{ submitInputs.count }} 个参数
+              </div>
+              <div v-else class="inputs-hint">留空字段用默认值或不传</div>
+            </template>
+
+            <!-- JSON 模式 -->
+            <template v-else>
+              <div v-if="requiredInputs.length" class="inputs-required">
+                <span>必填：</span>
+                <el-tag
+                  v-for="k in requiredInputs"
+                  :key="k"
+                  size="small"
+                  :type="missingRequired.includes(k) ? 'danger' : 'success'"
+                  disable-transitions
+                >
+                  {{ keyLabel(k) }}{{ missingRequired.includes(k) ? ' *' : ' ✓' }}
+                </el-tag>
+              </div>
+              <el-input
+                v-model="inputsText"
+                type="textarea"
+                :rows="5"
+                spellcheck="false"
+                :placeholder="jsonPlaceholder"
+              />
+              <div v-if="parsedInputs.error" class="inputs-error">{{ parsedInputs.error }}</div>
+              <div v-else-if="missingRequired.length" class="inputs-error">
+                缺少必填参数: {{ missingRequiredText }}
+              </div>
+              <div v-else-if="parsedInputs.count" class="inputs-hint">
+                已解析 {{ parsedInputs.count }} 个参数
+              </div>
+              <div v-else class="inputs-hint">留空则只用 YAML 默认 inputs</div>
+              <template v-if="hasDefaults">
+                <div class="inputs-defaults-head">
+                  <span class="inputs-defaults-title">默认参数（YAML）</span>
+                  <el-button size="small" text type="primary" @click="fillDefaults">填入默认值</el-button>
+                </div>
+                <pre class="inputs-defaults">{{ defaultsJson }}</pre>
+              </template>
+            </template>
+          </div>
+        </div>
+        <div class="create-actions">
+          <el-button @click="createDrawerOpen = false">取消</el-button>
+          <el-button type="primary" :loading="creating" @click="handleCreateRun">▶ 新建运行</el-button>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -600,11 +620,45 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
+  justify-content: space-between;
+}
+.head-info {
+  display: flex;
+  align-items: baseline;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .page-head h1 {
   font-size: 18px;
   margin: 0;
+}
+/* 新建运行 drawer 表单 */
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.create-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.create-select-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
 /* 参数 popover：等宽字体输入与页面 mono 语言一致（详情 meta、文件名） */
 .inputs-pop :deep(textarea) {

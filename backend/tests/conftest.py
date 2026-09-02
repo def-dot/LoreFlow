@@ -23,6 +23,15 @@ from app.registry.plugins import load_plugins
 
 load_plugins()  # 模拟 lifespan 的插件加载（ASGITransport 不运行 lifespan）
 
+# 测试专用节点：返回固定值（替代已删除的 cfg_fetch）
+from app.registry.core import node_type
+
+
+@node_type(label="测试数据源", description="返回固定的测试数据")
+async def test_fetch(ctx: dict) -> dict[str, str]:
+    return {"title": "test title", "body": "test body"}
+
+
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_db.sqlite"
 test_engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)

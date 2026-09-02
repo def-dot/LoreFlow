@@ -137,30 +137,6 @@ def test_sync_broken_new_file_registers_nothing(monkeypatch, tmp_path, isolated_
     assert info.node_names == [] and "boom" in info.error
 
 
-def test_plugin_importing_builtin_node(monkeypatch, tmp_path, isolated_registry) -> None:
-    """插件 import 内置节点复用：不算本插件注册，重载不误删内置。"""
-    _write(
-        tmp_path / "wrap.py",
-        "from app.registry.demo import cfg_fetch\n\n"
-        '@node_type(label="包装", description="复用内置抓取")\n'
-        "async def wrap_probe(ctx: dict) -> str:\n"
-        '    data = await cfg_fetch(ctx)\n'
-        '    return data["title"]\n',
-    )
-    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
-    plugin_loader.load_plugins()
-
-    assert "cfg_fetch" in REGISTRY
-    assert REGISTRY["wrap_probe"].label == "包装"
-    info = next(p for p in plugin_loader.list_plugins() if p.module == f"{tmp_path.name}.wrap")
-    assert info.node_names == ["wrap_probe"]  # cfg_fetch 不属于本插件
-
-    plugin_loader.load_plugins()  # 重载后内置节点必须仍在
-
-    assert "cfg_fetch" in REGISTRY
-    assert REGISTRY["wrap_probe"].label == "包装"
-
-
 def test_sync_updates_existing_file(monkeypatch, tmp_path, isolated_registry) -> None:
     """同一文件内容变化：新增节点注册进来，删除节点消失。"""
     path = tmp_path / "a.py"

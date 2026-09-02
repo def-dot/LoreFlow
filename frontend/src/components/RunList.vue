@@ -60,7 +60,7 @@ function fmtFull(iso: string | null): string {
   <aside class="run-side">
     <div class="head">
       <h2>运行记录</h2>
-      <span class="muted total">{{ total }}</span>
+      <span class="muted total">共 {{ total }} 条</span>
     </div>
     <div class="filters">
       <el-select

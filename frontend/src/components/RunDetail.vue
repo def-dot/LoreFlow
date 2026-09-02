@@ -85,7 +85,7 @@ async function openDefinition() {
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
         {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
-      <span class="run-pipeline" :title="detail.pipeline" @click="openDefinition">📋 {{ detail.pipeline }}</span>
+      <span class="run-workflow" @click="openDefinition">⚙️ 查看流水线配置</span>
       <el-popover v-if="inputCount" placement="bottom-start" :width="360" trigger="click">
         <template #reference>
           <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
@@ -96,7 +96,7 @@ async function openDefinition() {
     </div>
     <div class="panels">
       <section class="panel">
-        <h2>流水线</h2>
+        <h2>流水线（{{ detail.pipeline }}）</h2>
         <MermaidDiagram :source="detail.mermaid" :statuses="nodeStatuses" />
       </section>
       <section class="panel">
@@ -148,7 +148,7 @@ async function openDefinition() {
   color: var(--ink-3);
 }
 /* 工作流名称（可点击） */
-.run-pipeline {
+.run-workflow {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-3);
@@ -162,7 +162,7 @@ async function openDefinition() {
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s;
 }
-.run-pipeline:hover {
+.run-workflow:hover {
   border-color: var(--ink-3);
   color: var(--ink);
 }

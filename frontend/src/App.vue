@@ -21,7 +21,7 @@ const runsStore = useRunsStore()
         </svg>
         LoreFlow
       </span>
-      <router-link to="/" class="nav-link" :class="{ active: route.name === 'runs' }">运行记录</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: route.name === 'runs' }">运行</router-link>
       <router-link to="/plugins" class="nav-link" :class="{ active: route.name === 'plugins' }">节点类型</router-link>
     </nav>
     <router-view />
