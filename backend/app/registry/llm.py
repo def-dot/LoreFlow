@@ -38,6 +38,13 @@ async def _ollama_chat(
         "读取 ctx['prompt'] 调用本地 Ollama 生成回答；"
         "若 ctx['context'] 非空则附在问题后一并交给 LLM"
     ),
+    input_schema={
+        "prompt": {"type": "string", "required": True, "description": "用户提示词"},
+        "system": {"type": "string", "required": False, "description": "系统提示词"},
+        "context": {"type": "string", "required": False, "description": "参考资料（附在问题前）"},
+        "model": {"type": "string", "required": False, "description": "模型名（默认取配置）"},
+    },
+    output_schema={"type": "string", "description": "LLM 回复文本"},
 )
 async def llm_chat(ctx: dict[str, Any]) -> str:
     prompt = ctx.get("prompt")
@@ -58,6 +65,18 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
 @node_type(
     label="意图识别",
     description="通用意图分类器",
+    input_schema={
+        "prompt": {"type": "string", "required": True, "description": "待分类文本"},
+        "classify_system": {"type": "string", "required": False, "description": "分类系统提示词（覆盖默认）"},
+        "classify_labels": {"type": "list", "required": False, "description": "可选标签列表（覆盖默认）"},
+    },
+    output_schema={
+        "type": "object",
+        "fields": {
+            "intent": {"type": "string", "description": "分类标签"},
+            "raw": {"type": "string", "description": "LLM 原始输出"},
+        },
+    },
 )
 async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     prompt = ctx.get("prompt")
@@ -91,6 +110,11 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
 @node_type(
     label="知识库问答",
     description="结合检索片段回答 ctx['prompt']；检索结果 chunks ← rag_retrieve 类节点（YAML inputs 接线，未接线或上游被跳过视为未检索到）",
+    input_schema={
+        "prompt": {"type": "string", "required": True, "description": "用户问题"},
+        "chunks": {"type": "list", "required": False, "description": "检索片段列表（来自 rag_retrieve）"},
+    },
+    output_schema={"type": "string", "description": "基于知识库的回答"},
 )
 async def llm_rag_reply(ctx: dict[str, Any]) -> str:
     prompt = ctx.get("prompt")
@@ -119,6 +143,8 @@ async def llm_rag_reply(ctx: dict[str, Any]) -> str:
         "_upstream，无需 inputs 接线），输出 {branch, answer}（branch = 支路节点名）；"
         "未执行的支路输出为 null"
     ),
+    input_schema={},
+    output_schema={"type": "any", "description": "第一个非空上游输出（原样透传）"},
 )
 async def final_answer(ctx: dict[str, Any]) -> dict[str, Any]:
     upstream = ctx.get("_upstream")

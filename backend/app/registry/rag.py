@@ -12,7 +12,21 @@ from app.registry.core import node_type
 from app.utils import files
 
 
-@node_type(label="加载文档", description="按 document（{id, filename}）引用读取上传文件，输出 {doc_id, title, text}")
+@node_type(
+    label="加载文档",
+    description="按 document（{id, filename}）引用读取上传文件，输出 {doc_id, title, text}",
+    input_schema={
+        "document": {"type": "object", "required": True, "description": "上传文档引用"},
+    },
+    output_schema={
+        "type": "object",
+        "fields": {
+            "doc_id": {"type": "string", "description": "文档标识（文件名去扩展名）"},
+            "title": {"type": "string", "description": "文档标题"},
+            "text": {"type": "string", "description": "文档正文"},
+        },
+    },
+)
 async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
     """从上传目录读取 params 声明的 document 文件
     """
@@ -32,25 +46,50 @@ async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"doc_id": stem, "title": stem, "text": text}
 
 
-@node_type(label="切块", description="按空行把正文切成语义段；输入 document ← rag_load 节点（YAML inputs 接线）")
+@node_type(
+    label="切块",
+    description="按空行把正文切成语义段；输入 text ← rag_load.text（YAML inputs 接线）",
+    input_schema={
+        "text": {"type": "string", "required": True, "description": "文档正文"},
+    },
+    output_schema={"type": "list", "item": {"type": "string", "description": "一个文本段"}},
+)
 async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
-    document = ctx.get("document")
-    if not isinstance(document, dict):
-        raise ValueError("上游缺少文档输出：inputs 需接线 document ← rag_load 节点（或该上游被条件跳过）")
-    return [p.strip() for p in document["text"].split("\r\n\r\n") if p.strip()]
+    text = ctx.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("缺少文档正文：inputs 需接线 text ← $load.text（或上游被条件跳过）")
+    return [p.strip() for p in text.split("\r\n\r\n") if p.strip()]
 
 
-@node_type(label="向量化", description="为每个 chunk 生成 8 维确定性向量；输入 document、chunks ← rag_load/rag_chunk 节点（YAML inputs 接线）")
+@node_type(
+    label="向量化",
+    description="为每个 chunk 生成 8 维确定性向量；输入 doc_id、chunks ← rag_load/rag_chunk 节点（YAML inputs 接线）",
+    input_schema={
+        "doc_id": {"type": "string", "required": True, "description": "文档标识"},
+        "chunks": {"type": "list", "required": True, "description": "文本段列表"},
+    },
+    output_schema={
+        "type": "list",
+        "item": {
+            "type": "object",
+            "fields": {
+                "chunk_id": {"type": "string", "description": "块标识"},
+                "text": {"type": "string", "description": "块文本"},
+                "vector": {"type": "list", "description": "8 维浮点向量"},
+            },
+        },
+    },
+)
 async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
-    document = ctx.get("document")
-    if not isinstance(document, dict):
-        raise ValueError("上游缺少文档输出：inputs 需接线 document ← rag_load 节点（或该上游被条件跳过）")
+    doc_id = ctx.get("doc_id")
+    if not isinstance(doc_id, str) or not doc_id.strip():
+        raise ValueError("缺少文档标识：inputs 需接线 doc_id ← $load.doc_id（或上游被条件跳过）")
     chunks = ctx.get("chunks")
     if not isinstance(chunks, list):
-        raise ValueError("上游缺少切块输出：inputs 需接线 chunks ← rag_chunk 节点（或该上游被条件跳过）")
+        raise ValueError("缺少切块输出：inputs 需接线 chunks ← $chunk（或上游被条件跳过）")
     return [
         {
-            "chunk_id": f"{document['doc_id']}-c{i}",
+            "chunk_id": f"{doc_id}-c{i}",
             "text": chunk,
             "vector": [float(sum(ord(c) * (d + 1) for c in chunk) % 997) for d in range(8)],
         }
@@ -58,16 +97,24 @@ async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-@node_type(label="写入向量库", description="批量 upsert 向量，返回写入统计；输入 document、embeds ← rag_load/rag_embed 节点（YAML inputs 接线）")
+@node_type(
+    label="写入向量库",
+    description="批量 upsert 向量，返回写入统计；输入 doc_id、embeds ← rag_load/rag_embed 节点（YAML inputs 接线）",
+    input_schema={
+        "doc_id": {"type": "string", "required": True, "description": "文档标识"},
+        "embeds": {"type": "list", "required": True, "description": "向量列表"},
+    },
+    output_schema={"type": "string", "description": "写入统计文本"},
+)
 async def rag_upsert(ctx: dict[str, Any]) -> str:
     await asyncio.sleep(0.05)
-    document = ctx.get("document")
-    if not isinstance(document, dict):
-        raise ValueError("上游缺少文档输出：inputs 需接线 document ← rag_load 节点（或该上游被条件跳过）")
+    doc_id = ctx.get("doc_id")
+    if not isinstance(doc_id, str) or not doc_id.strip():
+        raise ValueError("缺少文档标识：inputs 需接线 doc_id ← $load.doc_id（或上游被条件跳过）")
     embeds = ctx.get("embeds")
     if not isinstance(embeds, list):
-        raise ValueError("上游缺少向量输出：inputs 需接线 embeds ← rag_embed 节点（或该上游被条件跳过）")
-    return f"upserted {len(embeds)} chunks from {document['doc_id']}"
+        raise ValueError("缺少向量输出：inputs 需接线 embeds ← $embed（或上游被条件跳过）")
+    return f"upserted {len(embeds)} chunks from {doc_id}"
 
 
 # 模拟知识库：与 rag_retrieve 的演示数据同源（真实实现应为向量库检索，见 rag_embed/rag_upsert）
@@ -90,7 +137,23 @@ _MOCK_KB: list[dict[str, Any]] = [
 ]
 
 
-@node_type(label="知识库检索", description="模拟 RAG 检索：按提示词关键词打分返回设定片段")
+@node_type(
+    label="知识库检索",
+    description="模拟 RAG 检索：按提示词关键词打分返回设定片段",
+    input_schema={
+        "prompt": {"type": "string", "required": False, "description": "检索关键词（默认空串）"},
+    },
+    output_schema={
+        "type": "list",
+        "item": {
+            "type": "object",
+            "fields": {
+                "source": {"type": "string", "description": "片段来源标识"},
+                "text": {"type": "string", "description": "片段正文"},
+            },
+        },
+    },
+)
 async def rag_retrieve(ctx: dict[str, Any]) -> list[dict[str, str]]:
     await asyncio.sleep(0.05)
     prompt = str(ctx.get("prompt", ""))

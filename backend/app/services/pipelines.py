@@ -62,7 +62,6 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
     return "，".join(parts)
 
 
-
 def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
     """根据 pipeline name 获取 YAML 原文和解析后的 config。不存在 404。"""
     path = PIPELINES_DIR / (name + ".yaml")
@@ -81,7 +80,6 @@ def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
     if not isinstance(config, dict):
         raise ValueError("顶层必须是映射(dict)")
     return raw, config
-
 
 
 def detail_from_config(
@@ -104,6 +102,8 @@ def detail_from_config(
             "type_label": node_type.label if node_type else None,
             "description": spec.get("description"),
             "type_description": node_type.description if node_type else None,
+            "type_input_schema": node_type.input_schema if node_type else None,
+            "type_output_schema": node_type.output_schema if node_type else None,
             "depends_on": list(spec.get("depends_on") or []),
             "inputs": spec.get("inputs"),
             "retry": _retry_summary(parse_retry(spec.get("retry"))),

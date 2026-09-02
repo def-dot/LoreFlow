@@ -1,5 +1,7 @@
 """Pydantic 响应模型 — /api/v1/node-types"""
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -9,6 +11,8 @@ class NodeTypeOut(BaseModel):
     name: str
     label: str
     description: str
+    input_schema: dict[str, dict[str, Any]] | None = None
+    output_schema: dict[str, Any] | None = None
 
 
 class NodeTypeListResponse(BaseModel):

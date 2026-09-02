@@ -17,16 +17,16 @@ nodes:
     type: rag_chunk
     label: 切块
     depends_on: [load]
-    inputs: {document: $load}
+    inputs: {text: $load.text}
 
   embed:
     type: rag_embed
     label: 向量化
     depends_on: [chunk]
-    inputs: {document: $load, chunks: $chunk}
+    inputs: {doc_id: $load.doc_id, chunks: $chunk}
 
   upsert:
     type: rag_upsert
     label: 写入向量库
     depends_on: [embed]
-    inputs: {document: $load, embeds: $embed}
+    inputs: {doc_id: $load.doc_id, embeds: $embed}

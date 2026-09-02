@@ -65,6 +65,20 @@ async def _fetch_page(url: str) -> dict[str, str]:
 @node_type(
     label="网络搜索",
     description="根据 ctx['prompt'] 调用 Tavily 搜索，返回 [{title, url, snippet}]",
+    input_schema={
+        "prompt": {"type": "string", "required": False, "description": "搜索关键词"},
+    },
+    output_schema={
+        "type": "list",
+        "item": {
+            "type": "object",
+            "fields": {
+                "title": {"type": "string", "description": "搜索结果标题"},
+                "url": {"type": "string", "description": "结果链接"},
+                "snippet": {"type": "string", "description": "摘要"},
+            },
+        },
+    },
 )
 async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
     prompt = ctx.get("prompt")
@@ -94,6 +108,10 @@ async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
 @node_type(
     label="搜索结果格式化",
     description="读取 ctx['search']（web_search 输出），格式化为可读文本写入 ctx['context']",
+    input_schema={
+        "search": {"type": "list", "required": True, "description": "搜索结果列表"},
+    },
+    output_schema={"type": "string", "description": "格式化后的可读文本"},
 )
 async def search_format(ctx: dict[str, Any]) -> str:
     results = ctx.get("search")
@@ -109,6 +127,19 @@ async def search_format(ctx: dict[str, Any]) -> str:
 @node_type(
     label="抓取链接正文",
     description="从 ctx['prompt'] 提取 http(s) 链接并发抓取网页正文",
+    input_schema={
+        "prompt": {"type": "string", "required": False, "description": "含 URL 的文本"},
+    },
+    output_schema={
+        "type": "list",
+        "item": {
+            "type": "object",
+            "fields": {
+                "url": {"type": "string", "description": "页面链接"},
+                "text": {"type": "string", "description": "页面正文"},
+            },
+        },
+    },
 )
 async def web_fetch(ctx: dict[str, Any]) -> list[dict[str, str]]:
     prompt = ctx.get("prompt")

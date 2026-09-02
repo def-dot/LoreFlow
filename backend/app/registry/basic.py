@@ -5,7 +5,14 @@ from typing import Any
 from app.registry.core import node_type
 
 
-@node_type(label="发布", description="发布内容")
+@node_type(
+    label="发布",
+    description="发布内容",
+    input_schema={
+        "title": {"type": "string", "required": False, "description": "发布标题"},
+    },
+    output_schema={"type": "string", "description": ""},
+)
 async def cfg_publish(ctx: dict[str, Any]) -> str:
     return f"Published: {ctx.get('title') or '(untitled)'}"
 
@@ -13,7 +20,12 @@ async def cfg_publish(ctx: dict[str, Any]) -> str:
 _svc_calls = 0
 
 
-@node_type(label="调用外部API", description="外部 API 偶发超时")
+@node_type(
+    label="调用外部API",
+    description="外部 API 偶发超时",
+    input_schema={},
+    output_schema={"type": "string", "description": ""},
+)
 async def svc_external_api(ctx: dict[str, Any]) -> str:
     global _svc_calls
     _svc_calls += 1
@@ -23,6 +35,11 @@ async def svc_external_api(ctx: dict[str, Any]) -> str:
     return "外部 API 调用成功（第 3 次尝试）"
 
 
-@node_type(label="外部服务不可用", description="外部 API 持续故障")
+@node_type(
+    label="外部服务不可用",
+    description="外部 API 持续故障",
+    input_schema={},
+    output_schema={"type": "string", "description": ""},
+)
 async def svc_unavailable(ctx: dict[str, Any]) -> str:
     raise TimeoutError("模拟外部 API 宕机 — 服务持续不可用")

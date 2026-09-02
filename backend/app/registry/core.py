@@ -16,7 +16,7 @@ human 结构化类型在 :mod:`app.registry.human` 注册（协议函数本体�
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -31,6 +31,8 @@ class NodeType:
     func: Callable[..., Any]
     label: str
     description: str
+    input_schema: dict[str, dict[str, Any]] | None = field(default=None, hash=False)
+    output_schema: dict[str, Any] | None = field(default=None, hash=False)
 
 
 #: 全局注册表：name -> NodeType。导入 functions.py 时由 @node 自动填充，
@@ -42,6 +44,8 @@ def node_type(
     label: str,
     description: str,
     name: str | None = None,
+    input_schema: dict[str, dict[str, Any]] | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """节点类型注册装饰器：在函数定义处声明元信息并注册为 NodeType。
 
@@ -56,6 +60,8 @@ def node_type(
             func=func,
             label=label,
             description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
         )
         # 1. 自动注册到全局注册表
         REGISTRY[type_name] = nt

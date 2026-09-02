@@ -1,4 +1,5 @@
 import { api } from './request'
+import type { SchemaField } from './nodeTypes'
 
 export interface PipelineNodeInfo {
   name: string
@@ -7,6 +8,8 @@ export interface PipelineNodeInfo {
   type_label: string | null
   description: string | null
   type_description: string | null
+  type_input_schema: Record<string, SchemaField> | null
+  type_output_schema: SchemaField | null
   depends_on: string[]
   inputs: Record<string, unknown> | null
   retry: string | null

@@ -114,8 +114,14 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
 def _validate_wiring(
     wiring: Any,
     available_refs: set[str],
+    input_schema: dict[str, dict[str, Any]] | None = None,
+    param_keys: set[str] | None = None,
 ) -> list[str]:
     """inputs 声明校验：必须是映射，``$`` 引用根键 ∈ 参数键 ∪ 上游闭包。
+
+    当 ``input_schema`` 存在时，额外校验：
+    - wiring 中的 local key 必须是 input_schema 声明的参数
+    - input_schema 中 required=true 且不在 param_keys 中的 key 必须出现在 wiring 中
     """
     if not isinstance(wiring, dict):
         return ["inputs 必须是「本地键: 来源键或字面量」的映射"]
@@ -127,6 +133,23 @@ def _validate_wiring(
         root = source[1:].partition(".")[0]  # $node.field → node
         if root not in available_refs:
             errors.append(f"inputs.{local} 引用的 {root!r} 不是参数键或上游依赖节点")
+
+    # 对照 input_schema 校验 wiring key
+    if input_schema is not None:
+        schema_keys = set(input_schema)
+        extra = set(wiring) - schema_keys
+        if extra:
+            errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
+
+        # required key 既不在 wiring 中、也不在顶层参数中 → 缺失
+        if param_keys is not None:
+            for key, spec in input_schema.items():
+                if not isinstance(spec, dict) or not spec.get("required"):
+                    continue
+                if key in wiring or key in param_keys:
+                    continue
+                errors.append(f"inputs 缺少必填参数 {key!r}")
+
     return errors
 
 
@@ -263,10 +286,16 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
         refs = _ancestors(name, edges) | set(params)
 
         wiring = spec.get("inputs")
+
+        # 取节点类型的 input_schema（如有）用于接线 key 校验
+        node_input_schema = None
+        if type_key and type_key in REGISTRY:
+            node_input_schema = REGISTRY[type_key].input_schema
+
         if wiring:
             errors.extend(
                 f"节点 {name!r}: {msg}"
-                for msg in _validate_wiring(wiring, refs)
+                for msg in _validate_wiring(wiring, refs, node_input_schema, set(params))
             )
         refs = refs | set(wiring) if isinstance(wiring, dict) else refs
 

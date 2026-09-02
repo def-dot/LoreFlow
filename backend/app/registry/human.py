@@ -10,7 +10,28 @@ from app.registry.core import node_type
 logger = logging.getLogger(__name__)
 
 
-@node_type(label="人工审核", description="人工审核节点，暂停等待审批", name="human")
+@node_type(
+    label="人工审核",
+    description="人工审核节点，暂停等待审批",
+    name="human",
+    input_schema={
+        "_review": {"type": "object", "required": False, "description": "审核卡片声明 {$键: 标签文本}"},
+    },
+    output_schema={
+        "type": "object",
+        "fields": {
+            "payload": {"type": "object", "description": "审核载荷（提交给审核人的数据）"},
+            "decision": {
+                "type": "object",
+                "description": "审核决策",
+                "fields": {
+                    "approve": {"type": "boolean", "description": "是否通过"},
+                    "reason": {"type": "string", "description": "拒绝原因（可选）"},
+                },
+            },
+        },
+    },
+)
 async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。
     """

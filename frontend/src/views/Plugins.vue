@@ -1,18 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
+import { listNodeTypes, type NodeTypeInfo, type SchemaField } from '@/api/nodeTypes'
 import { listPlugins, type PluginInfo } from '@/api/plugins'
 
 const plugins = ref<PluginInfo[]>([])
 const nodeTypes = ref<NodeTypeInfo[]>([])
 const loading = ref(false)
-// 后端未启动时置位，页头给提示，可点「刷新」重试
 const loadError = ref(false)
 
-// name → NodeTypeInfo 快速查找，供插件节点展示 label / description
 const nodeTypeMap = computed(() => new Map(nodeTypes.value.map((t) => [t.name, t])))
 
-// 内置节点 = 全量类型目录减去插件注册的名字（框架自带，只读展示）
 const builtinNodes = computed(() => {
   const pluginNames = new Set(plugins.value.flatMap((p) => p.node_names))
   return nodeTypes.value.filter((t) => !pluginNames.has(t.name))
@@ -37,6 +34,18 @@ function fmtTime(iso: string) {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+/** 递归渲染 schema 字段的类型标签 */
+function schemaTypeLabel(field: SchemaField): string {
+  if (field.type === 'list' && field.item) {
+    return `list[${schemaTypeLabel(field.item)}]`
+  }
+  if (field.type === 'object' && field.fields) {
+    const keys = Object.keys(field.fields)
+    return keys.length ? `{${keys.join(', ')}}` : 'object'
+  }
+  return field.type
+}
+
 onMounted(fetchAll)
 </script>
 
@@ -57,20 +66,56 @@ onMounted(fetchAll)
           <h2>内置节点类型</h2>
           <span class="muted">框架自带，只读 · {{ builtinNodes.length }}</span>
         </div>
-        <div v-loading="loading" class="tag-cloud">
-          <el-tooltip
-            v-for="t in builtinNodes"
-            :key="t.name"
-            :content="`${t.label} — ${t.description}`"
-            placement="top"
-          >
-            <el-tag
-              :class="['node-tag', t.name === 'human' ? 'node-tag--human' : 'node-tag--func']"
-              disable-transitions
-            >
-              {{ t.name }} · {{ t.label }}
-            </el-tag>
-          </el-tooltip>
+        <div v-loading="loading" class="node-grid">
+          <div v-for="t in builtinNodes" :key="t.name" class="node-card">
+            <div class="node-card-head">
+              <el-tag
+                :class="['node-tag', t.name === 'human' ? 'node-tag--human' : 'node-tag--func']"
+                disable-transitions
+              >
+                {{ t.name }}
+              </el-tag>
+              <span class="node-label">{{ t.label }}</span>
+            </div>
+            <p class="node-desc">{{ t.description }}</p>
+
+            <!-- 输入参数 -->
+            <div v-if="t.input_schema && Object.keys(t.input_schema).length" class="schema-section">
+              <h3 class="schema-title">输入</h3>
+              <div v-for="(field, key) in t.input_schema" :key="key" class="schema-field">
+                <span class="field-key">{{ key }}</span>
+                <span class="field-type">{{ schemaTypeLabel(field) }}</span>
+                <span v-if="field.required" class="field-required">*</span>
+                <span v-if="field.description" class="field-desc">{{ field.description }}</span>
+              </div>
+            </div>
+            <div v-else class="schema-section">
+              <h3 class="schema-title">输入</h3>
+              <span class="schema-empty">无声明</span>
+            </div>
+
+            <!-- 输出结构 -->
+            <div v-if="t.output_schema" class="schema-section">
+              <h3 class="schema-title">输出</h3>
+              <div v-if="t.output_schema.fields" class="schema-fields-block">
+                <div v-for="(field, key) in t.output_schema.fields" :key="key" class="schema-field">
+                  <span class="field-key">{{ key }}</span>
+                  <span class="field-type">{{ schemaTypeLabel(field) }}</span>
+                  <span v-if="field.description" class="field-desc">{{ field.description }}</span>
+                </div>
+              </div>
+              <div v-else-if="t.output_schema.item" class="schema-fields-block">
+                <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
+                <span v-if="t.output_schema.item.fields" class="field-desc">
+                  → {{ Object.keys(t.output_schema.item.fields).join(', ') }}
+                </span>
+              </div>
+              <div v-else>
+                <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
+                <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
+              </div>
+            </div>
+          </div>
           <span v-if="!builtinNodes.length && !loading" class="muted">—</span>
         </div>
       </section>
@@ -125,8 +170,6 @@ onMounted(fetchAll)
   align-items: center;
   gap: 14px;
 }
-/* 标题+描述成组占满左侧，把刷新按钮推到右端；baseline 对齐让
- * 描述与大标题同一文字基线，窄屏 flex-wrap 时描述整条换行到标题下方 */
 .head-info {
   flex: 1;
   min-width: 0;
@@ -165,18 +208,95 @@ onMounted(fetchAll)
   font-size: 13px;
   margin: 0;
 }
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+
+/* 节点卡片网格 */
+.node-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
   min-height: 26px;
 }
-/* 节点名是 YAML 里的 type: 键，用等宽呈现代码身份 */
+.node-card {
+  background: rgba(10, 14, 27, 0.6);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.node-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.node-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.node-desc {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* schema 区块 */
+.schema-section {
+  margin-top: 6px;
+}
+.schema-title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.schema-empty {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.schema-fields-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.schema-field {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.field-key {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+.field-type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+.field-required {
+  color: #ff8f8a;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.field-desc {
+  font-size: 11px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 节点标签 */
 .node-tag {
-  margin: 2px 4px 2px 0;
   font-family: var(--font-mono);
 }
-/* 三种节点类型颜色 */
 .node-tag--func {
   --el-tag-bg-color: rgba(64, 158, 255, 0.15);
   --el-tag-border-color: rgba(64, 158, 255, 0.4);

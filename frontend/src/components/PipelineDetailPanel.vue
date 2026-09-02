@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { PipelineDetail } from '@/api/pipelines'
 import { toParamSpecs } from '@/api/pipelines'
+import type { SchemaField } from '@/api/nodeTypes'
 import MermaidDiagram from './MermaidDiagram.vue'
 
 const props = defineProps<{ detail: PipelineDetail }>()
@@ -25,6 +26,34 @@ const hasParams = computed(() => paramSpecs.value.length > 0)
 function defaultPreview(value: unknown): string {
   const text = JSON.stringify(value) ?? ''
   return text.length > 40 ? `${text.slice(0, 40)}…` : text
+}
+
+// schema 格式化
+function schemaTypeLabel(field: SchemaField): string {
+  if (field.type === 'list' && field.item) return `list[${schemaTypeLabel(field.item)}]`
+  if (field.type === 'object' && field.fields) {
+    const keys = Object.keys(field.fields)
+    return keys.length ? `{${keys.join(', ')}}` : 'object'
+  }
+  return field.type
+}
+
+function inputsSummary(inputs: Record<string, unknown> | null): string {
+  if (!inputs || !Object.keys(inputs).length) return '—'
+  return Object.entries(inputs)
+    .map(([k, v]) => (typeof v === 'string' && v.startsWith('$') ? `${k}: ${v}` : k))
+    .join(', ')
+}
+
+function inputSchemaTooltip(schema: Record<string, SchemaField> | null): string {
+  if (!schema || !Object.keys(schema).length) return ''
+  return Object.entries(schema)
+    .map(([k, v]) => {
+      const req = v.required ? ' (必填)' : ''
+      const desc = v.description ? ` — ${v.description}` : ''
+      return `${k}: ${schemaTypeLabel(v)}${req}${desc}`
+    })
+    .join('\n')
 }
 </script>
 
@@ -73,6 +102,27 @@ function defaultPreview(value: unknown): string {
                 </el-tooltip>
               </template>
               <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="输入" min-width="160">
+            <template #default="{ row }">
+              <el-tooltip
+                v-if="row.type_input_schema && Object.keys(row.type_input_schema).length"
+                :content="inputSchemaTooltip(row.type_input_schema)"
+                placement="top"
+                :show-after="300"
+              >
+                <span class="wiring-text">{{ inputsSummary(row.inputs) }}</span>
+              </el-tooltip>
+              <span v-else class="wiring-text">{{ inputsSummary(row.inputs) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="输出" min-width="120">
+            <template #default="{ row }">
+              <span v-if="row.type_output_schema" class="wiring-text">
+                {{ schemaTypeLabel(row.type_output_schema) }}
+              </span>
+              <span v-else class="wiring-text">—</span>
             </template>
           </el-table-column>
           <el-table-column label="依赖" min-width="90">
@@ -124,6 +174,12 @@ function defaultPreview(value: unknown): string {
 .type-label {
   font-size: 12px;
   font-weight: 500;
+}
+/* 接线/输出文本 */
+.wiring-text {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
 }
 /* 节点类型描述问号图标 */
 .type-help {
