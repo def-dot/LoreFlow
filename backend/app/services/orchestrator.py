@@ -91,7 +91,11 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
     outcome = RunStatus.COMPLETED
     error: str | None = None
     try:
-        await dag.run(inputs=record.inputs, resume=record.nodes)
+        results = await dag.run(inputs=record.inputs, resume=record.nodes)
+        output_result = results.get("_output")
+        if output_result is not None:
+            record.nodes["_output"] = output_result.to_dict()
+            await runs.save_nodes(record)
     except asyncio.CancelledError:
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"

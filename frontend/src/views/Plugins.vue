@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
 import { listPlugins, type PluginInfo } from '@/api/plugins'
-import SchemaFields from '@/components/SchemaFields.vue'
+import NodeTypeCard from '@/components/NodeTypeCard.vue'
 
 const plugins = ref<PluginInfo[]>([])
 const nodeTypes = ref<NodeTypeInfo[]>([])
@@ -66,47 +66,10 @@ onMounted(fetchAll)
         <span class="muted">框架自带，只读 · {{ builtinNodes.length }}</span>
       </div>
       <div v-loading="loading">
-        <div v-for="(g, gi) in builtinGroups" :key="g.name" class="group-section">
+        <div v-for="g in builtinGroups" :key="g.name" class="group-section">
           <h3 class="group-title">{{ g.name }}</h3>
           <div class="node-grid">
-            <div v-for="t in g.items" :key="t.name" class="node-card">
-              <div class="node-card-head">
-                <el-tag
-                  class="node-tag node-tag--func"
-                  disable-transitions
-                >
-                  {{ t.name }}
-                </el-tag>
-                <span class="node-label">{{ t.label }}</span>
-              </div>
-              <p class="node-desc">{{ t.description }}</p>
-
-              <!-- 输入参数 -->
-              <div v-if="t.input_schema && Object.keys(t.input_schema).length" class="schema-section">
-                <h3 class="schema-title">输入</h3>
-                <SchemaFields :fields="t.input_schema" />
-              </div>
-              <div v-else class="schema-section">
-                <h3 class="schema-title">输入</h3>
-                <span class="schema-empty">无</span>
-              </div>
-
-              <!-- 输出结构 -->
-              <div v-if="t.output_schema" class="schema-section">
-                <h3 class="schema-title">输出</h3>
-                <SchemaFields v-if="t.output_schema.fields" :fields="t.output_schema.fields" />
-                <template v-else-if="t.output_schema.type === 'list' && t.output_schema.item?.fields">
-                  <div class="schema-field">
-                    <span class="field-type">list[object]</span>
-                  </div>
-                  <SchemaFields :fields="t.output_schema.item.fields" :depth="1" />
-                </template>
-                <div v-else class="schema-field">
-                  <span class="field-type">{{ t.output_schema.type === 'list' && t.output_schema.item ? `list[${t.output_schema.item.type}]` : t.output_schema.type }}</span>
-                  <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
-                </div>
-              </div>
-            </div>
+            <NodeTypeCard v-for="t in g.items" :key="t.name" :node="t" variant="func" />
           </div>
         </div>
         <span v-if="!builtinNodes.length && !loading" class="muted">—</span>
@@ -114,44 +77,36 @@ onMounted(fetchAll)
 
       <!-- 插件 -->
       <div class="section-divider"></div>
-      <section class="card">
-        <div class="card-head">
-          <h2>插件</h2>
-          <span class="muted">默认目录 custom_plugins/</span>
+      <div class="section-head">
+        <h2>插件</h2>
+        <span class="muted">默认目录 custom_plugins/</span>
+      </div>
+      <div v-loading="loading" class="plugin-list">
+        <div v-for="p in plugins" :key="p.filename" class="plugin-card">
+          <div class="plugin-head">
+            <div class="plugin-info">
+              <span class="plugin-filename">{{ p.filename }}</span>
+              <span class="plugin-module muted">{{ p.module }}</span>
+              <span class="plugin-time muted">{{ fmtTime(p.loaded_at) }}</span>
+            </div>
+            <el-tag v-if="p.error" type="danger" size="small" disable-transitions>{{ p.error }}</el-tag>
+            <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
+          </div>
+          <div v-if="p.node_names.length" class="plugin-nodes">
+            <template v-for="name in p.node_names" :key="name">
+              <NodeTypeCard v-if="nodeTypeMap.get(name)" :node="nodeTypeMap.get(name)!" variant="plugin" />
+              <div v-else class="node-card-missing">
+                <el-tag class="node-tag--plugin" size="small" disable-transitions>{{ name }}</el-tag>
+                <span class="muted">未找到类型信息</span>
+              </div>
+            </template>
+          </div>
+          <div v-else class="plugin-nodes">
+            <span class="muted">无注册节点类型</span>
+          </div>
         </div>
-        <el-table v-loading="loading" :data="plugins" empty-text="暂无已加载插件">
-          <el-table-column prop="filename" label="文件" min-width="160" />
-          <el-table-column prop="module" label="模块" min-width="200" />
-          <el-table-column label="注册节点类型" min-width="280">
-            <template #default="{ row }">
-              <el-tooltip
-                v-for="name in row.node_names"
-                :key="name"
-                :content="nodeTypeMap.get(name)?.description || name"
-                placement="top"
-              >
-                <el-tag
-                  class="node-tag node-tag--plugin"
-                  size="small"
-                  disable-transitions
-                >
-                  {{ name }} · {{ nodeTypeMap.get(name)?.label || '' }}
-                </el-tag>
-              </el-tooltip>
-              <span v-if="!row.node_names.length" class="muted">—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="加载时间" min-width="170">
-            <template #default="{ row }">{{ fmtTime(row.loaded_at) }}</template>
-          </el-table-column>
-          <el-table-column label="状态" min-width="220">
-            <template #default="{ row }">
-              <el-tag v-if="row.error" type="danger" size="small" disable-transitions>{{ row.error }}</el-tag>
-              <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
-      </section>
+        <span v-if="!plugins.length && !loading" class="muted">暂无已加载插件</span>
+      </div>
     </main>
   </div>
 </template>
@@ -186,17 +141,6 @@ onMounted(fetchAll)
   flex-direction: column;
   gap: 18px;
 }
-.card {
-  background: rgba(16, 21, 42, 0.72);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px 18px;
-}
-.card-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 .section-head {
   display: flex;
   align-items: center;
@@ -224,10 +168,6 @@ onMounted(fetchAll)
   font-weight: 600;
   color: var(--ink);
 }
-.card-head h2 {
-  font-size: 13px;
-  margin: 0;
-}
 
 /* 节点卡片网格 */
 .node-grid {
@@ -236,78 +176,55 @@ onMounted(fetchAll)
   gap: 12px;
   min-height: 26px;
 }
-.node-card {
-  background: rgba(10, 14, 27, 0.6);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px 14px;
+
+/* 插件卡片 */
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-.node-card-head {
+.plugin-card {
+  background: rgba(16, 21, 42, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.plugin-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 12px;
+  margin-bottom: 12px;
 }
-.node-label {
+.plugin-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.plugin-filename {
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
 }
-.node-desc {
-  margin: 0 0 8px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--ink-3);
+.plugin-module {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
 }
-
-/* schema 区块 */
-.schema-section {
-  margin-top: 6px;
-}
-.schema-title {
-  margin: 0 0 4px;
+.plugin-time {
   font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-2);
-  letter-spacing: 1px;
 }
-.schema-empty {
-  font-size: 11px;
-  color: var(--ink-3);
+.plugin-nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
 }
-.schema-field {
+.node-card-missing {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.field-type {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-3);
-  flex-shrink: 0;
-}
-.field-desc {
-  font-size: 11px;
-  color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 节点标签 */
-.node-tag {
-  font-family: var(--font-mono);
-}
-.node-tag--func {
-  --el-tag-bg-color: rgba(64, 158, 255, 0.15);
-  --el-tag-border-color: rgba(64, 158, 255, 0.4);
-  --el-tag-text-color: #79bbff;
-}
-.node-tag--plugin {
-  --el-tag-bg-color: rgba(103, 194, 58, 0.15);
-  --el-tag-border-color: rgba(103, 194, 58, 0.4);
-  --el-tag-text-color: #67c23a;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
 }
 </style>

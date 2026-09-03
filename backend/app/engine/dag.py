@@ -343,7 +343,9 @@ class DAG:
             resume: 重启恢复用的节点快照（见 DAGExecutor.execute）。
 
         Returns:
-            A dict mapping every node name to its :class:`NodeResult`.
+            映射每个节点名到 :class:`NodeResult`。若声明了 ``output_expr``
+            则额外包含 ``_output`` 键（值为 :class:`NodeResult`，output
+            字段即表达式求值结果）。
 
         Raises:
             ValueError: 结构校验失败，或（声明了 params 时）输入不合法。
@@ -374,12 +376,18 @@ class DAG:
         # ---- output 求值：从 ctx 中按 output_expr 提取最终输出 ----
         if self.output_expr is not None:
             refs = [self.output_expr] if isinstance(self.output_expr, str) else self.output_expr
+            output: Any = None
             for ref in refs:
                 key = ref[1:] if ref.startswith("$") else ref  # $node → node
                 value = ctx.get(key)
                 if value is not None:
-                    ctx["_output"] = value
+                    output = value
                     break
+            results["_output"] = NodeResult(
+                node_name="_output",
+                status=NodeStatus.COMPLETED if output is not None else NodeStatus.SKIPPED,
+                output=output,
+            )
 
         return results
 

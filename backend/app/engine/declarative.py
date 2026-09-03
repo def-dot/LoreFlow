@@ -31,6 +31,7 @@ def load_dag(
         params=config.get("inputs") or {},
         on_event=on_event,
         approver=approver,
+        output_expr=config.get("output"),
     )
 
     for name, spec in config["nodes"].items():

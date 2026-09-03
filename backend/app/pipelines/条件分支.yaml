@@ -1,5 +1,6 @@
 name: 条件分支
 description: 客服分流：闲聊 LLM 直接回答；知识类问题先检索知识库再作答；提示词包含「人工」转人工客服。
+output: [$llm_chat, $rag_answer]
 
 inputs:
   prompt:
@@ -51,8 +52,3 @@ nodes:
     inputs:
       context: $format_chunks
       system: 你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。
-
-  final_answer:
-    type: final_answer
-    label: 最终答复
-    depends_on: [llm_chat, rag_answer]

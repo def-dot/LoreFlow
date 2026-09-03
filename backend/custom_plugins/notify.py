@@ -5,7 +5,16 @@ from email.mime.text import MIMEText
 from app.registry import node_type
 
 
-@node_type(label="发送邮件", description="通过 SMTP 发送邮件")
+@node_type(
+    label="发送邮件",
+    description="通过 SMTP 发送邮件",
+    input_schema={
+        "to": {"type": "string", "required": True, "description": "收件人邮箱"},
+        "subject": {"type": "string", "required": False, "description": "邮件主题"},
+        "body": {"type": "string", "required": False, "description": "邮件正文"},
+    },
+    output_schema={"type": "string", "description": "发送结果"},
+)
 async def send_email(ctx: dict) -> str:
     """动作节点：从 ctx 读取收件人、主题、正文，发送邮件。
 
@@ -40,7 +49,15 @@ async def send_email(ctx: dict) -> str:
     return f"邮件已发送至 {to}"
 
 
-@node_type(label="发送短信", description="通过 HTTP API 发送短信")
+@node_type(
+    label="发送短信",
+    description="通过 HTTP API 发送短信",
+    input_schema={
+        "phone": {"type": "string", "required": True, "description": "手机号"},
+        "content": {"type": "string", "required": False, "description": "短信内容"},
+    },
+    output_schema={"type": "string", "description": "发送结果"},
+)
 async def send_message(ctx: dict) -> str:
     """动作节点：从 ctx 读取手机号和内容，调用短信 API。
 
