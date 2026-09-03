@@ -37,7 +37,7 @@ function fmtTime(iso: string) {
 /** 递归渲染 schema 字段的类型标签 */
 function schemaTypeLabel(field: SchemaField): string {
   if (field.type === 'list' && field.item) {
-    return `list[${schemaTypeLabel(field.item)}]`
+    return `list[${field.item.type}]`
   }
   if (field.type === 'object' && field.fields) {
     const keys = Object.keys(field.fields)
@@ -105,12 +105,20 @@ onMounted(fetchAll)
                 </div>
               </div>
               <div v-else-if="t.output_schema.item" class="schema-fields-block">
-                <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
-                <span v-if="t.output_schema.item.fields" class="field-desc">
-                  → {{ Object.keys(t.output_schema.item.fields).join(', ') }}
-                </span>
+                <template v-if="t.output_schema.item.fields">
+                  <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
+                  <div v-for="(f, k) in t.output_schema.item.fields" :key="k" class="schema-field" style="margin-left: 12px">
+                    <span class="field-key">{{ k }}</span>
+                    <span class="field-type">{{ schemaTypeLabel(f) }}</span>
+                    <span v-if="f.description" class="field-desc">{{ f.description }}</span>
+                  </div>
+                </template>
+                <div v-else class="schema-field">
+                  <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
+                  <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
+                </div>
               </div>
-              <div v-else>
+              <div v-else class="schema-field">
                 <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
                 <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
               </div>

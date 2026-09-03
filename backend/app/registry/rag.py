@@ -14,7 +14,7 @@ from app.utils import files
 
 @node_type(
     label="加载文档",
-    description="按 document（{id, filename}）引用读取上传文件，输出 {doc_id, title, text}",
+    description="读取上传文档内容",
     input_schema={
         "document": {"type": "object", "required": True, "description": "上传文档"},
     },
@@ -51,7 +51,7 @@ async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
     input_schema={
         "text": {"type": "string", "required": True, "description": "文档正文"},
     },
-    output_schema={"type": "list", "item": {"type": "string", "description": "一个文本段"}},
+    output_schema={"type": "list", "item": {"type": "string"}, "description": "文本段"},
 )
 async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
     text = ctx.get("text")
@@ -74,7 +74,7 @@ async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
             "fields": {
                 "chunk_id": {"type": "string", "description": "块标识"},
                 "text": {"type": "string", "description": "块文本"},
-                "vector": {"type": "list", "description": "浮点向量"},
+                "vector": {"type": "list", "item": {"type": "float"}, "description": "浮点向量"},
             },
         },
     },
