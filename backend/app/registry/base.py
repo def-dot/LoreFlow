@@ -67,7 +67,7 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     description="执行 Python 脚本，须给 result 赋值作为输出",
     group=NodeGroup.BASE,
     input_schema=None,
-    output_schema={"type": "any", "description": "脚本中 result 变量的值"},
+    output_schema={"type": "any", "description": "脚本中result变量的值"},
 )
 async def code(ctx: dict[str, Any]) -> Any:
     script = ctx.get("_script")

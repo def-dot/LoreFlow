@@ -104,7 +104,7 @@ onMounted(fetchAll)
               </div>
               <div v-else class="schema-section">
                 <h3 class="schema-title">输入</h3>
-                <span class="schema-empty">无声明</span>
+                <span class="schema-empty">无</span>
               </div>
 
               <!-- 输出结构 -->
