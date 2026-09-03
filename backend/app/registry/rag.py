@@ -103,7 +103,7 @@ async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
         "doc_id": {"type": "string", "required": True, "description": "文档名称"},
         "embeds": {"type": "list", "required": True, "description": "向量列表"},
     },
-    output_schema={"type": "string", "description": "写入统计文本"},
+    output_schema={"type": "string", "description": "成功写库的向量数量统计"},
 )
 async def rag_upsert(ctx: dict[str, Any]) -> str:
     await asyncio.sleep(0.05)
@@ -138,9 +138,9 @@ _MOCK_KB: list[dict[str, Any]] = [
 
 @node_type(
     label="知识库检索",
-    description="模拟 RAG 检索：按提示词关键词打分返回设定片段",
+    description="关键词查询返回片段",
     input_schema={
-        "prompt": {"type": "string", "required": False, "description": "检索关键词（默认空串）"},
+        "prompt": {"type": "string", "required": False, "description": "检索关键词"},
     },
     output_schema={
         "type": "list",
