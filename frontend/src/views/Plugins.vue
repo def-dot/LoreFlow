@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { listNodeTypes, type NodeTypeInfo, type SchemaField } from '@/api/nodeTypes'
+import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
 import { listPlugins, type PluginInfo } from '@/api/plugins'
+import SchemaFields from '@/components/SchemaFields.vue'
 
 const plugins = ref<PluginInfo[]>([])
 const nodeTypes = ref<NodeTypeInfo[]>([])
@@ -44,18 +45,6 @@ function fmtTime(iso: string) {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
-/** 递归渲染 schema 字段的类型标签 */
-function schemaTypeLabel(field: SchemaField): string {
-  if (field.type === 'list' && field.item) {
-    return `list[${field.item.type}]`
-  }
-  if (field.type === 'object' && field.fields) {
-    const keys = Object.keys(field.fields)
-    return keys.length ? `{${keys.join(', ')}}` : 'object'
-  }
-  return field.type
-}
-
 onMounted(fetchAll)
 </script>
 
@@ -95,12 +84,7 @@ onMounted(fetchAll)
               <!-- 输入参数 -->
               <div v-if="t.input_schema && Object.keys(t.input_schema).length" class="schema-section">
                 <h3 class="schema-title">输入</h3>
-                <div v-for="(field, key) in t.input_schema" :key="key" class="schema-field">
-                  <span class="field-key">{{ key }}</span>
-                  <span class="field-type">{{ schemaTypeLabel(field) }}</span>
-                  <span v-if="field.required" class="field-required">*</span>
-                  <span v-if="field.description" class="field-desc">{{ field.description }}</span>
-                </div>
+                <SchemaFields :fields="t.input_schema" />
               </div>
               <div v-else class="schema-section">
                 <h3 class="schema-title">输入</h3>
@@ -110,29 +94,15 @@ onMounted(fetchAll)
               <!-- 输出结构 -->
               <div v-if="t.output_schema" class="schema-section">
                 <h3 class="schema-title">输出</h3>
-                <div v-if="t.output_schema.fields" class="schema-fields-block">
-                  <div v-for="(field, key) in t.output_schema.fields" :key="key" class="schema-field">
-                    <span class="field-key">{{ key }}</span>
-                    <span class="field-type">{{ schemaTypeLabel(field) }}</span>
-                    <span v-if="field.description" class="field-desc">{{ field.description }}</span>
+                <SchemaFields v-if="t.output_schema.fields" :fields="t.output_schema.fields" />
+                <template v-else-if="t.output_schema.type === 'list' && t.output_schema.item?.fields">
+                  <div class="schema-field">
+                    <span class="field-type">list[object]</span>
                   </div>
-                </div>
-                <div v-else-if="t.output_schema.item" class="schema-fields-block">
-                  <template v-if="t.output_schema.item.fields">
-                    <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
-                    <div v-for="(f, k) in t.output_schema.item.fields" :key="k" class="schema-field" style="margin-left: 12px">
-                      <span class="field-key">{{ k }}</span>
-                      <span class="field-type">{{ schemaTypeLabel(f) }}</span>
-                      <span v-if="f.description" class="field-desc">{{ f.description }}</span>
-                    </div>
-                  </template>
-                  <div v-else class="schema-field">
-                    <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
-                    <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
-                  </div>
-                </div>
+                  <SchemaFields :fields="t.output_schema.item.fields" :depth="1" />
+                </template>
                 <div v-else class="schema-field">
-                  <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
+                  <span class="field-type">{{ t.output_schema.type }}</span>
                   <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
                 </div>
               </div>
@@ -305,11 +275,6 @@ onMounted(fetchAll)
   font-size: 11px;
   color: var(--ink-3);
 }
-.schema-fields-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 .schema-field {
   display: flex;
   align-items: baseline;
@@ -317,21 +282,10 @@ onMounted(fetchAll)
   font-size: 12px;
   line-height: 1.6;
 }
-.field-key {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--ink);
-  flex-shrink: 0;
-}
 .field-type {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-3);
-  flex-shrink: 0;
-}
-.field-required {
-  color: #ff8f8a;
-  font-size: 11px;
   flex-shrink: 0;
 }
 .field-desc {

@@ -15,12 +15,11 @@ logger = logging.getLogger(__name__)
     group=NodeGroup.BASE,
     input_schema={
         "_review": {"type": "object", "required": False, "description": "审核卡片声明 {$键: 标签文本}"},
-        "_prompt": {"type": "string", "required": False, "description": "审核提示词（兼容旧版定义）"},
     },
     output_schema={
         "type": "object",
         "fields": {
-            "payload": {"type": "object", "description": "审核载荷（提交给审核人的数据）"},
+            "payload": {"type": "object", "description": "审核载荷"},
             "decision": {
                 "type": "object",
                 "description": "审核决策",
