@@ -25,7 +25,7 @@ from .condition import _parse
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "file"}
 
 #: 注册函数类型接受的默认字段集（human 同样使用，无特殊字段）。
-_NODE_FIELDS = {"type", "label", "description", "depends_on", "inputs", "retry", "timeout", "condition"}
+_NODE_FIELDS = {"type", "label", "description", "depends_on", "inputs", "retry", "timeout", "condition", "script"}
 
 
 # ------------------------------------------------------------------
@@ -307,6 +307,13 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
             errors.extend(
                 f"节点 {name!r}: {msg}" for msg in _validate_review(wiring["_review"], refs)
             )
+
+        script = spec.get("script")
+        if type_key == "code":
+            if not script or not isinstance(script, str) or not script.strip():
+                errors.append(f"节点 {name!r}: code 类型必须提供非空 script")
+        elif script:
+            errors.append(f"节点 {name!r}: script 字段仅允许 code 类型节点使用")
 
     return errors
 

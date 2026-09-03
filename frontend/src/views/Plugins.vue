@@ -15,6 +15,16 @@ const builtinNodes = computed(() => {
   return nodeTypes.value.filter((t) => !pluginNames.has(t.name))
 })
 
+const builtinGroups = computed(() => {
+  const map = new Map<string, NodeTypeInfo[]>()
+  for (const t of builtinNodes.value) {
+    const g = t.group || '其他'
+    if (!map.has(g)) map.set(g, [])
+    map.get(g)!.push(t)
+  }
+  return [...map.entries()].map(([name, items]) => ({ name, items }))
+})
+
 async function fetchAll() {
   loading.value = true
   loadError.value = false
@@ -61,73 +71,79 @@ onMounted(fetchAll)
     </header>
 
     <main class="panel">
-      <section class="card">
-        <div class="card-head">
-          <h2>内置节点类型</h2>
-          <span class="muted">框架自带，只读 · {{ builtinNodes.length }}</span>
-        </div>
-        <div v-loading="loading" class="node-grid">
-          <div v-for="t in builtinNodes" :key="t.name" class="node-card">
-            <div class="node-card-head">
-              <el-tag
-                :class="['node-tag', t.name === 'human' ? 'node-tag--human' : 'node-tag--func']"
-                disable-transitions
-              >
-                {{ t.name }}
-              </el-tag>
-              <span class="node-label">{{ t.label }}</span>
-            </div>
-            <p class="node-desc">{{ t.description }}</p>
-
-            <!-- 输入参数 -->
-            <div v-if="t.input_schema && Object.keys(t.input_schema).length" class="schema-section">
-              <h3 class="schema-title">输入</h3>
-              <div v-for="(field, key) in t.input_schema" :key="key" class="schema-field">
-                <span class="field-key">{{ key }}</span>
-                <span class="field-type">{{ schemaTypeLabel(field) }}</span>
-                <span v-if="field.required" class="field-required">*</span>
-                <span v-if="field.description" class="field-desc">{{ field.description }}</span>
+      <!-- 内置节点类型 -->
+      <div class="section-head">
+        <h2>内置节点类型</h2>
+        <span class="muted">框架自带，只读 · {{ builtinNodes.length }}</span>
+      </div>
+      <div v-loading="loading">
+        <div v-for="(g, gi) in builtinGroups" :key="g.name" class="group-section">
+          <h3 class="group-title">{{ g.name }}</h3>
+          <div class="node-grid">
+            <div v-for="t in g.items" :key="t.name" class="node-card">
+              <div class="node-card-head">
+                <el-tag
+                  :class="['node-tag', t.name === 'human' ? 'node-tag--human' : 'node-tag--func']"
+                  disable-transitions
+                >
+                  {{ t.name }}
+                </el-tag>
+                <span class="node-label">{{ t.label }}</span>
               </div>
-            </div>
-            <div v-else class="schema-section">
-              <h3 class="schema-title">输入</h3>
-              <span class="schema-empty">无声明</span>
-            </div>
+              <p class="node-desc">{{ t.description }}</p>
 
-            <!-- 输出结构 -->
-            <div v-if="t.output_schema" class="schema-section">
-              <h3 class="schema-title">输出</h3>
-              <div v-if="t.output_schema.fields" class="schema-fields-block">
-                <div v-for="(field, key) in t.output_schema.fields" :key="key" class="schema-field">
+              <!-- 输入参数 -->
+              <div v-if="t.input_schema && Object.keys(t.input_schema).length" class="schema-section">
+                <h3 class="schema-title">输入</h3>
+                <div v-for="(field, key) in t.input_schema" :key="key" class="schema-field">
                   <span class="field-key">{{ key }}</span>
                   <span class="field-type">{{ schemaTypeLabel(field) }}</span>
+                  <span v-if="field.required" class="field-required">*</span>
                   <span v-if="field.description" class="field-desc">{{ field.description }}</span>
                 </div>
               </div>
-              <div v-else-if="t.output_schema.item" class="schema-fields-block">
-                <template v-if="t.output_schema.item.fields">
-                  <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
-                  <div v-for="(f, k) in t.output_schema.item.fields" :key="k" class="schema-field" style="margin-left: 12px">
-                    <span class="field-key">{{ k }}</span>
-                    <span class="field-type">{{ schemaTypeLabel(f) }}</span>
-                    <span v-if="f.description" class="field-desc">{{ f.description }}</span>
+              <div v-else class="schema-section">
+                <h3 class="schema-title">输入</h3>
+                <span class="schema-empty">无声明</span>
+              </div>
+
+              <!-- 输出结构 -->
+              <div v-if="t.output_schema" class="schema-section">
+                <h3 class="schema-title">输出</h3>
+                <div v-if="t.output_schema.fields" class="schema-fields-block">
+                  <div v-for="(field, key) in t.output_schema.fields" :key="key" class="schema-field">
+                    <span class="field-key">{{ key }}</span>
+                    <span class="field-type">{{ schemaTypeLabel(field) }}</span>
+                    <span v-if="field.description" class="field-desc">{{ field.description }}</span>
                   </div>
-                </template>
+                </div>
+                <div v-else-if="t.output_schema.item" class="schema-fields-block">
+                  <template v-if="t.output_schema.item.fields">
+                    <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
+                    <div v-for="(f, k) in t.output_schema.item.fields" :key="k" class="schema-field" style="margin-left: 12px">
+                      <span class="field-key">{{ k }}</span>
+                      <span class="field-type">{{ schemaTypeLabel(f) }}</span>
+                      <span v-if="f.description" class="field-desc">{{ f.description }}</span>
+                    </div>
+                  </template>
+                  <div v-else class="schema-field">
+                    <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
+                    <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
+                  </div>
+                </div>
                 <div v-else class="schema-field">
                   <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
                   <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
                 </div>
               </div>
-              <div v-else class="schema-field">
-                <span class="field-type">{{ schemaTypeLabel(t.output_schema) }}</span>
-                <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
-              </div>
             </div>
           </div>
-          <span v-if="!builtinNodes.length && !loading" class="muted">—</span>
         </div>
-      </section>
+        <span v-if="!builtinNodes.length && !loading" class="muted">—</span>
+      </div>
 
+      <!-- 插件 -->
+      <div class="section-divider"></div>
       <section class="card">
         <div class="card-head">
           <h2>插件</h2>
@@ -210,7 +226,33 @@ onMounted(fetchAll)
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.section-head h2 {
+  font-size: 13px;
+  margin: 0;
+}
+.section-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 6px 0;
+}
+.group-section {
+  margin-bottom: 14px;
+}
+.group-section:last-child {
+  margin-bottom: 0;
+}
+.group-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
 }
 .card-head h2 {
   font-size: 13px;
@@ -256,7 +298,7 @@ onMounted(fetchAll)
   margin: 0 0 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--ink-2);
   letter-spacing: 1px;
 }
 .schema-empty {

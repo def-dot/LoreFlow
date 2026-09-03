@@ -8,13 +8,14 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from app.registry.core import node_type
+from app.registry.core import NodeGroup, node_type
 from app.utils import files
 
 
 @node_type(
     label="加载文档",
     description="读取上传文档内容",
+    group=NodeGroup.RAG,
     input_schema={
         "document": {"type": "object", "required": True, "description": "上传文档"},
     },
@@ -48,6 +49,7 @@ async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
 @node_type(
     label="切块",
     description="按空行把正文切成语义段",
+    group=NodeGroup.RAG,
     input_schema={
         "text": {"type": "string", "required": True, "description": "文档正文"},
     },
@@ -63,6 +65,7 @@ async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
 @node_type(
     label="向量化",
     description="为每个 chunk 生成向量",
+    group=NodeGroup.RAG,
     input_schema={
         "doc_name": {"type": "string", "required": True, "description": "文档名称"},
         "chunks": {"type": "list", "required": True, "description": "文本段列表"},
@@ -99,6 +102,7 @@ async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
 @node_type(
     label="写入向量库",
     description="批量写入向量信息",
+    group=NodeGroup.RAG,
     input_schema={
         "doc_id": {"type": "string", "required": True, "description": "文档名称"},
         "embeds": {"type": "list", "required": True, "description": "向量列表"},
@@ -139,6 +143,7 @@ _MOCK_KB: list[dict[str, Any]] = [
 @node_type(
     label="知识库检索",
     description="关键词查询返回片段",
+    group=NodeGroup.RAG,
     input_schema={
         "prompt": {"type": "string", "required": False, "description": "检索关键词"},
     },

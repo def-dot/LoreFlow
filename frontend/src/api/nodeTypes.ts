@@ -13,6 +13,7 @@ export interface NodeTypeInfo {
   kind: 'function' | 'condition'
   label: string
   description: string
+  group?: string | null
   input_schema?: Record<string, SchemaField> | null
   output_schema?: SchemaField | null
 }

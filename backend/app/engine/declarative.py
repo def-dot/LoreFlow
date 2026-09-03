@@ -50,6 +50,7 @@ def load_dag(
                 retry=retry,
                 timeout=spec.get("timeout"),
                 condition=spec.get("condition"),
+                script=spec.get("script"),
             )
         )
     return dag

@@ -3,7 +3,7 @@
 """
 
 from .core import REGISTRY, NodeType, node_type, unregister
-from . import basic, human, llm, rag, web  # noqa: F401  # 导入即触发 @node_type 注册
+from . import human, llm, other, rag, web  # noqa: F401  # 导入即触发 @node_type 注册
 
 __all__ = [
     "NodeType",

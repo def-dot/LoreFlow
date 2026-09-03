@@ -18,7 +18,7 @@ from typing import Any
 
 from tavily import AsyncTavilyClient
 
-from app.registry.core import node_type
+from app.registry.core import NodeGroup, node_type
 from app.utils.http import http_client
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,7 @@ async def _fetch_page(url: str) -> dict[str, str]:
 @node_type(
     label="网络搜索",
     description="调用 Tavily 搜索",
+    group=NodeGroup.WEB,
     input_schema={
         "prompt": {"type": "string", "required": False, "description": "搜索关键词"},
     },
@@ -108,6 +109,7 @@ async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
 @node_type(
     label="搜索结果格式化",
     description="将网络搜索的结果格式化为可读文本",
+    group=NodeGroup.WEB,
     input_schema={
         "search": {"type": "list", "required": True, "description": "搜索结果列表"},
     },
@@ -126,7 +128,8 @@ async def search_format(ctx: dict[str, Any]) -> str:
 
 @node_type(
     label="抓取链接正文",
-    description="从 ctx['prompt'] 提取 http(s) 链接并发抓取网页正文",
+    description="从输入中提取 http(s) 链接并发抓取网页正文",
+    group=NodeGroup.WEB,
     input_schema={
         "prompt": {"type": "string", "required": False, "description": "含 URL 的文本"},
     },

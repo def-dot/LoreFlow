@@ -11,6 +11,7 @@ class NodeTypeOut(BaseModel):
     name: str
     label: str
     description: str
+    group: str | None = None
     input_schema: dict[str, dict[str, Any]] | None = None
     output_schema: dict[str, Any] | None = None
 

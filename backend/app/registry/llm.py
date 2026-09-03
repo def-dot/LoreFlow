@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import settings
-from app.registry.core import node_type
+from app.registry.core import NodeGroup, node_type
 from app.utils.http import http_client
 
 
@@ -34,6 +34,7 @@ async def _ollama_chat(
 
 @node_type(
     label="LLM 对话",
+    group=NodeGroup.LLM,
     description=(
         "读取 ctx['prompt'] 调用本地 Ollama 生成回答；"
         "若 ctx['context'] 非空则附在问题后一并交给 LLM"
@@ -65,6 +66,7 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
 @node_type(
     label="意图识别",
     description="通用意图分类器",
+    group=NodeGroup.LLM,
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "待分类文本"},
         "classify_system": {"type": "string", "required": False, "description": "分类系统提示词（覆盖默认）"},
@@ -110,6 +112,7 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
 @node_type(
     label="知识库问答",
     description="结合检索片段回答 ctx['prompt']；检索结果 chunks ← rag_retrieve 类节点（YAML inputs 接线，未接线或上游被跳过视为未检索到）",
+    group=NodeGroup.LLM,
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "用户问题"},
         "chunks": {"type": "list", "required": False, "description": "检索片段列表（来自 rag_retrieve）"},
@@ -138,6 +141,7 @@ async def llm_rag_reply(ctx: dict[str, Any]) -> str:
 
 @node_type(
     label="最终答复",
+    group=NodeGroup.LLM,
     description=(
         "互斥分支汇合：按 depends_on 声明顺序取第一个非空上游输出（视图保留键 "
         "_upstream，无需 inputs 接线），输出 {branch, answer}（branch = 支路节点名）；"

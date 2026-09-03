@@ -5,7 +5,7 @@ human 人工审核类型 — 审核协议函数（静态节点函数）与注册
 import logging
 from typing import Any
 
-from app.registry.core import node_type
+from app.registry.core import NodeGroup, node_type
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
     label="人工审核",
     description="人工审核节点，暂停等待审批",
     name="human",
+    group=NodeGroup.BASE,
     input_schema={
         "_review": {"type": "object", "required": False, "description": "审核卡片声明 {$键: 标签文本}"},
         "_prompt": {"type": "string", "required": False, "description": "审核提示词（兼容旧版定义）"},

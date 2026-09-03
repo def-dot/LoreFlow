@@ -317,6 +317,8 @@ class DAGExecutor:
         target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
         target["_upstream"] = {d: self.ctx.get(d) for d in node.depends_on} if node.depends_on else {}
+        if node.script is not None:
+            target["_script"] = node.script
         coro = node.func(target)
         if node.timeout is not None:
             return await asyncio.wait_for(coro, timeout=node.timeout)

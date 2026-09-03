@@ -114,7 +114,7 @@ def test_registry_only_lookup() -> None:
 
     # 点路径不是注册名字，同样被拒绝
     with pytest.raises(ValueError, match="未注册"):
-        load_dag({"nodes": {"b": {"type": "app.registry.basic.test_fetch"}}})
+        load_dag({"nodes": {"b": {"type": "app.registry.other.test_fetch"}}})
 
 
 def test_parse_retry_forms() -> None:
