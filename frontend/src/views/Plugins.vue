@@ -11,6 +11,7 @@ const loading = ref(false)
 const loadError = ref(false)
 const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const guideOpen = ref(false)
 
 const nodeTypeMap = computed(() => new Map(nodeTypes.value.map((t) => [t.name, t])))
 
@@ -81,7 +82,7 @@ onMounted(fetchAll)
       <span v-if="loadError" class="load-error">加载失败，请检查后端是否可用</span>
       <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
       <el-button type="primary" :loading="uploading" @click="fileInput?.click()">上传插件</el-button>
-      <el-button plain :loading="loading" @click="fetchAll">↻ 刷新</el-button>
+      <span class="guide-link" @click="guideOpen = true">编写指南</span>
     </header>
 
     <main class="panel">
@@ -106,6 +107,7 @@ onMounted(fetchAll)
         <h2>插件</h2>
         <span class="muted">默认目录 custom_plugins/</span>
       </div>
+
       <div v-loading="loading" class="plugin-list">
         <div v-for="p in plugins" :key="p.filename" class="plugin-card">
           <div class="plugin-head">
@@ -133,6 +135,46 @@ onMounted(fetchAll)
         <span v-if="!plugins.length && !loading" class="muted">暂无已加载插件</span>
       </div>
     </main>
+
+    <!-- 编写指南 drawer -->
+    <el-drawer v-model="guideOpen" title="插件编写指南" size="min(560px, 90vw)">
+      <div class="guide">
+        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@node_type</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可通过页面「上传插件」按钮上传。</p>
+
+        <h4 class="guide-h4">示例</h4>
+        <pre class="guide-code">from app.registry import node_type
+
+@node_type(
+    label="发送通知",
+    description="发送通知消息",
+    input_schema={
+        "message": {"type": "string", "required": True, "description": "消息内容"},
+        "channel": {"type": "string", "required": False, "description": "通知渠道"},
+    },
+    output_schema={"type": "string", "description": "发送结果"},
+)
+async def send_notify(ctx: dict) -> str:
+    message = ctx.get("message", "")
+    channel = ctx.get("channel", "default")
+    # 你的业务逻辑
+    return f"已发送至 {channel}"</pre>
+
+        <h4 class="guide-h4">规则</h4>
+        <ul class="guide-rules">
+          <li>函数必须是 <code>async def</code>，参数为 <code>ctx: dict</code></li>
+          <li><code>ctx</code> 是输入字典，通过 <code>ctx.get("字段名")</code> 取值</li>
+        </ul>
+
+        <h4 class="guide-h4">@node_type 参数</h4>
+        <table class="guide-table">
+          <tr><th>参数</th><th>必填</th><th>说明</th></tr>
+          <tr><td><code>label</code></td><td>是</td><td>显示名称</td></tr>
+          <tr><td><code>description</code></td><td>是</td><td>节点类型功能描述</td></tr>
+          <tr><td><code>input_schema</code></td><td>否</td><td>输入参数声明，字典格式</td></tr>
+          <tr><td><code>output_schema</code></td><td>否</td><td>输出结构声明</td></tr>
+        </table>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -155,6 +197,15 @@ onMounted(fetchAll)
 .page-head h1 {
   font-size: 18px;
   margin: 0;
+}
+.guide-link {
+  font-size: 13px;
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.guide-link:hover {
+  color: #79bbff;
 }
 .load-error {
   color: #f87171;
@@ -251,5 +302,67 @@ onMounted(fetchAll)
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
+}
+
+/* 编写指南 */
+.guide {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.guide p {
+  margin: 0 0 14px;
+}
+.guide code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.guide-h4 {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.guide-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0 0 10px;
+  white-space: pre;
+}
+.guide-rules {
+  margin: 0;
+  padding-left: 20px;
+}
+.guide-rules li {
+  margin-bottom: 4px;
+}
+.guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.guide-table th,
+.guide-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.guide-table th {
+  font-weight: 600;
+  color: var(--ink-2);
+  font-size: 11px;
+}
+.guide-table code {
+  font-size: 11.5px;
 }
 </style>
