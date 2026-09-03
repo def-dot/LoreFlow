@@ -35,15 +35,12 @@ async def _ollama_chat(
 @node_type(
     label="LLM 对话",
     group=NodeGroup.LLM,
-    description=(
-        "读取 ctx['prompt'] 调用本地 Ollama 生成回答；"
-        "若 ctx['context'] 非空则附在问题后一并交给 LLM"
-    ),
+    description="调用本地 Ollama 模型生成回答",
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "用户提示词"},
         "system": {"type": "string", "required": False, "description": "系统提示词"},
-        "context": {"type": "string", "required": False, "description": "参考资料（附在问题前）"},
-        "model": {"type": "string", "required": False, "description": "模型名（默认取配置）"},
+        "context": {"type": "string", "required": False, "description": "上下文"},
+        "model": {"type": "string", "required": False, "description": "模型名"},
     },
     output_schema={"type": "string", "description": "LLM 回复文本"},
 )
@@ -69,14 +66,13 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
     group=NodeGroup.LLM,
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "待分类文本"},
-        "classify_system": {"type": "string", "required": False, "description": "分类系统提示词（覆盖默认）"},
-        "classify_labels": {"type": "list", "required": False, "description": "可选标签列表（覆盖默认）"},
+        "classify_system": {"type": "string", "required": False, "description": "分类系统提示词"},
+        "classify_labels": {"type": "list", "item": {"type": "string"}, "required": False, "description": "可选标签列表"},
     },
     output_schema={
         "type": "object",
         "fields": {
             "intent": {"type": "string", "description": "分类标签"},
-            "raw": {"type": "string", "description": "LLM 原始输出"},
         },
     },
 )
