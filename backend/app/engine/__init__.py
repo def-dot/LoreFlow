@@ -29,7 +29,7 @@ Quick start::
     print(results["process"].output)
 """
 
-from app.registry.human import human_review
+from app.registry.base import human_review
 
 from .dag import DAG, terminal_approver
 from .declarative import load_dag

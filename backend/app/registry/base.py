@@ -1,13 +1,12 @@
-"""
-human 人工审核类型 — 审核协议函数（静态节点函数）与注册。
-"""
-
 import logging
+import json
+import re
 from typing import Any
 
 from app.registry.core import NodeGroup, node_type
 
 logger = logging.getLogger(__name__)
+
 
 
 @node_type(
@@ -62,3 +61,29 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     reason = f"人工审核拒绝：{decision.get("reason")}"
     logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
     raise HumanRejected(reason, output={"payload": payload, "decision": decision})
+
+
+@node_type(
+    label="代码执行",
+    description="执行 Python 脚本，脚本中可用 inputs 作为局部变量，须给 result 赋值作为输出",
+    group=NodeGroup.BASE,
+    input_schema={},
+    output_schema={"type": "any", "description": "脚本中 result 变量的值"},
+)
+async def code(ctx: dict[str, Any]) -> Any:
+    script = ctx.get("_script")
+    if not script or not isinstance(script, str):
+        raise ValueError("code 节点缺少 script")
+
+    # 构建局部命名空间：inputs 作为变量 + 常用模块
+    local_ns: dict[str, Any] = {
+        k: v for k, v in ctx.items() if not k.startswith("_")
+    }
+    local_ns["json"] = json
+    local_ns["re"] = re
+
+    exec(script, {"__builtins__": __builtins__}, local_ns)  # noqa: S102
+
+    if "result" not in local_ns:
+        raise ValueError("code 脚本必须给 result 赋值")
+    return local_ns["result"]

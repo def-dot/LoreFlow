@@ -83,7 +83,7 @@ onMounted(fetchAll)
             <div v-for="t in g.items" :key="t.name" class="node-card">
               <div class="node-card-head">
                 <el-tag
-                  :class="['node-tag', t.name === 'human' ? 'node-tag--human' : 'node-tag--func']"
+                  class="node-tag node-tag--func"
                   disable-transitions
                 >
                   {{ t.name }}
@@ -350,11 +350,6 @@ onMounted(fetchAll)
   --el-tag-bg-color: rgba(64, 158, 255, 0.15);
   --el-tag-border-color: rgba(64, 158, 255, 0.4);
   --el-tag-text-color: #79bbff;
-}
-.node-tag--human {
-  --el-tag-bg-color: rgba(230, 162, 60, 0.15);
-  --el-tag-border-color: rgba(230, 162, 60, 0.4);
-  --el-tag-text-color: #e6a23c;
 }
 .node-tag--plugin {
   --el-tag-bg-color: rgba(103, 194, 58, 0.15);
