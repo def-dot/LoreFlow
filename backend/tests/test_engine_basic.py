@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from app.engine import DAG, DAGExecutionError, Node, NodeStatus, RetryPolicy
-from app.engine.validate import validate_inputs
+from app.engine.validate import validate_config, validate_inputs
 
 
 async def test_serial_chain() -> None:
@@ -225,3 +225,115 @@ def test_no_params_rejects_any_inputs() -> None:
         return 1
 
     assert validate_inputs({"x": 1}, dag.params) == ["未声明的参数键: x"]
+
+
+# ---------------------------------------------------------------------------
+# output_expr 求值
+# ---------------------------------------------------------------------------
+
+
+async def test_output_expr_list_picks_first_non_null() -> None:
+    """output_expr 为列表时，按声明顺序取第一个非 null 的节点输出。"""
+    dag = DAG("out_list", output_expr=["$a", "$b"])
+
+    @dag.node("a")
+    async def a(ctx):
+        return "from_a"
+
+    @dag.node("b", depends_on=["a"])
+    async def b(ctx):
+        return None
+
+    results = await dag.run()
+    assert "_output" in results
+    assert results["_output"].output == "from_a"
+    assert results["_output"].status == NodeStatus.COMPLETED
+
+
+async def test_output_expr_single_ref() -> None:
+    """output_expr 为单个 $node 字符串时直接取该节点输出。"""
+    dag = DAG("out_single", output_expr="$x")
+
+    @dag.node("x")
+    async def x(ctx):
+        return "single"
+
+    results = await dag.run()
+    assert results["_output"].output == "single"
+
+
+async def test_output_expr_all_null_yields_skipped() -> None:
+    """所有引用节点输出均为 null 时，_output 状态为 SKIPPED。"""
+    dag = DAG("out_all_none", output_expr=["$a", "$b"])
+
+    @dag.node("a")
+    async def a(ctx):
+        return None
+
+    @dag.node("b", depends_on=["a"])
+    async def b(ctx):
+        return None
+
+    results = await dag.run()
+    assert results["_output"].status == NodeStatus.SKIPPED
+    assert results["_output"].output is None
+
+
+async def test_no_output_expr_no_output_key() -> None:
+    """未声明 output_expr 时，results 中不含 _output 键。"""
+    dag = DAG("no_output")
+
+    @dag.node("x")
+    async def x(ctx):
+        return "hello"
+
+    results = await dag.run()
+    assert "_output" not in results
+
+
+def test_output_validation_rejects_missing_node() -> None:
+    """output 引用不存在的节点时报错。"""
+    errors = validate_config({
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": "$nonexistent",
+    })
+    assert any("nonexistent" in e and "不在 DAG 中" in e for e in errors)
+
+
+def test_output_validation_rejects_missing_node_in_list() -> None:
+    """output 列表中引用不存在的节点时报错。"""
+    errors = validate_config({
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": ["$a", "$missing"],
+    })
+    assert any("missing" in e and "不在 DAG 中" in e for e in errors)
+
+
+def test_output_validation_accepts_valid_refs() -> None:
+    """output 引用存在的节点时通过校验。"""
+    errors = validate_config({
+        "nodes": {
+            "a": {"type": "test_fetch"},
+            "b": {"type": "test_fetch"},
+        },
+        "output": ["$a", "$b"],
+    })
+    assert errors == []
+
+
+def test_output_validation_accepts_single_ref() -> None:
+    """output 单引用存在的节点时通过校验。"""
+    errors = validate_config({
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": "$a",
+    })
+    assert errors == []
+
+
+def test_output_validation_rejects_no_dollar_prefix() -> None:
+    """output 引用不带 $ 前缀时报错。"""
+    errors = validate_config({
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": "a",
+    })
+    assert any("$" in e for e in errors)

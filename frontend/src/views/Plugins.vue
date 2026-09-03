@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
-import { listPlugins, type PluginInfo } from '@/api/plugins'
+import { listPlugins, uploadPlugin, type PluginInfo } from '@/api/plugins'
 import NodeTypeCard from '@/components/NodeTypeCard.vue'
 
 const plugins = ref<PluginInfo[]>([])
 const nodeTypes = ref<NodeTypeInfo[]>([])
 const loading = ref(false)
 const loadError = ref(false)
+const uploading = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const nodeTypeMap = computed(() => new Map(nodeTypes.value.map((t) => [t.name, t])))
 
@@ -45,6 +48,26 @@ function fmtTime(iso: string) {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+async function handleUpload(file: File) {
+  uploading.value = true
+  try {
+    const plugin = await uploadPlugin(file)
+    ElMessage.success(`插件 ${plugin.filename} 上传成功`)
+    await fetchAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+function onFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) handleUpload(file)
+  input.value = ''
+}
+
 onMounted(fetchAll)
 </script>
 
@@ -56,6 +79,8 @@ onMounted(fetchAll)
         <span class="muted">可在 YAML 流程定义中使用的全部节点类型；插件修改后自动热加载。</span>
       </div>
       <span v-if="loadError" class="load-error">加载失败，请检查后端是否可用</span>
+      <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
+      <el-button type="primary" :loading="uploading" @click="fileInput?.click()">上传插件</el-button>
       <el-button plain :loading="loading" @click="fetchAll">↻ 刷新</el-button>
     </header>
 
