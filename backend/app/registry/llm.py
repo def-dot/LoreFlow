@@ -103,25 +103,3 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     )
     text = raw.strip().strip('"').lower()
     return {"intent": text, "raw": raw.strip()}
-
-
-
-@node_type(
-    label="最终答复",
-    group=NodeGroup.LLM,
-    description=(
-        "互斥分支汇合：按 depends_on 声明顺序取第一个非空上游输出（视图保留键 "
-        "_upstream，无需 inputs 接线），输出 {branch, answer}（branch = 支路节点名）；"
-        "未执行的支路输出为 null"
-    ),
-    input_schema={},
-    output_schema={"type": "any", "description": "第一个非空上游输出（原样透传）"},
-)
-async def final_answer(ctx: dict[str, Any]) -> dict[str, Any]:
-    upstream = ctx.get("_upstream")
-    if not isinstance(upstream, dict) or not upstream:
-        raise ValueError("缺少上游支路：final_answer 须声明 depends_on（按声明顺序取第一个非空输出）")
-    for _, answer in upstream.items():
-        if answer:
-            return answer
-    raise ValueError("没有支路产出答复：上游输出全为空（互斥条件可能全部未命中）")
