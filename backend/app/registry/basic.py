@@ -10,6 +10,7 @@ from app.registry.core import node_type
     description="发布内容",
     input_schema={
         "title": {"type": "string", "required": False, "description": "发布标题"},
+        "content": {"type": "string", "required": False, "description": "发布内容"},
     },
     output_schema={"type": "string", "description": ""},
 )

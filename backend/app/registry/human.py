@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
     name="human",
     input_schema={
         "_review": {"type": "object", "required": False, "description": "审核卡片声明 {$键: 标签文本}"},
+        "_prompt": {"type": "string", "required": False, "description": "审核提示词（兼容旧版定义）"},
     },
     output_schema={
         "type": "object",
