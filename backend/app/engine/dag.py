@@ -81,11 +81,13 @@ class DAG:
         params: dict[str, dict[str, Any]] | None = None,
         on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
         approver: ApproverFunc | None = None,
+        output_expr: str | list[str] | None = None,
     ):
         self.name = name
         self.params = params if params else {}
         self.on_event = on_event
         self.approver = approver
+        self.output_expr = output_expr
         self._nodes: dict[str, Node] = {}
 
     @property
@@ -367,7 +369,19 @@ class DAG:
             ctx["_approver"] = self.approver
 
         executor = DAGExecutor(nodes=self._nodes, ctx=ctx, concurrency=concurrency, on_event=self.on_event)
-        return await executor.execute(resume=resume)
+        results = await executor.execute(resume=resume)
+
+        # ---- output 求值：从 ctx 中按 output_expr 提取最终输出 ----
+        if self.output_expr is not None:
+            refs = [self.output_expr] if isinstance(self.output_expr, str) else self.output_expr
+            for ref in refs:
+                key = ref[1:] if ref.startswith("$") else ref  # $node → node
+                value = ctx.get(key)
+                if value is not None:
+                    ctx["_output"] = value
+                    break
+
+        return results
 
     # ------------------------------------------------------------------
     # Visualisation

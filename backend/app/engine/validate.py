@@ -318,7 +318,37 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_output(config: dict[str, Any]) -> list[str]:
+    """校验顶层 output 声明：``$node`` 或 ``[$node, ...]``，引用根键 ∈ nodes。"""
+    output = config.get("output")
+    if output is None:
+        return []
+
+    node_names = set(config.get("nodes") or {})
+    errors: list[str] = []
+
+    def _check_ref(ref: Any, idx: int | None = None) -> None:
+        loc = f"output[{idx}]" if idx is not None else "output"
+        if not isinstance(ref, str):
+            errors.append(f"{loc} 必须是字符串，实际是 {type(ref).__name__}")
+            return
+        if not ref.startswith("$"):
+            errors.append(f"{loc} 引用 {ref!r} 须以 $ 开头")
+            return
+        root = ref[1:].partition(".")[0]
+        if root not in node_names:
+            errors.append(f"{loc} 引用的节点 {root!r} 不在 DAG 中")
+
+    if isinstance(output, list):
+        for i, item in enumerate(output):
+            _check_ref(item, i)
+    else:
+        _check_ref(output)
+
+    return errors
+
+
 def validate_config(config: dict[str, Any]) -> list[str]:
-    """校验完整 DAG 配置（params + nodes 及其接线/condition/review/图），返回全部错误。
+    """校验完整 DAG 配置（params + nodes 及其接线/condition/review/图/output），返回全部错误。
     """
-    return validate_params(config) + validate_nodes(config)
+    return validate_params(config) + validate_nodes(config) + validate_output(config)

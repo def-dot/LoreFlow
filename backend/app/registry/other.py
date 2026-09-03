@@ -15,9 +15,9 @@ from app.registry.core import NodeGroup, node_type
         "title": {"type": "string", "required": False, "description": "发布标题"},
         "content": {"type": "string", "required": False, "description": "发布内容"},
     },
-    output_schema={"type": "string", "description": ""},
+    output_schema={"type": "string", "description": "发布结果"},
 )
-async def cfg_publish(ctx: dict[str, Any]) -> str:
+async def publish(ctx: dict[str, Any]) -> str:
     return f"Published: {ctx.get('title') or '(untitled)'}"
 
 
@@ -29,7 +29,7 @@ _svc_calls = 0
     description="外部 API 偶发超时",
     group=NodeGroup.OTHER,
     input_schema={},
-    output_schema={"type": "string", "description": ""},
+    output_schema={"type": "string", "description": "调用结果"},
 )
 async def svc_external_api(ctx: dict[str, Any]) -> str:
     global _svc_calls
@@ -45,7 +45,7 @@ async def svc_external_api(ctx: dict[str, Any]) -> str:
     description="外部 API 持续故障",
     group=NodeGroup.OTHER,
     input_schema={},
-    output_schema={"type": "string", "description": ""},
+    output_schema={"type": "string", "description": "调用结果"},
 )
 async def svc_unavailable(ctx: dict[str, Any]) -> str:
-    raise TimeoutError("模拟外部 API 宕机 — 服务持续不可用")
+    raise TimeoutError("外部 API 宕机 — 服务持续不可用")

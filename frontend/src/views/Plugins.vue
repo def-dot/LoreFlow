@@ -102,7 +102,7 @@ onMounted(fetchAll)
                   <SchemaFields :fields="t.output_schema.item.fields" :depth="1" />
                 </template>
                 <div v-else class="schema-field">
-                  <span class="field-type">{{ t.output_schema.type }}</span>
+                  <span class="field-type">{{ t.output_schema.type === 'list' && t.output_schema.item ? `list[${t.output_schema.item.type}]` : t.output_schema.type }}</span>
                   <span v-if="t.output_schema.description" class="field-desc">{{ t.output_schema.description }}</span>
                 </div>
               </div>
