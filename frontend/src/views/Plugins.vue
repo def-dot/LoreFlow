@@ -256,9 +256,8 @@ onMounted(fetchAll)
   margin: 0 0 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--accent);
+  letter-spacing: 1px;
 }
 .schema-empty {
   font-size: 11px;
