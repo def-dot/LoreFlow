@@ -107,26 +107,6 @@ async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
 
 
 @node_type(
-    label="搜索结果格式化",
-    description="将网络搜索的结果格式化为可读文本",
-    group=NodeGroup.WEB,
-    input_schema={
-        "search": {"type": "list", "required": True, "description": "搜索结果列表"},
-    },
-    output_schema={"type": "string", "description": "格式化后的可读文本"},
-)
-async def search_format(ctx: dict[str, Any]) -> str:
-    results = ctx.get("search")
-    if not isinstance(results, list) or not results:
-        return ""
-    return "\n\n".join(
-        f"[{i}] {r.get('title', '')}\n{r.get('url', '')}\n{r.get('snippet', '')}"
-        for i, r in enumerate(results, 1)
-        if isinstance(r, dict)
-    )
-
-
-@node_type(
     label="抓取链接正文",
     description="从输入中提取 http(s) 链接并发抓取网页正文",
     group=NodeGroup.WEB,

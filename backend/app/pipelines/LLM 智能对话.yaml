@@ -30,12 +30,23 @@ nodes:
     condition: $classify.intent == "search"
 
   format_search:
-    type: search_format
+    type: code
     label: 格式化搜索结果
     description: 将搜索结果格式化为可读文本
     depends_on: [search]
     inputs:
       search: $search
+    script: |
+      if not isinstance(search, list):
+          result = ""
+      else:
+          lines = []
+          for i, r in enumerate(search, 1):
+              title = r.get("title", "")
+              url = r.get("url", "")
+              snippet = r.get("snippet", "")
+              lines.append(f"[{i}] {title}\n{url}\n{snippet}")
+          result = "\n\n".join(lines)
 
   search_reply:
     type: llm_chat

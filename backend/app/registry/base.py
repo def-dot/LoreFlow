@@ -1,6 +1,5 @@
+import asyncio
 import logging
-import json
-import re
 from typing import Any
 
 from app.registry.core import NodeGroup, node_type
@@ -65,7 +64,7 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
 
 @node_type(
     label="代码执行",
-    description="执行 Python 脚本，脚本中可用 inputs 作为局部变量，须给 result 赋值作为输出",
+    description="执行 Python 脚本，须给 result 赋值作为输出",
     group=NodeGroup.BASE,
     input_schema={},
     output_schema={"type": "any", "description": "脚本中 result 变量的值"},
@@ -75,15 +74,10 @@ async def code(ctx: dict[str, Any]) -> Any:
     if not script or not isinstance(script, str):
         raise ValueError("code 节点缺少 script")
 
-    # 构建局部命名空间：inputs 作为变量 + 常用模块
-    local_ns: dict[str, Any] = {
-        k: v for k, v in ctx.items() if not k.startswith("_")
-    }
-    local_ns["json"] = json
-    local_ns["re"] = re
+    exec_globals: dict[str, Any] = {k: v for k, v in ctx.items() if not k.startswith("_")}
 
-    exec(script, {"__builtins__": __builtins__}, local_ns)  # noqa: S102
+    await asyncio.to_thread(exec, script, exec_globals)  # noqa: S102
 
-    if "result" not in local_ns:
+    if "result" not in exec_globals:
         raise ValueError("code 脚本必须给 result 赋值")
-    return local_ns["result"]
+    return exec_globals["result"]
