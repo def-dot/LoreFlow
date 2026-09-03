@@ -32,13 +32,27 @@ nodes:
     depends_on: [intent_recognition]
     condition: $intent_recognition.intent == rag
 
-  llm_rag_reply:
-    type: llm_rag_reply
-    label: LLM检索回答
+  format_chunks:
+    type: code
+    label: 格式化检索片段
     depends_on: [rag_retrieve]
     inputs: {chunks: $rag_retrieve}
+    script: |
+      if not isinstance(chunks, list) or not chunks:
+          result = "知识库中没有检索到相关内容。"
+      else:
+          lines = [f"[{i}] {c.get('source', '')} {c.get('text', '')}" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]
+          result = "\n\n".join(lines)
+
+  rag_answer:
+    type: llm_chat
+    label: LLM检索回答
+    depends_on: [format_chunks]
+    inputs:
+      context: $format_chunks
+      system: 你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。
 
   final_answer:
     type: final_answer
     label: 最终答复
-    depends_on: [llm_chat, llm_rag_reply]
+    depends_on: [llm_chat, rag_answer]

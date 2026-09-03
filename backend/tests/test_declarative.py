@@ -827,7 +827,8 @@ async def test_condition_yaml_chat_branch_final_answer(monkeypatch: pytest.Monke
     assert results["intent_recognition"].status is NodeStatus.COMPLETED
     assert results["llm_chat"].status is NodeStatus.COMPLETED
     assert results["rag_retrieve"].status is NodeStatus.SKIPPED
-    assert results["llm_rag_reply"].status is NodeStatus.UPSTREAM_SKIPPED
+    assert results["format_chunks"].status is NodeStatus.UPSTREAM_SKIPPED
+    assert results["rag_answer"].status is NodeStatus.UPSTREAM_SKIPPED
     assert results["final_answer"].status is NodeStatus.COMPLETED
     assert results["final_answer"].output == {"branch": "llm_chat", "answer": "闲聊支路答复"}
 
@@ -837,9 +838,10 @@ async def test_condition_yaml_rag_branch_final_answer(monkeypatch: pytest.Monkey
     results = await _run_condition_yaml(monkeypatch, "北境要塞是什么", classify_raw="rag")
     assert results["llm_chat"].status is NodeStatus.SKIPPED
     assert results["rag_retrieve"].status is NodeStatus.COMPLETED
-    assert results["llm_rag_reply"].status is NodeStatus.COMPLETED
+    assert results["format_chunks"].status is NodeStatus.COMPLETED
+    assert results["rag_answer"].status is NodeStatus.COMPLETED
     assert results["final_answer"].status is NodeStatus.COMPLETED
-    assert results["final_answer"].output == {"branch": "llm_rag_reply", "answer": "知识库支路答复"}
+    assert results["final_answer"].output == {"branch": "rag_answer", "answer": "知识库支路答复"}
 
 
 async def test_condition_yaml_human_keyword_cascades_to_join(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -848,7 +850,7 @@ async def test_condition_yaml_human_keyword_cascades_to_join(monkeypatch: pytest
     final_answer 不执行，run 空手完成。）"""
     results = await _run_condition_yaml(monkeypatch, "我要找人工客服")
     assert results["llm_chat"].status is NodeStatus.SKIPPED
-    assert results["llm_rag_reply"].status is NodeStatus.UPSTREAM_SKIPPED
+    assert results["rag_answer"].status is NodeStatus.UPSTREAM_SKIPPED
     assert results["final_answer"].status is NodeStatus.UPSTREAM_SKIPPED
 
 

@@ -105,35 +105,6 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"intent": text, "raw": raw.strip()}
 
 
-@node_type(
-    label="知识库问答",
-    description="结合检索片段回答 ctx['prompt']；检索结果 chunks ← rag_retrieve 类节点（YAML inputs 接线，未接线或上游被跳过视为未检索到）",
-    group=NodeGroup.LLM,
-    input_schema={
-        "prompt": {"type": "string", "required": True, "description": "用户问题"},
-        "chunks": {"type": "list", "required": False, "description": "检索片段列表（来自 rag_retrieve）"},
-    },
-    output_schema={"type": "string", "description": "基于知识库的回答"},
-)
-async def llm_rag_reply(ctx: dict[str, Any]) -> str:
-    prompt = ctx.get("prompt")
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
-    chunks = ctx.get("chunks") or []
-    if not chunks:
-        return "知识库中没有检索到相关内容。"
-    refs = "\n\n".join(
-        f"[{i}] {c.get('source', '')} {c.get('text', '')}"
-        for i, c in enumerate(chunks, 1)
-        if isinstance(c, dict)
-    )
-    system = "你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。"
-    user = f"参考资料：\n{refs}\n\n问题：{prompt}"
-    return await _ollama_chat(
-        settings.OLLAMA_MODEL,
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
-    )
-
 
 @node_type(
     label="最终答复",

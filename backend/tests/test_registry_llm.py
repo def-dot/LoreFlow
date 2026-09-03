@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.registry.llm import final_answer, llm_classify, llm_rag_reply
+from app.registry.llm import final_answer, llm_classify
 
 
 async def test_classify_human_keyword_short_circuits() -> None:
@@ -11,20 +11,15 @@ async def test_classify_human_keyword_short_circuits() -> None:
     assert out == {"intent": "human", "raw": "关键词命中：人工"}
 
 
-async def test_rag_reply_without_chunks_message() -> None:
-    """无检索片段（支路未走/被跳过）→ 明确告知，不调用模型。"""
-    assert await llm_rag_reply({"prompt": "北境要塞是什么"}) == "知识库中没有检索到相关内容。"
-
-
 async def test_final_answer_picks_executed_branch() -> None:
     """互斥分支汇合：_upstream 按 depends_on 顺序取第一个非空输出（未执行支路为 None）。"""
-    assert await final_answer({"_upstream": {"llm_chat": "你好呀", "llm_rag_reply": None}}) == {
+    assert await final_answer({"_upstream": {"llm_chat": "你好呀", "rag_answer": None}}) == {
         "branch": "llm_chat", "answer": "你好呀",
     }
-    assert await final_answer({"_upstream": {"llm_chat": None, "llm_rag_reply": "北境要塞……"}}) == {
-        "branch": "llm_rag_reply", "answer": "北境要塞……",
+    assert await final_answer({"_upstream": {"llm_chat": None, "rag_answer": "北境要塞……"}}) == {
+        "branch": "rag_answer", "answer": "北境要塞……",
     }
     with pytest.raises(ValueError):
-        await final_answer({"_upstream": {"llm_chat": None, "llm_rag_reply": None}})
+        await final_answer({"_upstream": {"llm_chat": None, "rag_answer": None}})
     with pytest.raises(ValueError):
         await final_answer({})  # 未声明 depends_on → 无 _upstream
