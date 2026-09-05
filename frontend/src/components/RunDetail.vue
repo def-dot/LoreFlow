@@ -56,6 +56,18 @@ const inputFields = computed<FieldValue[]>(() => {
   return fields
 })
 
+// 工作流最终输出：数量以 chip 展示，点击弹层逐字段查看
+// 当输出键与节点名一致时，优先显示节点 label
+const outputCount = computed(() => Object.keys(props.detail.output ?? {}).length)
+const outputFields = computed<FieldValue[]>(() => {
+  const nodes = props.detail.nodes ?? {}
+  return Object.entries(props.detail.output ?? {}).map(([key, value]) => ({
+    key,
+    label: nodes[key]?.label || key,
+    value,
+  }))
+})
+
 // 工作流定义弹窗（点击 pipeline 名称加载配置详情）
 const definitionVisible = ref(false)
 const definitionLoading = ref(false)
@@ -91,6 +103,12 @@ async function openDefinition() {
           <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
         </template>
         <FieldValues :fields="inputFields" />
+      </el-popover>
+      <el-popover v-if="outputCount" placement="bottom-start" :width="360" trigger="click">
+        <template #reference>
+          <span class="run-output">📤 输出 × {{ outputCount }}</span>
+        </template>
+        <FieldValues :fields="outputFields" />
       </el-popover>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
@@ -167,7 +185,8 @@ async function openDefinition() {
   color: var(--ink);
 }
 /* 运行时输入快照 chip：与 run-meta 同级弱化展示，点击弹层逐字段查看 */
-.run-inputs {
+.run-inputs,
+.run-output {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-3);

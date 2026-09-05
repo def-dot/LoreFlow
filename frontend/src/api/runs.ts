@@ -28,6 +28,7 @@ export interface RunDetail extends RunListItem {
   definition: string | null
   nodes: Record<string, NodeSnapshot>
   inputs: Record<string, unknown>
+  output: Record<string, unknown>
 }
 
 export interface RunListSummary {

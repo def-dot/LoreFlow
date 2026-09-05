@@ -34,7 +34,8 @@ export const useRunsStore = defineStore('runs', {
       // 把「加载更多」拿到的旧页冲掉；500 为后端单次 limit 上限
       const limit = Math.min(Math.max(50, this.runs.length), 500)
       const data = await listRuns(0, limit, this.filters)
-      this.runs = data.items
+      // 原地更新避免数组引用变化导致整个列表重新渲染（闪烁）
+      this.runs.splice(0, this.runs.length, ...data.items)
       this.total = data.total
       this.summary = data.summary
     },

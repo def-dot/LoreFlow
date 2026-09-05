@@ -16,35 +16,64 @@ from app.utils.http import http_client
 
 
 async def _ollama_chat(
-    model: str, messages: list[dict[str, str]], fmt: dict[str, Any] | str | None = None
-) -> str:
-    """POST /api/chat（非流式）→ 助手回复文本；fmt 透传 Ollama 的 format
-    约束（``"json"`` 或 JSON Schema，如分类用的 enum）。"""
+    model: str,
+    messages: list[dict[str, str]],
+    fmt: dict[str, Any] | str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | str:
+    """POST /api/chat（非流式）→ 助手回复。
+
+    传入 ``tools`` 时返回 ``{"content": str, "tool_calls": list}``；
+    否则返回纯文本字符串（保持向后兼容）。
+
+    fmt 透传 Ollama 的 format 约束（``"json"`` 或 JSON Schema）。
+    """
     payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
     if fmt is not None:
         payload["format"] = fmt
+    if tools is not None:
+        payload["tools"] = tools
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
     resp = await http_client().post(url, json=payload)
     resp.raise_for_status()
     data = resp.json()
 
-    content = data["message"]["content"]
-    return str(content)
+    msg = data["message"]
+    if tools is not None:
+        return {
+            "content": str(msg.get("content", "")),
+            "tool_calls": msg.get("tool_calls", []),
+        }
+    return str(msg["content"])
 
 
 @node_type(
     label="LLM 对话",
     group=NodeGroup.LLM,
-    description="调用本地 Ollama 模型生成回答",
+    description="调用本地 Ollama 模型生成回答，可选传入 tools 启用工具调用",
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "用户提示词"},
         "system": {"type": "string", "required": False, "description": "系统提示词"},
         "context": {"type": "string", "required": False, "description": "上下文"},
         "model": {"type": "string", "required": False, "description": "模型名"},
+        "tools": {
+            "type": "list",
+            "required": False,
+            "description": "工具定义列表（Ollama function calling 格式）",
+        },
     },
-    output_schema={"type": "string", "description": "LLM 回复文本"},
+    output_schema={
+        "type": "object",
+        "fields": {
+            "content": {"type": "string", "description": "LLM 回复文本"},
+            "tool_calls": {
+                "type": "list",
+                "description": "模型请求的工具调用列表（未传 tools 时为空）",
+            },
+        },
+    },
 )
-async def llm_chat(ctx: dict[str, Any]) -> str:
+async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any] | str:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
@@ -57,6 +86,9 @@ async def llm_chat(ctx: dict[str, Any]) -> str:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     model = str(ctx.get("model") or settings.OLLAMA_MODEL)
+    tools = ctx.get("tools")
+    if isinstance(tools, list) and tools:
+        return await _ollama_chat(model, messages, tools=tools)
     return await _ollama_chat(model, messages)
 
 

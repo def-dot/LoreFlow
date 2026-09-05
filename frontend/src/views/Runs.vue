@@ -255,8 +255,8 @@ async function openPreview(name: string) {
 }
 
 // ---------------------------------------------------------------------------
-// 轮询（沿用旧 index.html 的两路 1s 轮询：列表有 running 就刷新列表；
-// 选中的 run 在 running 状态就刷新详情，到终态即停）
+// 轮询：选中 run 为 running 时轮询详情（终态自动刷新列表）；
+// 列表轮询仅在 onMounted 初始加载且有 running 时启动。
 // ---------------------------------------------------------------------------
 let runsTimer: ReturnType<typeof setInterval> | undefined
 let detailTimer: ReturnType<typeof setInterval> | undefined
@@ -311,9 +311,9 @@ function startDetailPolling() {
 
 async function select(id: number) {
   await store.select(id)
+  stopRunsPolling()
   if (store.detail?.status === 'running') {
     startDetailPolling()
-    startRunsPolling()
   } else {
     stopDetailPolling()
   }
@@ -335,7 +335,6 @@ async function startNewRun() {
     runName.value = '' // 创建成功后清空
     createDrawerOpen.value = false
     startDetailPolling()
-    startRunsPolling()
   } finally {
     creating.value = false
   }
@@ -347,9 +346,8 @@ const handleCreateRun = startNewRun
 async function decide(node: string, ok: boolean, reason: string | null, values: Record<string, string> | null) {
   await store.decide(node, ok, reason, values)
   if (store.detail?.status === 'running') {
-    // 审批后 run 回到执行中：恢复两路轮询（列表在挂起期间已停）
+    // 审批后 run 回到执行中：恢复详情轮询（终态时自动刷新列表）
     startDetailPolling()
-    startRunsPolling()
   } else {
     // 续跑瞬间已到终态（无下一轮审核）：直接刷新列表
     refreshRunsIfTerminal().catch(() => {})

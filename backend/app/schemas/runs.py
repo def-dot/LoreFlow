@@ -47,11 +47,12 @@ class RunDetail(RunListItem):
     definition: str | None = None  # YAML 定义快照
     nodes: dict[str, Any]
     inputs: dict[str, Any] = {}  # 创建时的运行时输入快照
+    output: dict[str, Any] = {}  # 工作流最终输出
 
-    @field_validator("inputs", mode="before")
+    @field_validator("inputs", "output", mode="before")
     @classmethod
-    def _inputs_none_to_empty(cls, value: dict[str, Any] | None) -> dict[str, Any]:
-        """迁移前创建的旧记录 inputs 列为 NULL，响应层归一为空对象。"""
+    def _none_to_empty(cls, value: dict[str, Any] | None) -> dict[str, Any]:
+        """NULL 归一为空对象。"""
         return value or {}
 
 
