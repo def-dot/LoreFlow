@@ -1,6 +1,8 @@
 name: 条件分支
 description: 客服分流：闲聊 LLM 直接回答；知识类问题先检索知识库再作答；提示词包含「人工」转人工客服。
-output: [$llm_chat, $rag_answer]
+output:
+  llm_chat: $llm_chat
+  rag_answer: $rag_answer
 
 inputs:
   prompt:
@@ -37,13 +39,14 @@ nodes:
     type: code
     label: 格式化检索片段
     depends_on: [rag_retrieve]
-    inputs: {chunks: $rag_retrieve}
-    script: |
-      if not isinstance(chunks, list) or not chunks:
-          result = "知识库中没有检索到相关内容。"
-      else:
-          lines = [f"[{i}] {c.get('source', '')} {c.get('text', '')}" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]
-          result = "\n\n".join(lines)
+    inputs:
+      chunks: $rag_retrieve
+      script: |
+        if not isinstance(chunks, list) or not chunks:
+            result = "知识库中没有检索到相关内容。"
+        else:
+            lines = [f"[{i}] {c.get('source', '')} {c.get('text', '')}" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]
+            result = "\n\n".join(lines)
 
   rag_answer:
     type: llm_chat

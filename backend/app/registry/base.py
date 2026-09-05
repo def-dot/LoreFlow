@@ -36,9 +36,8 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     """
     approver = ctx.get("_approver")
     if approver is None:
-        raise ValueError("人工审核节点缺少 approver —— load_dag(approver=...) 未提供")
-    name = ctx["_node"]  # approver 按节点领取决策（make_approver 的 claim_decision）
-
+        raise ValueError("人工审核节点缺少 approver —— dag.run(approver=...) 未提供")
+    name = ctx["_node"]  # approver 按节点领取决策
     review = ctx.get("_review")
     if isinstance(review, dict) and review:
         # 卡片键带 $ 引用前缀（声明层约定）；载荷与决策字段用剥前缀后的裸键
@@ -69,7 +68,7 @@ async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
     output_schema={"type": "any", "description": "脚本中result变量的值"},
 )
 async def code(ctx: dict[str, Any]) -> Any:
-    script = ctx.get("_script")
+    script = ctx.get("script")
     if not script or not isinstance(script, str):
         raise ValueError("code 节点缺少 script")
 

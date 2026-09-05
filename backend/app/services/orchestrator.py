@@ -18,61 +18,15 @@ from app.core.logging import get_logger
 from app.engine import (
     DAG,
     NodeResult,
-    NodeStatus,
     SuspendExecution,
     load_dag,
 )
-from app.engine.node import ApproverFunc
-from app.engine.types import NodeEventFunc
 from app.engine.validate import validate_inputs
 from app.models.run import RunRecord, RunStatus
 from app.services import runs
 from app.services.pipelines import get_pipeline
 
 logger = get_logger(__name__)
-
-
-def make_approver(record: RunRecord) -> ApproverFunc:
-    """人工审核时挂起；审核后恢复。
-    """
-
-    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        entry = record.nodes.setdefault(node_name, {})
-        output = entry.get("output") or {}
-        if output.get("decision"):
-            return output["decision"]
-
-        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批", {"payload": payload})
-
-    return approver
-
-
-def make_event_sink(record: RunRecord) -> NodeEventFunc:
-    """节点状态变化写进快照并落库（只写 nodes，status 归 CAS 独占）。
-    """
-
-    async def on_event(result: NodeResult) -> None:
-        entry = result.to_dict()
-        prev = record.nodes.get(result.node_name) or {}
-        prev_output = prev.get("output")
-        if entry.get("output") is None and prev_output is not None:
-            entry["output"] = prev_output
-
-        if result.status is NodeStatus.RETRYING:
-            entry["attempts_log"] = (prev.get("attempts_log") or []) + [
-                {
-                    "attempt": result.attempts,
-                    "error": entry.get("error"),
-                    "at": datetime.now().isoformat(timespec="seconds"),
-                }
-            ]
-        record.nodes[result.node_name] = {**prev, **entry}
-        try:
-            await runs.save_nodes(record)
-        except Exception as exc:
-            logger.error("Failed to save run snapshot: %s", exc)
-
-    return on_event
 
 
 async def approve_and_resume(record: RunRecord, node_name: str, decision: dict[str, Any]) -> None:
@@ -88,13 +42,34 @@ async def approve_and_resume(record: RunRecord, node_name: str, decision: dict[s
 async def run_pipeline(record: RunRecord, dag: DAG) -> None:
     """执行一次 run。挂起与终态均走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
     """
+
+    async def on_event(result: NodeResult) -> None:
+        record.nodes[result.node_name] = result.to_dict()
+        try:
+            await runs.save_nodes(record)
+        except Exception as exc:
+            logger.error("Failed to save run snapshot: %s", exc)
+
+    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """人工审核时挂起；审核后恢复。"""
+        entry = record.nodes.setdefault(node_name, {})
+        output = entry.get("output") or {}
+        if output.get("decision"):
+            return output["decision"]
+
+        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批", {"payload": payload})
+
     outcome = RunStatus.COMPLETED
     error: str | None = None
     try:
-        results = await dag.run(inputs=record.inputs, resume=record.nodes)
-        output_result = results.get("_output")
-        if output_result is not None:
-            record.nodes["_output"] = output_result.to_dict()
+        results = await dag.run(
+            inputs=record.inputs,
+            on_event=on_event,
+            approver=approver,
+            resume=record.nodes,
+        )
+        if "_output" in results:
+            record.nodes["_output"] = results["_output"]
             await runs.save_nodes(record)
     except asyncio.CancelledError:
         outcome = RunStatus.CANCELLED
@@ -155,11 +130,9 @@ async def create_run(
         created_at=datetime.now().isoformat(timespec="seconds"),
         status=RunStatus.RUNNING,
     )
-    dag.approver = make_approver(record)
-    dag.on_event = make_event_sink(record)
     record.definition = text
 
-    errors = validate_inputs(inputs, dag.params)
+    errors = validate_inputs(inputs, dag.inputs)
     if errors:
         raise ValueError("\n".join(errors))
 
@@ -219,12 +192,8 @@ async def resume_record(record: RunRecord) -> None:
     
     record.status = RunStatus.RUNNING
    
-    dag = load_dag(
-        yaml.safe_load(record.definition),
-        approver=make_approver(record),
-        on_event=make_event_sink(record),
-    )
-  
+    dag = load_dag(yaml.safe_load(record.definition))
+
     task = asyncio.create_task(run_pipeline(record, dag))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
     task.add_done_callback(lambda _: watchdog.cancel())

@@ -25,7 +25,7 @@ from .condition import _parse
 _PARAM_FIELDS = {"label", "description", "default", "required", "multiline", "file"}
 
 #: 注册函数类型接受的默认字段集（human 同样使用，无特殊字段）。
-_NODE_FIELDS = {"type", "label", "description", "depends_on", "inputs", "retry", "timeout", "condition", "script"}
+_NODE_FIELDS = {"type", "label", "description", "depends_on", "inputs", "retry", "timeout", "condition"}
 
 
 # ------------------------------------------------------------------
@@ -308,42 +308,46 @@ def validate_nodes(config: dict[str, Any]) -> list[str]:
                 f"节点 {name!r}: {msg}" for msg in _validate_review(wiring["_review"], refs)
             )
 
-        script = spec.get("script")
         if type_key == "code":
+            inputs = spec.get("inputs") or {}
+            script = inputs.get("script") if isinstance(inputs, dict) else None
             if not script or not isinstance(script, str) or not script.strip():
-                errors.append(f"节点 {name!r}: code 类型必须提供非空 script")
-        elif script:
-            errors.append(f"节点 {name!r}: script 字段仅允许 code 类型节点使用")
+                errors.append(f"节点 {name!r}: code 类型必须在 inputs 中提供非空 script")
 
     return errors
 
 
 def validate_output(config: dict[str, Any]) -> list[str]:
-    """校验顶层 output 声明：``$node`` 或 ``[$node, ...]``，引用根键 ∈ nodes。"""
+    """校验顶层 output 声明（形态：映射 ``{key: $ref}``）。
+
+    ``$ref`` 的根键必须是已声明的节点名或输入键名。
+    点分路径后续段是运行期数据，不校验。
+    """
     output = config.get("output")
     if output is None:
         return []
 
-    node_names = set(config.get("nodes") or {})
     errors: list[str] = []
+    if not isinstance(output, dict):
+        errors.append(f"output 必须是映射，实际是 {type(output).__name__}")
+        return errors
+    if not output:
+        errors.append("output 映射不能为空")
+        return errors
 
-    def _check_ref(ref: Any, idx: int | None = None) -> None:
-        loc = f"output[{idx}]" if idx is not None else "output"
-        if not isinstance(ref, str):
-            errors.append(f"{loc} 必须是字符串，实际是 {type(ref).__name__}")
-            return
-        if not ref.startswith("$"):
-            errors.append(f"{loc} 引用 {ref!r} 须以 $ 开头")
-            return
-        root = ref[1:].partition(".")[0]
-        if root not in node_names:
-            errors.append(f"{loc} 引用的节点 {root!r} 不在 DAG 中")
+    known = set(config.get("nodes") or {}) | set(config.get("inputs") or {})
 
-    if isinstance(output, list):
-        for i, item in enumerate(output):
-            _check_ref(item, i)
-    else:
-        _check_ref(output)
+    for key, ref in output.items():
+        if not isinstance(key, str) or not key:
+            errors.append(f"output 映射键必须是非空字符串，实际是 {key!r}")
+            continue
+        loc = f"output.{key}"
+        if not isinstance(ref, str) or not ref.startswith("$"):
+            errors.append(f"{loc} 必须是 $ 开头的引用，实际是 {ref!r}")
+            continue
+        root = ref[1:].split(".")[0]
+        if root and root not in known:
+            errors.append(f"{loc} 引用的 {root!r} 不在节点或输入中")
 
     return errors
 

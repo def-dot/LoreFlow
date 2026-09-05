@@ -10,15 +10,12 @@ from app.registry import REGISTRY
 
 from . import validate
 from .dag import DAG
-from .node import ApproverFunc, Node
+from .node import Node
 from .resolve import parse_retry
-from .types import NodeEventFunc
 
 
 def load_dag(
     config: dict[str, Any],
-    approver: ApproverFunc | None = None,
-    on_event: NodeEventFunc | None = None,
 ) -> DAG:
     """Build a :class:`DAG` from a config dict."""
 
@@ -28,10 +25,8 @@ def load_dag(
 
     dag = DAG(
         config.get("name", "dag"),
-        params=config.get("inputs") or {},
-        on_event=on_event,
-        approver=approver,
-        output_expr=config.get("output"),
+        inputs=config.get("inputs") or {},
+        output=config.get("output"),
     )
 
     for name, spec in config["nodes"].items():
@@ -51,7 +46,6 @@ def load_dag(
                 retry=retry,
                 timeout=spec.get("timeout"),
                 condition=spec.get("condition"),
-                script=spec.get("script"),
             )
         )
     return dag

@@ -24,14 +24,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import pprint
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Any
 
 from app.registry import NodeType
 
 from .executor import DAGExecutor
-from .node import ApproverFunc, ConditionFunc, Node, NodeFunc
+from .node import ApproverFunc, ConditionFunc, Node, NodeFunc, wired_ctx
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
 from .validate import validate_graph, validate_inputs, validate_params
 
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 async def terminal_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Interactive approver: ask the reviewer on the terminal (y/n).
 
-    Pass explicitly to ``load_dag(approver=...)`` or ``DAG(approver=...)``
+    Pass explicitly to ``dag.run(approver=...)``
     for runs driven from a terminal; on EOF (e.g. CI) the review is rejected.
     """
     print(f"  Payload:\n{pprint.pformat(payload, sort_dicts=False)}")
@@ -65,29 +65,23 @@ class DAG:
 
     Parameters:
         name: A human-readable label for this workflow (used in logs & diagrams).
-        params: 运行时输入参数声明 ``{name: {default, required, ...}}``
-                （load_dag 传入 YAML 顶层 ``inputs`` 原文）。默认值/必填键不
-                单独拆开传，由 :attr:`default_inputs` / :attr:`required_inputs`
-                按需派生。
-        on_event: Optional async callback invoked on every node state change
-                  (running/retrying/completed/failed/upstream_failed/skipped/
-                  upstream_skipped/cancelled) and awaited. Useful for live
-                  progress monitoring (e.g. a web UI).
+        inputs: 运行时输入参数声明 ``{name: {default, required, ...}}``
+                （YAML 顶层 ``inputs`` 原文）。默认值/必填键不单独拆开传，
+                由 :attr:`default_inputs` / :attr:`required_inputs` 按需派生。
+        output: 最终输出声明 ``{key: $ref}``
+                （YAML 顶层 ``output`` 原文）。语法与 node inputs 接线一致，
+                从执行上下文（inputs + 节点输出）按 ``$key`` 提取。
     """
 
     def __init__(
         self,
         name: str = "dag",
-        params: dict[str, dict[str, Any]] | None = None,
-        on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
-        approver: ApproverFunc | None = None,
-        output_expr: str | list[str] | None = None,
+        inputs: dict[str, dict[str, Any]] | None = None,
+        output: dict[str, str] | None = None,
     ):
         self.name = name
-        self.params = params if params else {}
-        self.on_event = on_event
-        self.approver = approver
-        self.output_expr = output_expr
+        self.inputs = inputs if inputs else {}
+        self.output = output
         self._nodes: dict[str, Node] = {}
 
     @property
@@ -96,14 +90,14 @@ class DAG:
         """
         return {
             name: spec["default"]
-            for name, spec in self.params.items()
+            for name, spec in self.inputs.items()
             if "default" in spec
         }
 
     @property
     def required_inputs(self) -> list[str]:
         """``required: true`` 的参数键（run 前缺失即 ``ValueError``）。"""
-        return [name for name, spec in self.params.items() if spec.get("required")]
+        return [name for name, spec in self.inputs.items() if spec.get("required")]
 
     # ------------------------------------------------------------------
     # Registration
@@ -225,11 +219,11 @@ class DAG:
                 logger.info("[%s] loop iteration %d / %d", name, iteration, max_iterations)
 
                 # Run the body sub-DAG。直接驱动执行器并共享外层上下文：
-                # body 已在注册期校验过，且外层上下文对无 params 的 body
+                # body 已在注册期校验过，且外层上下文对无 inputs 的 body
                 # 不是「输入」，不走 run() 的输入白名单。body 失败时已完成
                 # 节点的输出已在共享上下文，是否终止循环由 condition 决定
                 try:
-                    await DAGExecutor(nodes=sub.nodes, ctx=ctx, on_event=sub.on_event).execute()
+                    await DAGExecutor(nodes=sub.nodes, ctx=ctx).execute()
                 except DAGExecutionError:
                     pass
 
@@ -287,7 +281,7 @@ class DAG:
             return errors
 
         # 程序化 DAG 无 config —— 按函数入参形状合成（只用到 inputs/nodes 键）
-        errors.extend(validate_params({"inputs": self.params, "nodes": self._nodes}))
+        errors.extend(validate_params({"inputs": self.inputs, "nodes": self._nodes}))
 
         edges = {name: node.depends_on for name, node in self._nodes.items()}
         errors.extend(validate_graph(edges))
@@ -330,6 +324,9 @@ class DAG:
     async def run(
         self,
         inputs: dict[str, Any] | None = None,
+        *,
+        on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
+        approver: ApproverFunc | None = None,
         concurrency: int | None = None,
         resume: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, NodeResult]:
@@ -338,17 +335,20 @@ class DAG:
         Args:
             inputs: Initial data placed into the shared context before
                     execution (defaults to ``default_inputs``).
+            on_event: 每个节点状态变化时的回调（running/retrying/completed/
+                      failed/skipped/upstream_skipped/cancelled）。
+            approver: 人工审核回调（human 节点挂起时调用）。
             concurrency: Maximum number of nodes running at once
                          (``None`` = unlimited).
             resume: 重启恢复用的节点快照（见 DAGExecutor.execute）。
 
         Returns:
-            映射每个节点名到 :class:`NodeResult`。若声明了 ``output_expr``
-            则额外包含 ``_output`` 键（值为 :class:`NodeResult`，output
-            字段即表达式求值结果）。
+            映射每个节点名到 :class:`NodeResult`。若声明了 ``output``
+            则额外包含 ``_output`` 键：按 ``{key: $.路径}`` 从运行文档提取
+            的映射，被跳过分支 / 缺失路径的键缺席。
 
         Raises:
-            ValueError: 结构校验失败，或（声明了 params 时）输入不合法。
+            ValueError: 结构校验失败，或（声明了 inputs 时）输入不合法。
             DAGExecutionError: If any nodes failed.
         """
         errors = self.validate()
@@ -358,7 +358,7 @@ class DAG:
         if inputs is None:
             inputs = self.default_inputs
 
-        if self.params and (errors := validate_inputs(inputs, self.params)):
+        if self.inputs and (errors := validate_inputs(inputs, self.inputs)):
             raise ValueError("\n".join(errors))
 
         logger.info("== DAG %r starting (%d nodes) ==", self.name, len(self._nodes))
@@ -367,27 +367,17 @@ class DAG:
 
         # _approver 注入共享上下文：human 节点的审核结果来自当前运行
         ctx: dict[str, Any] = dict(inputs or {})
-        if self.approver is not None:
-            ctx["_approver"] = self.approver
+        if approver is not None:
+            ctx["_approver"] = approver
 
-        executor = DAGExecutor(nodes=self._nodes, ctx=ctx, concurrency=concurrency, on_event=self.on_event)
+        executor = DAGExecutor(nodes=self._nodes, ctx=ctx, concurrency=concurrency, on_event=on_event)
         results = await executor.execute(resume=resume)
 
-        # ---- output 求值：从 ctx 中按 output_expr 提取最终输出 ----
-        if self.output_expr is not None:
-            refs = [self.output_expr] if isinstance(self.output_expr, str) else self.output_expr
-            output: Any = None
-            for ref in refs:
-                key = ref[1:] if ref.startswith("$") else ref  # $node → node
-                value = ctx.get(key)
-                if value is not None:
-                    output = value
-                    break
-            results["_output"] = NodeResult(
-                node_name="_output",
-                status=NodeStatus.COMPLETED if output is not None else NodeStatus.SKIPPED,
-                output=output,
-            )
+        if self.output is not None:
+            results["_output"] = {
+                k: v for k, v in wired_ctx(ctx, self.output).items()
+                if k in self.output and v is not None
+            }
 
         return results
 

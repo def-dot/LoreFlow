@@ -1,6 +1,9 @@
 name: LLM 智能对话
 description: LLM 判断是否需要联网搜索——需要时先检索再汇总回复，不需要时直接回复。
-output: [$search_reply, $direct_reply]
+
+output:
+  search_reply: $search_reply
+  direct_reply: $direct_reply
 
 inputs:
   prompt:
@@ -37,17 +40,17 @@ nodes:
     depends_on: [search]
     inputs:
       search: $search
-    script: |
-      if not isinstance(search, list):
-          result = ""
-      else:
-          lines = []
-          for i, r in enumerate(search, 1):
-              title = r.get("title", "")
-              url = r.get("url", "")
-              snippet = r.get("snippet", "")
-              lines.append(f"[{i}] {title}\n{url}\n{snippet}")
-          result = "\n\n".join(lines)
+      script: |
+        if not isinstance(search, list):
+            result = ""
+        else:
+            lines = []
+            for i, r in enumerate(search, 1):
+                title = r.get("title", "")
+                url = r.get("url", "")
+                snippet = r.get("snippet", "")
+                lines.append(f"[{i}] {title}\n{url}\n{snippet}")
+            result = "\n\n".join(lines)
 
   search_reply:
     type: llm_chat

@@ -70,6 +70,7 @@ class NodeResult:
         error: The exception that caused failure (if failed).
         attempts: Number of execution attempts (1 + retries).
         duration_ms: Wall-clock duration of the final attempt in milliseconds.
+        retry_history: 重试记录列表（由 executor 构建，每次 RETRYING 追加）。
     """
 
     node_name: str
@@ -78,16 +79,22 @@ class NodeResult:
     error: Exception | None = None
     attempts: int = 0
     duration_ms: float = 0.0
+    retry_history: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe dict (the shape the web UI consumes)."""
-        return {
+        d: dict[str, Any] = {
             "status": self.status.value,
             "output": self.output,
-            "error": str(self.error) if self.error else None,
             "attempts": self.attempts,
-            "duration_ms": round(self.duration_ms) if self.duration_ms else 0,
         }
+        if self.error:
+            d["error"] = str(self.error)
+        if self.duration_ms:
+            d["duration_ms"] = round(self.duration_ms)
+        if self.retry_history:
+            d["attempts_log"] = self.retry_history
+        return d
 
     def __repr__(self) -> str:
         if self.status == NodeStatus.COMPLETED:

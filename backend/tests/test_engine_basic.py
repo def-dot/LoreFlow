@@ -148,7 +148,7 @@ async def test_resume_ignores_nodes_missing_from_current_dag() -> None:
 
 
 async def test_default_inputs_applied() -> None:
-    dag = DAG("inputs", params={"seed": {"default": 41}})
+    dag = DAG("inputs", inputs={"seed": {"default": 41}})
 
     @dag.node("calc")
     async def calc(ctx: dict[str, Any]) -> int:
@@ -216,71 +216,88 @@ def test_depends_on_wrong_type_keeps_node_visible() -> None:
     assert dag.validate() == ["节点 'a': depends_on 必须是字符串列表"]
 
 
-def test_no_params_rejects_any_inputs() -> None:
-    """params 未声明 → 输入白名单为空：任何输入键都算未声明（此前静默进上下文）。"""
-    dag = DAG("no_params")
+def test_no_inputs_rejects_any_inputs() -> None:
+    """inputs 未声明 → 输入白名单为空：任何输入键都算未声明（此前静默进上下文）。"""
+    dag = DAG("no_inputs")
 
     @dag.node("a")
     async def a(ctx: dict[str, Any]) -> int:
         return 1
 
-    assert validate_inputs({"x": 1}, dag.params) == ["未声明的参数键: x"]
+    assert validate_inputs({"x": 1}, dag.inputs) == ["未声明的参数键: x"]
 
 
 # ---------------------------------------------------------------------------
-# output_expr 求值
+# output 求值（$key 语法，与 node inputs 接线一致）
 # ---------------------------------------------------------------------------
 
 
-async def test_output_expr_list_picks_first_non_null() -> None:
-    """output_expr 为列表时，按声明顺序取第一个非 null 的节点输出。"""
-    dag = DAG("out_list", output_expr=["$a", "$b"])
+async def test_output_extracts_node_and_path() -> None:
+    """$key 提取节点输出，点分路径下钻子字段。"""
+    dag = DAG("out_map", output={
+        "result_text": "$a.text",
+        "status_code": "$b.code",
+    })
 
     @dag.node("a")
+    async def a(ctx):
+        return {"text": "hello"}
+
+    @dag.node("b")
+    async def b(ctx):
+        return {"code": 200}
+
+    results = await dag.run()
+    assert results["_output"] == {"result_text": "hello", "status_code": 200}
+
+
+async def test_output_skipped_branch_absent() -> None:
+    """被跳过的节点不在上下文中 → 该键缺席。"""
+    dag = DAG("out_skip", output={"a": "$a", "b": "$b"})
+
+    @dag.node("a", condition=False)
     async def a(ctx):
         return "from_a"
 
-    @dag.node("b", depends_on=["a"])
+    @dag.node("b")
     async def b(ctx):
-        return None
+        return "from_b"
 
     results = await dag.run()
-    assert "_output" in results
-    assert results["_output"].output == "from_a"
-    assert results["_output"].status == NodeStatus.COMPLETED
+    assert results["a"].status == NodeStatus.SKIPPED
+    assert results["_output"] == {"b": "from_b"}
 
 
-async def test_output_expr_single_ref() -> None:
-    """output_expr 为单个 $node 字符串时直接取该节点输出。"""
-    dag = DAG("out_single", output_expr="$x")
-
-    @dag.node("x")
-    async def x(ctx):
-        return "single"
-
-    results = await dag.run()
-    assert results["_output"].output == "single"
-
-
-async def test_output_expr_all_null_yields_skipped() -> None:
-    """所有引用节点输出均为 null 时，_output 状态为 SKIPPED。"""
-    dag = DAG("out_all_none", output_expr=["$a", "$b"])
+async def test_output_missing_path_absent() -> None:
+    """下钻路径不存在 → 键缺席，不报错。"""
+    dag = DAG("out_miss", output={"x": "$a.nope"})
 
     @dag.node("a")
     async def a(ctx):
-        return None
-
-    @dag.node("b", depends_on=["a"])
-    async def b(ctx):
-        return None
+        return {"text": "hello"}
 
     results = await dag.run()
-    assert results["_output"].status == NodeStatus.SKIPPED
-    assert results["_output"].output is None
+    assert results["_output"] == {}
 
 
-async def test_no_output_expr_no_output_key() -> None:
-    """未声明 output_expr 时，results 中不含 _output 键。"""
+async def test_output_inputs_ref() -> None:
+    """$key 引用本次运行输入（inputs 直接在上下文顶层）。"""
+    dag = DAG(
+        "out_inputs",
+        inputs={"query": {"default": "hi"}},
+        output={"q": "$query"},
+    )
+
+    @dag.node("a")
+    async def a(ctx):
+        return ctx["query"]
+
+    results = await dag.run()
+    assert results["_output"] == {"q": "hi"}
+
+
+async def test_no_output_no_output_key() -> None:
+    """未声明 output 时，results 中不含 _output 键。"""
     dag = DAG("no_output")
 
     @dag.node("x")
@@ -291,49 +308,68 @@ async def test_no_output_expr_no_output_key() -> None:
     assert "_output" not in results
 
 
-def test_output_validation_rejects_missing_node() -> None:
-    """output 引用不存在的节点时报错。"""
-    errors = validate_config({
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": "$nonexistent",
-    })
-    assert any("nonexistent" in e and "不在 DAG 中" in e for e in errors)
-
-
-def test_output_validation_rejects_missing_node_in_list() -> None:
-    """output 列表中引用不存在的节点时报错。"""
-    errors = validate_config({
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": ["$a", "$missing"],
-    })
-    assert any("missing" in e and "不在 DAG 中" in e for e in errors)
-
-
-def test_output_validation_accepts_valid_refs() -> None:
-    """output 引用存在的节点时通过校验。"""
+def test_output_validation_accepts_node_ref() -> None:
+    """$节点名 引用存在的节点时通过校验。"""
     errors = validate_config({
         "nodes": {
             "a": {"type": "test_fetch"},
             "b": {"type": "test_fetch"},
         },
-        "output": ["$a", "$b"],
+        "output": {"result_text": "$a.text", "code": "$b.code"},
     })
     assert errors == []
 
 
-def test_output_validation_accepts_single_ref() -> None:
-    """output 单引用存在的节点时通过校验。"""
+def test_output_validation_accepts_input_ref() -> None:
+    """$输入键 引用已声明的输入键时通过校验。"""
+    errors = validate_config({
+        "inputs": {"query": {}},
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": {"q": "$query"},
+    })
+    assert errors == []
+
+
+def test_output_validation_rejects_non_mapping() -> None:
+    """output 只认映射形态，字符串报错。"""
     errors = validate_config({
         "nodes": {"a": {"type": "test_fetch"}},
         "output": "$a",
     })
-    assert errors == []
+    assert any("必须是映射" in e for e in errors)
 
 
-def test_output_validation_rejects_no_dollar_prefix() -> None:
-    """output 引用不带 $ 前缀时报错。"""
+def test_output_validation_rejects_missing_ref() -> None:
+    """$引用 不存在的节点或输入时报错。"""
     errors = validate_config({
         "nodes": {"a": {"type": "test_fetch"}},
-        "output": "a",
+        "output": {"k": "$missing"},
     })
-    assert any("$" in e for e in errors)
+    assert any("missing" in e and "不在节点或输入中" in e for e in errors)
+
+
+def test_output_validation_rejects_no_prefix() -> None:
+    """引用必须 $ 开头。"""
+    errors = validate_config({
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": {"k": "a.text"},
+    })
+    assert any("$ 开头" in e for e in errors)
+
+
+def test_output_validation_rejects_empty_mapping() -> None:
+    """output 映射不能为空。"""
+    errors = validate_config({
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": {},
+    })
+    assert any("不能为空" in e for e in errors)
+
+
+def test_output_validation_rejects_undeclared_input_ref() -> None:
+    """$引用 未声明的键时报错。"""
+    errors = validate_config({
+        "nodes": {"a": {"type": "test_fetch"}},
+        "output": {"q": "$query"},
+    })
+    assert any("query" in e for e in errors)

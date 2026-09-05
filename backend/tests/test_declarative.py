@@ -60,8 +60,8 @@ async def test_load_dag_with_human_node() -> None:
             "review": {"type": "human", "depends_on": ["data"], "prompt": "check it"},
         },
     }
-    dag = load_dag(config, approver=approver)
-    results = await dag.run()
+    dag = load_dag(config)
+    results = await dag.run(approver=approver)
     assert results["review"].status == NodeStatus.COMPLETED
 
 
@@ -80,8 +80,8 @@ async def test_load_dag_human_with_condition() -> None:
             "review": {"type": "human", "depends_on": ["data"], "condition": "$approved == true"},
         },
     }
-    dag = load_dag(config, approver=approver)
-    results = await dag.run()
+    dag = load_dag(config)
+    results = await dag.run(approver=approver)
     assert results["review"].status == NodeStatus.SKIPPED
     assert calls == []
 
@@ -196,7 +196,7 @@ def test_load_dag_bad_file(tmp_path) -> None:
 
 
 async def test_required_inputs_enforced_at_run(registered: Any) -> None:
-    """params 声明的必填键：run() 对生效输入强制契约——缺必填开跑前即 ValueError。"""
+    """inputs 声明的必填键：run() 对生效输入强制契约——缺必填开跑前即 ValueError。"""
     ran = {"n": 0}
 
     async def only(ctx: dict[str, Any]) -> str:
@@ -207,7 +207,7 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     dag = load_dag({"nodes": {"only": {"type": "t_only"}}, "inputs": {"query": {"required": True}}})
 
     assert dag.validate() == []
-    assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
+    assert validate_inputs({}, dag.inputs) == ["必填参数缺失或为空: query"]
 
     with pytest.raises(ValueError, match="必填参数缺失或为空"):
         await dag.run()
@@ -239,7 +239,7 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
     assert ran["n"] == 1
 
     # 显式空 = 未提供，不回退 default（create_run 校验原始 inputs 时拦截）
-    assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
+    assert validate_inputs({}, dag.inputs) == ["必填参数缺失或为空: query"]
 
     results = await dag.run(inputs={"query": "显式值"})
     assert results["only"].output == "显式值"
@@ -265,16 +265,16 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
     )
 
     for bad in (None, "", "   "):
-        assert validate_inputs({"count": bad}, dag.params) == ["必填参数缺失或为空: count"]
+        assert validate_inputs({"count": bad}, dag.inputs) == ["必填参数缺失或为空: count"]
 
     for good in (0, False):
         results = await dag.run(inputs={"count": good})
         assert results["echo"].output == good  # 0/False 是填了的合法值
 
 
-async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
-    """输入键必须是声明参数的子集：声明了 params → inputs ⊆ 声明键；
-    未声明 params → 白名单为空，任何输入键都算未声明（loop body
+async def test_undeclared_inputs_reject_all_inputs(registered: Any) -> None:
+    """输入键必须是声明参数的子集：声明了 inputs → 实际输入 ⊆ 声明键；
+    未声明 inputs → 白名单为空，任何输入键都算未声明（loop body
     不受影响——loop_func 直接驱动执行器，不走 run() 的输入契约）。"""
 
     async def echo(ctx: dict[str, Any]) -> Any:
@@ -282,19 +282,19 @@ async def test_undeclared_params_reject_all_inputs(registered: Any) -> None:
 
     registered("t_echo_extra", echo)
 
-    # 声明了 params 契约：extra 未声明 → 拒
+    # 声明了 inputs 契约：extra 未声明 → 拒
     declared = load_dag(
         {"nodes": {"echo": {"type": "t_echo_extra"}},
          "inputs": {"q": {"required": True}}}
     )
     inputs = {"q": "ok", "extra": 1}
-    assert validate_inputs(inputs, declared.params) == ["未声明的参数键: extra"]
+    assert validate_inputs(inputs, declared.inputs) == ["未声明的参数键: extra"]
 
-    # 未声明 params：白名单为空，q/extra 都是未声明的
+    # 未声明 inputs：白名单为空，q/extra 都是未声明的
     free = load_dag({"nodes": {"echo": {"type": "t_echo_extra"}}})
-    assert validate_inputs(inputs, free.params) == ["未声明的参数键: extra, q"]
+    assert validate_inputs(inputs, free.inputs) == ["未声明的参数键: extra, q"]
 
-    # 未声明 params = 自由上下文种子：run() 不设白名单，原样进 ctx
+    # 未声明 inputs = 自由上下文种子：run() 不设白名单，原样进 ctx
     results = await free.run(inputs={"extra": 1})
     assert results["echo"].output == 1
 
@@ -311,12 +311,12 @@ def test_input_keys_clash_node_names_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# params 富声明 — label/description/default/required，与简式归一化
+# inputs 富声明 — label/description/default/required，与简式归一化
 # ---------------------------------------------------------------------------
 
 
-def test_params_rich_form() -> None:
-    """params 富声明原样进 DAG；默认值/必填键是从声明派生的只读视图
+def test_inputs_rich_form() -> None:
+    """inputs 富声明原样进 DAG；默认值/必填键是从声明派生的只读视图
     （前端参数行由展示层从同一声明派生，见 services/pipelines._param_rows）。"""
     params = {
         "query": {"required": True, "label": "查询词", "description": "要检索的内容"},
@@ -325,18 +325,18 @@ def test_params_rich_form() -> None:
         "body": {"required": True, "multiline": True},  # 多行文本（前端 textarea）
     }
     dag = load_dag({"nodes": {"only": {"type": "test_fetch"}}, "inputs": params})
-    assert dag.params == params  # 声明原样保留
+    assert dag.inputs == params  # 声明原样保留
     assert dag.default_inputs == {"topic": "默认主题", "limit": 5}
     assert dag.required_inputs == ["query", "body"]
 
 
-def test_params_multiline_bad_type_rejected() -> None:
+def test_inputs_multiline_bad_type_rejected() -> None:
     errors = validate_params({"inputs": {"b": {"multiline": "yes"}}})
     assert errors == ["参数 'b': multiline 必须是布尔值"]
 
 
-async def test_params_rich_form_runs(registered: Any) -> None:
-    """params 声明的必填/默认与简式语义一致：run 前校验、默认值进 ctx。"""
+async def test_inputs_rich_form_runs(registered: Any) -> None:
+    """inputs 声明的必填/默认与简式语义一致：run 前校验、默认值进 ctx。"""
 
     async def search(ctx: dict[str, Any]) -> dict[str, Any]:
         return {"query": ctx["query"], "topic": ctx.get("topic")}
@@ -353,19 +353,19 @@ async def test_params_rich_form_runs(registered: Any) -> None:
     )
     assert dag.default_inputs == {"topic": "默认主题"}
     assert dag.required_inputs == ["query"]
-    assert validate_inputs({}, dag.params) == ["必填参数缺失或为空: query"]
+    assert validate_inputs({}, dag.inputs) == ["必填参数缺失或为空: query"]
 
     # run(inputs=...) 整体替换默认值；合并语义在 orchestrator（runtime 覆盖默认）
     results = await dag.run(inputs={**dag.default_inputs, "query": "洛伦佐"})
     assert results["search"].output == {"query": "洛伦佐", "topic": "默认主题"}
 
 
-def test_params_unknown_field_rejected() -> None:
+def test_inputs_unknown_field_rejected() -> None:
     errors = validate_params({"inputs": {"q": {"type": "string"}}})
     assert errors == ["参数 'q': 不支持的字段 ['type']"]
 
 
-def test_params_collects_all_errors() -> None:
+def test_inputs_collects_all_errors() -> None:
     """多个参数错误一次性全部返回，而非遇错即抛。"""
     errors = validate_params({"inputs": {
         "q": {"bogus": 1},
@@ -378,14 +378,14 @@ def test_params_collects_all_errors() -> None:
     assert any("定义必须是映射" in e for e in errors)
 
 
-def test_params_node_name_clash_rejected() -> None:
+def test_inputs_node_name_clash_rejected() -> None:
     """参数键与节点名冲突应被拒绝"""
     assert validate_params(
         {"inputs": {"query": {"required": True}}, "nodes": {"query": {}}}
     ) == ["输入参数键与节点名冲突: query"]
 
 
-def test_params_no_clash_accepted() -> None:
+def test_inputs_no_clash_accepted() -> None:
     """参数键与节点名无冲突时通过"""
     assert validate_params(
         {"inputs": {"query": {"required": True}}, "nodes": {"fetch": {}}}
@@ -420,7 +420,7 @@ def test_validate_nodes_accepts() -> None:
 
     # human 类型节点
     assert validate_nodes({"nodes": {"a": {"type": "human", "prompt": "审核"}}}) == []
-    # human 节点 review - 键必须在 params 或 nodes 中
+    # human 节点 review - 键必须在 inputs 或 nodes 中
     assert validate_nodes({
         "nodes": {"a": {"type": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}},
         "inputs": {"title": {}},
@@ -520,7 +520,7 @@ def test_validate_nodes_collects_errors_across_nodes() -> None:
 
 def test_validate_config_accepts() -> None:
     """validate_config 接受合法的完整配置（结构检查要求至少一个节点）"""
-    # 只有 nodes（params 可选）
+    # 只有 nodes（inputs 可选）
     assert validate_config({"nodes": {"a": {"type": "test_fetch"}}}) == []
 
     # 完整配置
@@ -532,7 +532,7 @@ def test_validate_config_accepts() -> None:
 
 def test_validate_config_rejects_bad_structure() -> None:
     """图结构错误：空流水线 / 依赖缺失 / 循环依赖（loop body 递归同查）"""
-    # nodes 是必填键：未声明（含只声明 params）与空映射都报错
+    # nodes 是必填键：未声明（含只声明 inputs）与空映射都报错
     assert validate_config({}) == ["流水线至少需要一个节点"]
     assert validate_config({"inputs": {"q": {"required": True}}}) == [
         "流水线至少需要一个节点"
@@ -571,7 +571,7 @@ def test_validate_config_rejects_param_node_clash() -> None:
 
 def test_param_node_clash_checked_at_engine() -> None:
     """程序化 DAG 不走 validate_params——冲突由 DAG.validate 兜底拦截。"""
-    dag = DAG("clash", params={"query": {"required": True}})
+    dag = DAG("clash", inputs={"query": {"required": True}})
 
     @dag.node("query")
     async def query(ctx: dict[str, Any]) -> str:
@@ -582,9 +582,9 @@ def test_param_node_clash_checked_at_engine() -> None:
 
 
 def test_param_spec_shape_checked_at_engine() -> None:
-    """程序化 DAG 的 params 形状由 DAG.validate 兜底——畸形 spec 不再让
+    """程序化 DAG 的 inputs 形状由 DAG.validate 兜底——畸形 spec 不再让
     required_inputs 的派生视图 AttributeError，而是清晰的校验消息。"""
-    dag = DAG("bad_spec", params={"q": "不是字典"})
+    dag = DAG("bad_spec", inputs={"q": "不是字典"})
 
     @dag.node("only")
     async def only(ctx: dict[str, Any]) -> str:
@@ -594,7 +594,7 @@ def test_param_spec_shape_checked_at_engine() -> None:
 
 
 def test_validate_config_collects_all_errors() -> None:
-    """params 与 nodes 的错误一次性全部返回（load_dag 抛出时含全部信息）"""
+    """inputs 与 nodes 的错误一次性全部返回（load_dag 抛出时含全部信息）"""
     config = {
         "inputs": {
             "q": {"bogus": 1},          # 不支持的字段

@@ -13,6 +13,7 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Any
 
 from .condition import eval_condition
@@ -190,6 +191,7 @@ class DAGExecutor:
             await self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
             retry = node.retry or RetryPolicy(max_retries=0)
             last_error: Exception | None = None
+            retry_history: list[dict[str, Any]] = []
 
             for attempt in range(retry.max_retries + 1):
                 try:
@@ -218,6 +220,7 @@ class DAGExecutor:
                         output=output,
                         attempts=attempt + 1,
                         duration_ms=duration_ms,
+                        retry_history=retry_history or None,
                     )
                     return result
 
@@ -229,6 +232,7 @@ class DAGExecutor:
                         output=exc.output,
                         error=exc,
                         attempts=attempt + 1,
+                        retry_history=retry_history or None,
                     )
                     return result
 
@@ -238,7 +242,7 @@ class DAGExecutor:
                     result = NodeResult(
                         node_name=node.name,
                         status=NodeStatus.REVIEWING,
-                        output=exc.results,
+                        retry_history=retry_history or None,
                     )
                     raise
 
@@ -264,14 +268,11 @@ class DAGExecutor:
                         exc,
                         delay,
                     )
-                    await self._emit(
-                        NodeResult(
-                            node_name=node.name,
-                            status=NodeStatus.RETRYING,
-                            attempts=attempt + 1,
-                            error=exc,
-                        )
-                    )
+                    retry_history.append({
+                        "attempt": attempt + 1,
+                        "error": str(exc),
+                        "at": datetime.now().isoformat(timespec="seconds"),
+                    })
                     await asyncio.sleep(delay)
 
             # ---- 5. All retries exhausted ----
@@ -287,6 +288,7 @@ class DAGExecutor:
                 status=NodeStatus.FAILED,
                 error=last_error,
                 attempts=attempt + 1,
+                retry_history=retry_history or None,
             )
         except asyncio.CancelledError:
             result = NodeResult(
@@ -302,8 +304,7 @@ class DAGExecutor:
                 error=exc,
             )
         finally:
-            if result:
-                await self._emit(result)
+            await self._emit(result)
             events[node.name].set()
         return result
 
@@ -317,8 +318,6 @@ class DAGExecutor:
         target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
         # target["_upstream"] = {d: self.ctx.get(d) for d in node.depends_on} if node.depends_on else {}
-        if node.script is not None:
-            target["_script"] = node.script
         coro = node.func(target)
         if node.timeout is not None:
             return await asyncio.wait_for(coro, timeout=node.timeout)

@@ -14,7 +14,7 @@ from app.engine.types import SuspendExecution
 from app.models.review import ReviewDecision
 from app.models.run import RunRecord
 from app.services import reviews, runs
-from app.services.orchestrator import make_approver
+from app.services.orchestrator import _make_approver
 
 
 async def _all_rows() -> list[ReviewDecision]:
@@ -121,6 +121,6 @@ async def test_approver_suspends_without_decision() -> None:
     record = await _persist_run()
 
     with pytest.raises(SuspendExecution) as excinfo:
-        await make_approver(record)("review", {"payload": "x"})
+        await _make_approver(record)("review", {"payload": "x"})
 
     assert excinfo.value.results == {"payload": {"payload": "x"}}

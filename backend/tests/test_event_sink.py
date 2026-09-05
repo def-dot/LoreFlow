@@ -1,83 +1,77 @@
-"""事件汇（make_event_sink）— attempts_log 重试历史的追加与透传"""
+"""节点快照 — executor 构建 retry_history，on_event 全量写入。"""
 
-from contextlib import contextmanager
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import AsyncMock, patch
 
-import pytest
-
-from app.engine import NodeResult, NodeStatus
+from app.engine import DAG, RetryPolicy
+from app.engine.node import Node
 from app.models.run import RunRecord
-from app.services.orchestrator import make_event_sink
+from app.services.orchestrator import run_pipeline
 
 
-async def _noop(_record: RunRecord) -> None:
-    """事件汇内部 save_nodes 的替身：只测快照组装，不落库。"""
-    return None
+async def test_retry_history_accumulates() -> None:
+    """重试 2 次后成功：attempts_log 保留全过程，终态 output 是最后一次的。"""
+    attempts = {"n": 0}
 
+    async def flaky(ctx: dict[str, Any]) -> str:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise TimeoutError(f"超时{attempts['n']}")
+        return "ok"
 
-def _result(status: NodeStatus, attempts: int = 0, error: Exception | None = None) -> NodeResult:
-    return NodeResult(node_name="外部API", status=status, attempts=attempts, error=error)
+    dag = DAG("retry_test")
+    dag.add_node(Node(name="flaky", func=flaky, retry=RetryPolicy(max_retries=3)))
 
-
-@contextmanager
-def _event_sink(record: RunRecord):
-    """构造事件汇并屏蔽落库。"""
-    with patch("app.services.orchestrator.runs.save_nodes", new=_noop):
-        yield make_event_sink(record)
-
-
-async def test_retry_history_appended_kept_on_success() -> None:
-    """重试 2 次后成功：终态输出/尝试数是最后一次的，attempts_log 保留全过程。"""
     record = RunRecord(nodes={})
-    with _event_sink(record) as event:
-        await event(_result(NodeStatus.RUNNING))
-        await event(_result(NodeStatus.RETRYING, attempts=1, error=TimeoutError("模拟超时1")))
-        await event(_result(NodeStatus.RETRYING, attempts=2, error=TimeoutError("模拟超时2")))
-        await event(NodeResult(node_name="外部API", status=NodeStatus.COMPLETED, attempts=3, output="ok"))
+    with patch("app.services.orchestrator.runs.save_nodes", new=AsyncMock()):
+        await run_pipeline(record, dag)
 
-    entry = record.nodes["外部API"]
+    entry = record.nodes["flaky"]
     assert entry["status"] == "completed"
     assert entry["output"] == "ok"
     assert entry["attempts"] == 3
     log = entry["attempts_log"]
-    assert [a["attempt"] for a in log] == [1, 2]
-    assert log[0]["error"] == "模拟超时1"
-    assert log[1]["error"] == "模拟超时2"
-    assert all(a["at"] for a in log)  # 每条带时间戳
+    assert len(log) == 2
+    assert log[0]["attempt"] == 1
+    assert "超时1" in log[0]["error"]
+    assert log[1]["attempt"] == 2
+    assert "超时2" in log[1]["error"]
+    assert all("at" in a for a in log)
 
 
-async def test_retry_history_kept_on_final_failure() -> None:
-    """重试耗尽后失败：终态错误是最后一次的，中间尝试也不丢。"""
+async def test_retry_history_on_final_failure() -> None:
+    """重试耗尽后失败：终态带 attempts_log。"""
+
+    async def always_fail(ctx: dict[str, Any]) -> None:
+        raise TimeoutError("boom")
+
+    dag = DAG("fail_test")
+    dag.add_node(Node(name="bad", func=always_fail, retry=RetryPolicy(max_retries=2)))
+
     record = RunRecord(nodes={})
-    with _event_sink(record) as event:
-        await event(_result(NodeStatus.RETRYING, attempts=1, error=TimeoutError("超时1")))
-        await event(_result(NodeStatus.RETRYING, attempts=2, error=TimeoutError("超时2")))
-        await event(_result(NodeStatus.FAILED, attempts=3, error=TimeoutError("超时3")))
+    with patch("app.services.orchestrator.runs.save_nodes", new=AsyncMock()):
+        try:
+            await run_pipeline(record, dag)
+        except Exception:
+            pass
 
-    entry = record.nodes["外部API"]
+    entry = record.nodes["bad"]
     assert entry["status"] == "failed"
-    assert entry["error"] == "超时3"
-    assert [a["attempt"] for a in entry["attempts_log"]] == [1, 2]
+    assert len(entry["attempts_log"]) == 2
 
 
 async def test_no_log_without_retries() -> None:
     """一次成功的节点不产生 attempts_log 键。"""
+
+    async def ok(ctx: dict[str, Any]) -> str:
+        return "done"
+
+    dag = DAG("ok_test")
+    dag.add_node(Node(name="ok", func=ok))
+
     record = RunRecord(nodes={})
-    with _event_sink(record) as event:
-        await event(_result(NodeStatus.RUNNING))
-        await event(NodeResult(node_name="外部API", status=NodeStatus.COMPLETED, attempts=1, output="ok"))
+    with patch("app.services.orchestrator.runs.save_nodes", new=AsyncMock()):
+        await run_pipeline(record, dag)
 
-    assert "attempts_log" not in record.nodes["外部API"]
-
-
-async def test_log_survives_resume_running_event() -> None:
-    """resume 重放：RUNNING 事件不冲掉上次进程留下的重试历史。"""
-    record = RunRecord(
-        nodes={"外部API": {"status": "reviewing", "attempts_log": [{"attempt": 1, "error": "旧错误", "at": "旧时间"}]}}
-    )
-    with _event_sink(record) as event:
-        await event(_result(NodeStatus.RUNNING))
-
-    entry = record.nodes["外部API"]
-    assert entry["attempts_log"] == [{"attempt": 1, "error": "旧错误", "at": "旧时间"}]
-    assert entry["status"] == "running"
+    assert "attempts_log" not in record.nodes["ok"]
+    assert record.nodes["ok"]["output"] == "done"

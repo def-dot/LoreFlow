@@ -78,7 +78,6 @@ class Node:
     inputs: dict[str, Any] | None = None
     depends_on: list[str] = field(default_factory=list)
     condition: str | bool | None = None
-    script: str | None = None
     retry: RetryPolicy | None = None
     timeout: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
