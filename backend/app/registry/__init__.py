@@ -3,11 +3,14 @@
 """
 
 from .core import REGISTRY, NodeType, node_type, unregister
-from . import base, llm, other, rag, web  # noqa: F401  # 导入即触发 @node_type 注册
+from .tools import TOOL_REGISTRY, tool
+from . import base, llm, other, rag, web, tools  # noqa: F401  # 导入即触发注册
 
 __all__ = [
     "NodeType",
     "REGISTRY",
+    "TOOL_REGISTRY",
     "node_type",
+    "tool",
     "unregister",
 ]

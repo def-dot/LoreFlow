@@ -1,0 +1,91 @@
+name: 工具调用
+description: >
+  演示 LLM function calling：模型根据用户问题自主决定是否调用工具，
+  code 节点模拟执行工具，最终由 LLM 汇总工具结果给出回答。
+  工具执行是示例逻辑，实际使用时替换为真实 API 调用即可。
+
+inputs:
+  prompt:
+    required: true
+    multiline: true
+    label: 用户问题
+    description: 例如「北京今天天气怎么样」「帮我算一下 123 * 456」
+
+output:
+  tool_reply: $llm_after_tools
+  direct_reply: $llm_direct
+
+nodes:
+  # ── 第一步：带工具定义调用 LLM，让模型决定是否需要调用工具 ──
+  llm_with_tools:
+    type: llm_chat
+    label: LLM 工具决策
+    description: 传入工具定义，模型返回文本回复或工具调用请求
+    inputs:
+      system: >-
+        你是一个智能助手。你可以使用提供的工具来回答问题。
+        如果问题不需要工具就能回答，直接回复即可。
+      tools:
+        - type: function
+          function:
+            name: get_weather
+            description: 查询指定城市的当前天气信息
+            parameters:
+              type: object
+              properties:
+                city:
+                  type: string
+                  description: 城市名称，如"北京"、"上海"
+              required:
+                - city
+        - type: function
+          function:
+            name: calculator
+            description: 执行数学计算表达式并返回结果
+            parameters:
+              type: object
+              properties:
+                expression:
+                  type: string
+                  description: 数学表达式，如"123 * 456"、"sqrt(144)"
+              required:
+                - expression
+    timeout: 60
+
+  # ── 第二步：判断模型是否请求了工具调用 ──
+  has_tool_calls:
+    type: code
+    label: 判断是否需要调用工具
+    depends_on: [llm_with_tools]
+    inputs:
+      llm_result: $llm_with_tools
+      script: |
+        tool_calls = llm_result.get("tool_calls", []) if isinstance(llm_result, dict) else []
+        result = {"has_tools": bool(tool_calls)}
+
+  # ── 第三步-分支A：执行工具调用 ──
+  execute_tools:
+    type: tool_executor
+    label: 执行工具
+    depends_on: [has_tool_calls]
+    condition: $has_tool_calls.has_tools
+    inputs:
+      tool_calls: $llm_with_tools.tool_calls
+
+  # ── 第四步-分支A：将工具结果交给 LLM 生成最终回答 ──
+  llm_after_tools:
+    type: llm_chat
+    label: LLM 工具汇总
+    depends_on: [execute_tools]
+    inputs:
+      system: 你是一个智能助手。请根据工具返回的结果，用自然语言回答用户的问题。
+      context: $execute_tools
+    timeout: 60
+
+  # ── 第三步-分支B：不需要工具，LLM 直接回答 ──
+  llm_direct:
+    type: llm_chat
+    label: LLM 直接回答
+    depends_on: [has_tool_calls]
+    condition: $has_tool_calls.has_tools == false
+    timeout: 60
