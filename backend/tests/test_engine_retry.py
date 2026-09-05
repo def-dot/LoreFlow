@@ -19,7 +19,7 @@ async def test_retry_then_success() -> None:
             raise RuntimeError("transient")
         return "ok"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert calls["n"] == 3
     assert results["flaky"].status == NodeStatus.COMPLETED
     assert results["flaky"].attempts == 3

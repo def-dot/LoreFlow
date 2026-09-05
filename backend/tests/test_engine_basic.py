@@ -24,7 +24,7 @@ async def test_serial_chain() -> None:
     async def node_c(ctx: dict[str, Any]) -> str:
         return f"finalized({ctx['B']})"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["A"].status == NodeStatus.COMPLETED
     assert results["C"].output == "finalized(processed(data_from_A))"
 
@@ -63,7 +63,7 @@ async def test_parallel_fanout() -> None:
     async def join(ctx: dict[str, Any]) -> str:
         return "|".join(ctx[n] for n in ("b", "c", "d"))
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["join"].status == NodeStatus.COMPLETED
     assert max_active >= 3  # b/c/d 确实并发执行
 
@@ -119,7 +119,7 @@ async def test_resume_skips_completed_nodes() -> None:
     async def after(ctx: dict[str, Any]) -> str:
         return ctx["done_node"]
 
-    results = await dag.run(
+    results, _ = await dag.run(
         resume={
             "done_node": {"status": "completed", "output": "cached"},
         }
@@ -137,7 +137,7 @@ async def test_resume_ignores_nodes_missing_from_current_dag() -> None:
     async def fresh(ctx: dict[str, Any]) -> str:
         return "ran"
 
-    results = await dag.run(
+    results, _ = await dag.run(
         resume={
             "输入内容": {"status": "completed", "output": {"title": "旧配置的节点"}},
             "fresh": {"status": "completed", "output": "stale"},  # 已完成不重跑
@@ -154,7 +154,7 @@ async def test_default_inputs_applied() -> None:
     async def calc(ctx: dict[str, Any]) -> int:
         return ctx["seed"] + 1
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["calc"].output == 42
 
 
@@ -247,8 +247,8 @@ async def test_output_extracts_node_and_path() -> None:
     async def b(ctx):
         return {"code": 200}
 
-    results = await dag.run()
-    assert results["_output"] == {"result_text": "hello", "status_code": 200}
+    results, output = await dag.run()
+    assert output == {"result_text": "hello", "status_code": 200}
 
 
 async def test_output_skipped_branch_absent() -> None:
@@ -263,9 +263,9 @@ async def test_output_skipped_branch_absent() -> None:
     async def b(ctx):
         return "from_b"
 
-    results = await dag.run()
+    results, output = await dag.run()
     assert results["a"].status == NodeStatus.SKIPPED
-    assert results["_output"] == {"b": "from_b"}
+    assert output == {"b": "from_b"}
 
 
 async def test_output_missing_path_absent() -> None:
@@ -276,8 +276,8 @@ async def test_output_missing_path_absent() -> None:
     async def a(ctx):
         return {"text": "hello"}
 
-    results = await dag.run()
-    assert results["_output"] == {}
+    results, output = await dag.run()
+    assert output == {}
 
 
 async def test_output_inputs_ref() -> None:
@@ -292,8 +292,8 @@ async def test_output_inputs_ref() -> None:
     async def a(ctx):
         return ctx["query"]
 
-    results = await dag.run()
-    assert results["_output"] == {"q": "hi"}
+    results, output = await dag.run()
+    assert output == {"q": "hi"}
 
 
 async def test_no_output_no_output_key() -> None:
@@ -304,8 +304,8 @@ async def test_no_output_no_output_key() -> None:
     async def x(ctx):
         return "hello"
 
-    results = await dag.run()
-    assert "_output" not in results
+    results, output = await dag.run()
+    assert output is None
 
 
 def test_output_validation_accepts_node_ref() -> None:

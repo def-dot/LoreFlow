@@ -34,7 +34,7 @@ async def test_loop_until_condition() -> None:
         max_iterations=10,
     )
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["batch"].status == NodeStatus.COMPLETED
     # 最后一次迭代的 process_one 结果已合并进上下文
     assert results["batch"].output["process_one"] == "c"
@@ -54,7 +54,7 @@ async def test_loop_max_iterations_cap() -> None:
         max_iterations=3,
     )
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["loop"].status == NodeStatus.COMPLETED
     assert results["loop"].output["tick"] == 3
 
@@ -79,7 +79,7 @@ async def test_loop_body_failure_continues() -> None:
         max_iterations=10,
     )
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["loop"].status == NodeStatus.COMPLETED
     assert results["loop"].output["count"] == 2
 
@@ -152,7 +152,7 @@ async def test_loop_output_snapshot_no_self_reference() -> None:
         max_iterations=5,
     )
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["batch"].status == NodeStatus.COMPLETED
     assert results["batch"].output["tick"] == 3
     assert "batch" not in results["batch"].output  # 无自引用

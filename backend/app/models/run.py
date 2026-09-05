@@ -39,4 +39,5 @@ class RunRecord(SQLModel, table=True):
     error: str | None = None
     nodes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     inputs: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))  # 运行时输入快照（resume 回放用）
+    output: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     definition: str | None = Field(default=None, sa_column=Column(Text))

@@ -25,7 +25,7 @@ async def test_condition_false_skips_node_and_cascades() -> None:
     async def notify(ctx: dict[str, Any]) -> str:
         return "notified"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["premium_flow"].status == NodeStatus.SKIPPED
     # 跳过不等于失败，但沿单一路径要级联：下游不带着缺失输入照跑
     assert results["notify"].status == NodeStatus.UPSTREAM_SKIPPED
@@ -47,7 +47,7 @@ async def test_condition_true_runs_node() -> None:
     async def premium_flow(ctx: dict[str, Any]) -> str:
         return "premium"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["premium_flow"].status == NodeStatus.COMPLETED
 
 
@@ -61,7 +61,7 @@ async def test_condition_raising_skips_node() -> None:
     async def maybe(ctx: dict[str, Any]) -> str:
         return "ran"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["maybe"].status == NodeStatus.SKIPPED
 
 
@@ -89,7 +89,7 @@ async def test_skip_cascades_transitively() -> None:
     async def tail(ctx: dict[str, Any]) -> str:
         return "tail"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["premium"].status == NodeStatus.SKIPPED
     assert results["mid"].status == NodeStatus.UPSTREAM_SKIPPED
     assert results["tail"].status == NodeStatus.UPSTREAM_SKIPPED
@@ -121,7 +121,7 @@ async def test_join_runs_when_any_upstream_completed() -> None:
     async def join(ctx: dict[str, Any]) -> str:
         return f"joined:{ctx['standard_path']}"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["premium_path"].status == NodeStatus.SKIPPED
     assert results["standard_path"].status == NodeStatus.COMPLETED
     assert results["join"].status == NodeStatus.COMPLETED
@@ -156,7 +156,7 @@ async def test_join_skips_when_all_upstreams_skipped() -> None:
     async def join(ctx: dict[str, Any]) -> str:
         return "joined"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["premium_path"].status == NodeStatus.SKIPPED
     assert results["standard_path"].status == NodeStatus.SKIPPED
     assert results["join"].status == NodeStatus.UPSTREAM_SKIPPED
@@ -186,13 +186,13 @@ async def test_resume_restores_skipped_without_reeval() -> None:
     async def notify(ctx: dict[str, Any]) -> str:
         return "notified"
 
-    first = await dag.run()
+    first, _ = await dag.run()
     assert first["premium_flow"].status == NodeStatus.SKIPPED
     assert first["notify"].status == NodeStatus.UPSTREAM_SKIPPED
     assert calls == 1
 
     snapshot = {name: r.to_dict() for name, r in first.items()}
-    second = await dag.run(resume=snapshot)
+    second, _ = await dag.run(resume=snapshot)
     assert second["premium_flow"].status == NodeStatus.SKIPPED  # 仍是跳过，非重评估
     assert second["notify"].status == NodeStatus.UPSTREAM_SKIPPED  # 既成事实不重跑
     assert calls == 1  # 条件未被再次调用

@@ -37,7 +37,7 @@ async def test_human_approve_completes_review() -> None:
     async def publish(ctx: dict[str, Any]) -> int:
         return ctx["review"]["payload"]["data"]["value"]
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["review"].status == NodeStatus.COMPLETED
     assert results["review"].output["approved"] is True
     assert results["publish"].output == 42
@@ -63,7 +63,7 @@ async def test_human_approve_edits_override_payload() -> None:
     async def publish(ctx: dict[str, Any]) -> str:
         return ctx["draft"]
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["publish"].output == "草稿没有错别字"  # 下游经 ctx 拿到修订版
     assert results["review"].output["payload"]["draft"] == "草稿有一个错别子"  # 快照保持审核时原样
     assert results["draft"].output == "草稿有一个错别子"  # 上游原始输出未被改动
@@ -93,7 +93,7 @@ async def test_edits_propagate_to_next_review() -> None:
     dag.human_node("编辑初审", approver=first_approver, review=view)
     dag.human_node("主编终审", depends_on=["编辑初审"], approver=final_approver, review=view)
 
-    results = await dag.run(inputs={"title": "原始标题", "content": "正文"})
+    results, _ = await dag.run(inputs={"title": "原始标题", "content": "正文"})
     assert results["主编终审"].status == NodeStatus.COMPLETED
     assert seen["payload"]["title"] == "修订后的标题"
     assert seen["payload"]["content"] == "正文"
@@ -124,7 +124,7 @@ async def test_human_edits_cannot_inject_new_keys() -> None:
         seen.update(ctx)
         return "ok"
 
-    results = await dag.run()
+    results, _ = await dag.run()
     payload = results["review"].output["payload"]
     assert payload["data"] == "内容"  # 快照保持审核时原样
     assert "injected" not in payload
@@ -271,7 +271,7 @@ async def test_human_node_condition_false_skips_review() -> None:
     async def publish(ctx: dict[str, Any]) -> int:
         return 1
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert called is False
     assert results["review"].status == NodeStatus.SKIPPED
     assert results["publish"].status == NodeStatus.UPSTREAM_SKIPPED
@@ -354,7 +354,7 @@ async def test_review_keys_may_reference_params_and_nodes() -> None:
         review={"topic": {"label": "主题"}, "data": {"label": "数据"}},
     )
 
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["review"].status == NodeStatus.COMPLETED
     assert set(seen["payload"]) == {"_review", "topic", "data"}
 

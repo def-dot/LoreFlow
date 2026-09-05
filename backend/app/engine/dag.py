@@ -329,7 +329,7 @@ class DAG:
         approver: ApproverFunc | None = None,
         concurrency: int | None = None,
         resume: dict[str, dict[str, Any]] | None = None,
-    ) -> dict[str, NodeResult]:
+    ) -> tuple[dict[str, NodeResult], dict[str, Any] | None]:
         """Execute the DAG.
 
         Args:
@@ -343,9 +343,9 @@ class DAG:
             resume: 重启恢复用的节点快照（见 DAGExecutor.execute）。
 
         Returns:
-            映射每个节点名到 :class:`NodeResult`。若声明了 ``output``
-            则额外包含 ``_output`` 键：按 ``{key: $.路径}`` 从运行文档提取
-            的映射，被跳过分支 / 缺失路径的键缺席。
+            ``(results, output)`` — 映射每个节点名到 :class:`NodeResult`；
+            若声明了 ``output`` 则第二项为按 ``{key: $.路径}`` 从运行文档
+            提取的映射（被跳过分支 / 缺失路径的键缺席），否则 ``None``。
 
         Raises:
             ValueError: 结构校验失败，或（声明了 inputs 时）输入不合法。
@@ -373,13 +373,14 @@ class DAG:
         executor = DAGExecutor(nodes=self._nodes, ctx=ctx, concurrency=concurrency, on_event=on_event)
         results = await executor.execute(resume=resume)
 
+        output = None
         if self.output is not None:
-            results["_output"] = {
+            output = {
                 k: v for k, v in wired_ctx(ctx, self.output).items()
                 if k in self.output and v is not None
             }
 
-        return results
+        return results, output
 
     # ------------------------------------------------------------------
     # Visualisation

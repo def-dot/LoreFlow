@@ -46,7 +46,7 @@ async def test_load_dag_from_dict_runs(registered: Any) -> None:
     }
     dag = load_dag(config)
     assert dag.name == "cfg_demo"
-    results = await dag.run()
+    results, _ = await dag.run()
     assert results["clean"].output == "declarative config rocks"
 
 

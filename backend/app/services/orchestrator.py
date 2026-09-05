@@ -61,16 +61,14 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
 
     outcome = RunStatus.COMPLETED
     error: str | None = None
+    output: dict[str, Any] | None = None
     try:
-        results = await dag.run(
+        _, output = await dag.run(
             inputs=record.inputs,
             on_event=on_event,
             approver=approver,
             resume=record.nodes,
         )
-        if "_output" in results:
-            record.nodes["_output"] = results["_output"]
-            await runs.save_nodes(record)
     except asyncio.CancelledError:
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"
@@ -84,6 +82,7 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         # REVIEWING/FAILED，永不是 RUNNING）
         values: dict[str, Any] = {
             "status": outcome,
+            "output": output,
             "finished_at": datetime.now().isoformat(timespec="seconds") if outcome is not RunStatus.REVIEWING else None,
             "error": error,
         }
