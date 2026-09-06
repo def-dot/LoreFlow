@@ -141,3 +141,56 @@ async def web_fetch(ctx: dict[str, Any]) -> list[dict[str, str]]:
         return []
 
     return list(await asyncio.gather(*(_fetch_page(u) for u in urls)))
+
+
+@node_type(
+    label="HTTP 请求",
+    description="发送 HTTP 请求，返回状态码、响应头和响应体",
+    group=NodeGroup.WEB,
+    input_schema={
+        "url": {"type": "string", "required": True, "description": "请求 URL"},
+        "method": {"type": "string", "required": False, "description": "HTTP 方法（默认 GET）"},
+        "headers": {"type": "object", "required": False, "description": "请求头"},
+        "body": {"type": "any", "required": False, "description": "请求体（对象自动序列化为 JSON）"},
+        "timeout": {"type": "number", "required": False, "description": "超时秒数（默认 30）"},
+    },
+    output_schema={
+        "type": "object",
+        "fields": {
+            "status_code": {"type": "integer", "description": "HTTP 状态码"},
+            "headers": {"type": "object", "description": "响应头"},
+            "body": {"type": "any", "description": "响应体（自动解析 JSON）"},
+        },
+    },
+)
+async def http_request(ctx: dict[str, Any]) -> dict[str, Any]:
+    url = ctx.get("url")
+    if not url or not isinstance(url, str):
+        raise ValueError("http_request 节点缺少 url")
+
+    method = (ctx.get("method") or "GET").upper()
+    headers = ctx.get("headers") or {}
+    body = ctx.get("body")
+    timeout = ctx.get("timeout") or 30
+
+    kwargs: dict[str, Any] = {"method": method, "url": url, "headers": headers, "timeout": timeout}
+
+    if body is not None:
+        if isinstance(body, (dict, list)):
+            kwargs["json"] = body
+        else:
+            kwargs["content"] = str(body)
+
+    resp = await http_client().request(**kwargs)
+
+    # 响应体：尝试 JSON 解析，失败则取文本
+    try:
+        resp_body: Any = resp.json()
+    except Exception:
+        resp_body = resp.text
+
+    return {
+        "status_code": resp.status_code,
+        "headers": dict(resp.headers),
+        "body": resp_body,
+    }
