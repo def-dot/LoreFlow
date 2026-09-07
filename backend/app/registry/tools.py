@@ -94,13 +94,25 @@ def tool(
 
 @node_type(
     label="工具执行",
-    description="按 function.name 路由到注册的工具函数，收集执行结果",
+    description="接收 LLM 的工具调用请求，路由到对应工具执行并返回结果",
     group=NodeGroup.LLM,
     input_schema={
         "tool_calls": {
             "type": "list",
             "required": True,
-            "description": "LLM 返回的工具调用列表（llm_chat 输出的 tool_calls 字段）",
+            "description": "LLM 返回的工具调用列表（tool_calls 字段）",
+            "item": {
+                "type": "object",
+                "fields": {
+                    "function": {
+                        "type": "object",
+                        "fields": {
+                            "name": {"type": "string", "description": "工具名称"},
+                            "arguments": {"type": "object", "description": "调用参数"},
+                        },
+                    },
+                },
+            },
         },
     },
     output_schema={
