@@ -4,7 +4,7 @@
 
 from .core import REGISTRY, NodeType, node_type, unregister
 from .tools import TOOL_REGISTRY, tool
-from . import base, llm, other, rag, web, tools  # noqa: F401  # 导入即触发注册
+from . import agent, base, default_tools, llm, other, rag, web, tools  # noqa: F401  # 导入即触发注册
 
 __all__ = [
     "NodeType",
