@@ -23,29 +23,7 @@ nodes:
         你是一个智能助手。你可以使用提供的工具来回答问题。
         如果问题不需要工具就能回答，直接回复即可。
       tools:
-        - type: function
-          function:
-            name: get_weather
-            description: 查询指定城市的当前天气信息
-            parameters:
-              type: object
-              properties:
-                city:
-                  type: string
-                  description: 城市名称，如"北京"、"上海"
-              required:
-                - city
-        - type: function
-          function:
-            name: calculator
-            description: 执行数学计算表达式并返回结果
-            parameters:
-              type: object
-              properties:
-                expression:
-                  type: string
-                  description: 数学表达式，如"123 * 456"、"sqrt(144)"
-              required:
-                - expression
+        - get_weather
+        - calculator
       max_iterations: 5
     timeout: 120

@@ -806,14 +806,16 @@ async def _run_condition_yaml(
     模型输出（空串 = 预期不触达模型，如「人工」关键词短路）。"""
     from app.registry import llm as llm_mod
 
-    async def fake_ollama(model: str, messages: list[dict[str, str]], fmt: Any = None) -> str:
+    async def fake_ollama(model: str, messages: list[dict[str, str]], fmt: Any = None, tools: Any = None) -> dict:
         assert classify_raw, "本用例不应触达 Ollama"
         system = next((m["content"] for m in messages if m["role"] == "system"), "")
         if "意图分类器" in system:
-            return classify_raw
-        if "知识库问答助手" in system:
-            return "知识库支路答复"
-        return "闲聊支路答复"
+            content = classify_raw
+        elif "知识库问答助手" in system:
+            content = "知识库支路答复"
+        else:
+            content = "闲聊支路答复"
+        return {"content": content, "tool_calls": []}
 
     monkeypatch.setattr(llm_mod, "_ollama_chat", fake_ollama)
     _, config = read_yaml(settings.PIPELINES_DIR / "02_condition.yaml")

@@ -20,11 +20,8 @@ async def _ollama_chat(
     messages: list[dict[str, str]],
     fmt: dict[str, Any] | str | None = None,
     tools: list[dict[str, Any]] | None = None,
-) -> dict[str, Any] | str:
-    """POST /api/chat（非流式）→ 助手回复。
-
-    传入 ``tools`` 时返回 ``{"content": str, "tool_calls": list}``；
-    否则返回纯文本字符串（保持向后兼容）。
+) -> dict[str, Any]:
+    """POST /api/chat（非流式）→ ``{"content": str, "tool_calls": list}``。
 
     fmt 透传 Ollama 的 format 约束（``"json"`` 或 JSON Schema）。
     """
@@ -39,12 +36,10 @@ async def _ollama_chat(
     data = resp.json()
 
     msg = data["message"]
-    if tools is not None:
-        return {
-            "content": str(msg.get("content", "")),
-            "tool_calls": msg.get("tool_calls", []),
-        }
-    return str(msg["content"])
+    return {
+        "content": str(msg.get("content", "")),
+        "tool_calls": msg.get("tool_calls", []),
+    }
 
 
 @node_type(
@@ -73,7 +68,7 @@ async def _ollama_chat(
         },
     },
 )
-async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any] | str:
+async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any]:
     prompt = ctx.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
@@ -86,10 +81,8 @@ async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any] | str:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     model = str(ctx.get("model") or settings.OLLAMA_MODEL)
-    tools = ctx.get("tools")
-    if isinstance(tools, list) and tools:
-        return await _ollama_chat(model, messages, tools=tools)
-    return await _ollama_chat(model, messages)
+    tools = ctx.get("tools") if isinstance(ctx.get("tools"), list) else None
+    return await _ollama_chat(model, messages, tools=tools)
 
 
 @node_type(
@@ -133,5 +126,5 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         fmt={"type": "string", "enum": labels},
     )
-    text = raw.strip().strip('"').lower()
-    return {"intent": text, "raw": raw.strip()}
+    text = raw["content"].strip().strip('"').lower()
+    return {"intent": text, "raw": raw["content"].strip()}

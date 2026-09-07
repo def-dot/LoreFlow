@@ -11,11 +11,14 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from collections.abc import Callable
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, get_type_hints
 
+from app.utils.http import http_client
 from app.core.config import settings
 from app.registry.core import NodeGroup, node_type
 from app.registry.llm import _ollama_chat
@@ -26,37 +29,95 @@ logger = logging.getLogger(__name__)
 # 工具注册表
 # ---------------------------------------------------------------------------
 
-#: 全局工具注册表：name → async callable(**kwargs) -> str
-TOOL_REGISTRY: dict[str, Callable[..., Any]] = {}
+
+@dataclass(frozen=True)
+class ToolDef:
+    """一个可被 LLM 调用的工具定义。"""
+
+    name: str
+    func: Callable[..., Any]
+    description: str = ""
+    parameters: dict[str, Any] = field(default_factory=dict)
+
+
+#: 全局工具注册表：name → ToolDef
+TOOL_REGISTRY: dict[str, ToolDef] = {}
+
+#: Python 类型 → JSON Schema 类型
+_TYPE_MAP = {str: "string", int: "integer", float: "number", bool: "boolean"}
+
+
+def _build_param_schema(
+    func: Callable[..., Any],
+    descriptions: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """从函数签名自动生成 JSON Schema parameters。
+
+    Args:
+        func: 工具函数
+        descriptions: 参数名 → 中文描述（来自 @tool 的 params 参数）
+    """
+    try:
+        sig = inspect.signature(func)
+        hints = get_type_hints(func)
+    except Exception:
+        return {}
+
+    descriptions = descriptions or {}
+    props: dict[str, Any] = {}
+    required: list[str] = []
+    for pname, param in sig.parameters.items():
+        type_hint = hints.get(pname, str)
+        prop: dict[str, Any] = {"type": _TYPE_MAP.get(type_hint, "string")}
+        if pname in descriptions:
+            prop["description"] = descriptions[pname]
+        props[pname] = prop
+        if param.default is inspect.Parameter.empty:
+            required.append(pname)
+
+    if not props:
+        return {}
+    schema: dict[str, Any] = {"type": "object", "properties": props}
+    if required:
+        schema["required"] = required
+    return schema
 
 
 def tool(
     name: str | None = None,
     description: str = "",
+    params: dict[str, str] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """工具注册装饰器：将异步函数注册为可被 LLM 调用的工具。
 
     用法::
 
-        @tool(name="get_weather", description="查询城市天气")
+        @tool(name="get_weather", description="查询城市天气",
+              params={"city": "城市名称，如北京、上海"})
         async def get_weather(city: str) -> str:
             return f"{city}：晴，25°C"
 
-    函数签名接受关键字参数，返回字符串结果。
+    参数类型从函数签名自动提取（支持 str/int/float/bool），
+    描述通过 ``params`` 传入。
     """
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = name or func.__name__
-        TOOL_REGISTRY[tool_name] = func
-        func.__tool_name__ = tool_name
-        func.__tool_description__ = description
+        td = ToolDef(
+            name=tool_name,
+            func=func,
+            description=description,
+            parameters=_build_param_schema(func, params),
+        )
+        TOOL_REGISTRY[tool_name] = td
+        setattr(func, "__tool_def__", td)
         return func
     return decorator
 
 
-@tool(name="get_weather", description="查询指定城市的当前天气信息")
-async def get_weather(city: str = "未知城市") -> str:
+@tool(name="get_weather", description="查询指定城市的当前天气信息",
+      params={"city": "城市名称，如北京、上海"})
+async def get_weather(city: str) -> str:
     """通过 wttr.in 查询实时天气。"""
-    from app.utils.http import http_client
 
     try:
         resp = await http_client().get(f"https://wttr.in/{city}", params={"format": "j1"}, timeout=10)
@@ -73,13 +134,40 @@ async def get_weather(city: str = "未知城市") -> str:
         return f"{city}：天气查询失败（{type(exc).__name__}: {exc}）"
 
 
-@tool(name="calculator", description="执行数学计算表达式并返回结果")
+@tool(name="calculator", description="执行数学计算表达式并返回结果",
+      params={"expression": "数学表达式，如 123 * 456、sqrt(144)"})
 async def calculator(expression: str = "") -> str:
     """计算器 — 替换为安全的表达式求值库。"""
     try:
         return str(eval(expression))
     except Exception:
         return f"计算错误：无法计算表达式 {expression}"
+
+
+# ---------------------------------------------------------------------------
+# 工具定义 → Ollama function calling 格式
+# ---------------------------------------------------------------------------
+
+
+def get_tool_definitions(names: list[str]) -> list[dict[str, Any]]:
+    """从 TOOL_REGISTRY 按名称查找工具，返回 Ollama function calling 格式定义列表。
+
+    YAML 中 ``tools: [get_weather, calculator]`` 经此函数展开为完整 schema。
+    """
+    defs: list[dict[str, Any]] = []
+    for n in names:
+        td = TOOL_REGISTRY.get(n)
+        if td is None:
+            raise ValueError(f"未知工具：{n}（未在 TOOL_REGISTRY 中注册）")
+        defs.append({
+            "type": "function",
+            "function": {
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            },
+        })
+    return defs
 
 
 # ---------------------------------------------------------------------------
@@ -126,12 +214,12 @@ async def tool_executor(ctx: dict[str, Any]) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 args = {}
 
-        handler = TOOL_REGISTRY.get(name)
-        if handler is None:
+        td = TOOL_REGISTRY.get(name)
+        if td is None:
             output = f"未知工具：{name}（未在 TOOL_REGISTRY 中注册）"
         else:
             try:
-                output = await handler(**args)
+                output = await td.func(**args)
             except Exception as exc:
                 output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
 
@@ -161,7 +249,7 @@ async def tool_executor(ctx: dict[str, Any]) -> list[dict[str, Any]]:
         "tools": {
             "type": "list",
             "required": False,
-            "description": "工具定义列表（Ollama function calling 格式）",
+            "description": "工具名列表（如 [get_weather, calculator]）或完整 Ollama 定义列表",
         },
         "max_iterations": {
             "type": "integer",
@@ -200,9 +288,12 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": user_prompt})
 
-    # 工具定义
-    tools = ctx.get("tools")
-    use_tools = isinstance(tools, list) and tools
+    # 工具定义：支持字符串列表（工具名）或完整定义列表（向后兼容）
+    tools_input = ctx.get("tools")
+    if isinstance(tools_input, list) and tools_input:
+        tools = get_tool_definitions(tools_input) if isinstance(tools_input[0], str) else tools_input
+    else:
+        tools = None
 
     # 循环执行
     all_tool_calls: list[dict[str, Any]] = []
@@ -211,14 +302,9 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     for iteration in range(1, max_iter + 1):
         logger.info("[agent] iteration %d / %d", iteration, max_iter)
 
-        if use_tools:
-            result = await _ollama_chat(model, messages, tools=tools)
-            # result = {"content": str, "tool_calls": list}
-            content = result["content"]
-            tool_calls = result.get("tool_calls", [])
-        else:
-            content = await _ollama_chat(model, messages)
-            tool_calls = []
+        result = await _ollama_chat(model, messages, tools=tools)
+        content = result["content"]
+        tool_calls = result.get("tool_calls", [])
 
         # 没有工具调用 → 结束
         if not tool_calls:
@@ -263,12 +349,12 @@ async def _execute_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str
             except json.JSONDecodeError:
                 args = {}
 
-        handler = TOOL_REGISTRY.get(name)
-        if handler is None:
+        td = TOOL_REGISTRY.get(name)
+        if td is None:
             output = f"未知工具：{name}（未在 TOOL_REGISTRY 中注册）"
         else:
             try:
-                output = await handler(**args)
+                output = await td.func(**args)
             except Exception as exc:
                 output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
 
