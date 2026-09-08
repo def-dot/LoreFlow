@@ -57,7 +57,6 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     model = str(ctx.get("model") or settings.OLLAMA_MODEL)
     max_iter = int(ctx.get("max_iterations") or 5)
 
-    # 构建初始消息
     messages: list[dict[str, str]] = []
     system = ctx.get("system")
     context = ctx.get("context")
@@ -69,6 +68,7 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     messages.append({"role": "user", "content": user_prompt})
 
     # 工具定义：支持字符串列表（工具名）或完整定义列表（向后兼容）
+    tools = None
     tools_input = ctx.get("tools")
     if isinstance(tools_input, list) and tools_input:
         if isinstance(tools_input[0], str):
@@ -77,11 +77,15 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
                 td = TOOL_REGISTRY.get(n)
                 if td is None:
                     raise ValueError(f"未知工具：{n}（未在 TOOL_REGISTRY 中注册）")
-                props = {p.name: {"type": _TYPE_MAP.get(p.param_type, "string")} for p in td.params}
+                props: dict[str, Any] = {}
+                required: list[str] = []
                 for p in td.params:
+                    prop: dict[str, Any] = {"type": _TYPE_MAP.get(p.param_type, "string")}
                     if p.description:
-                        props[p.name]["description"] = p.description
-                required = [p.name for p in td.params if p.required]
+                        prop["description"] = p.description
+                    props[p.name] = prop
+                    if p.required:
+                        required.append(p.name)
                 schema: dict[str, Any] = {"type": "object", "properties": props}
                 if required:
                     schema["required"] = required
@@ -91,10 +95,7 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
                 })
         else:
             tools = tools_input
-    else:
-        tools = None
 
-    # 循环执行
     all_tool_calls: list[dict[str, Any]] = []
     content = ""
 
@@ -105,16 +106,13 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
         content = result["content"]
         tool_calls = result.get("tool_calls", [])
 
-        # 没有工具调用 → 结束
         if not tool_calls:
             logger.info("[agent] finished after %d iteration(s)", iteration)
             break
 
-        # 执行工具调用
         tool_results = await execute_tool_calls(tool_calls)
         all_tool_calls.extend(tool_results)
 
-        # 将 LLM 回复和工具结果追加到消息历史
         messages.append({
             "role": "assistant",
             "content": content,

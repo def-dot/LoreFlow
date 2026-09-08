@@ -1,5 +1,5 @@
 """
-内置工具 — get_weather、calculator。
+内置工具
 """
 
 from app.registry.tools import tool
