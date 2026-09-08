@@ -78,6 +78,11 @@ def _build_skill_prompt(skill_names: list[str]) -> str | None:
         "prompt": {"type": "string", "required": True, "description": "用户提示词"},
         "system": {"type": "string", "required": False, "description": "系统提示词"},
         "context": {"type": "string", "required": False, "description": "上下文"},
+        "file_paths": {
+            "type": "list",
+            "required": False,
+            "description": "上传文件的路径列表",
+        },
         "model": {"type": "string", "required": False, "description": "模型名"},
         "tools": {
             "type": "list",
@@ -124,17 +129,25 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     if skill_prompt:
         system = f"{skill_prompt}\n\n{system}" if system else skill_prompt
 
-    user_prompt = prompt
+    parts: list[str] = []
+    file_paths: list[str] = ctx.get("file_paths") or []
+    if file_paths:
+        parts.append("已上传文件：\n" + "\n".join(f"- {p}" for p in file_paths))
     if isinstance(context, str) and context.strip():
-        user_prompt = f"参考资料：\n{context}\n\n用户问题：{prompt}"
+        parts.append(f"参考资料：\n{context}")
+    parts.append(f"用户问题：{prompt}")
+    user_prompt = "\n\n".join(parts)
+    
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": user_prompt})
 
-    # --- 构建工具列表（有 skills 时自动注入 read_file）---
+    # --- 构建工具列表（有 skills 时自动注入 read_file + run_code）---
     tool_names: list[str] = ctx.get("tools") or []
-    if ctx.get("skills") and "read_file" not in tool_names and "*" not in tool_names:
-        tool_names.append("read_file")
+    if ctx.get("skills") and "*" not in tool_names:
+        for t in ("read_file", "run_code"):
+            if t not in tool_names:
+                tool_names.append(t)
     tools = _build_tools(tool_names)
 
     all_tool_calls: list[dict[str, Any]] = []
