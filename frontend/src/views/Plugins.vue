@@ -167,11 +167,15 @@ async def send_notify(ctx: dict) -> str:
 
         <h4 class="guide-h4">@node_type 参数</h4>
         <table class="guide-table">
-          <tr><th>参数</th><th>必填</th><th>说明</th></tr>
-          <tr><td><code>label</code></td><td>是</td><td>显示名称</td></tr>
-          <tr><td><code>description</code></td><td>是</td><td>节点类型功能描述</td></tr>
-          <tr><td><code>input_schema</code></td><td>否</td><td>输入参数声明，字典格式</td></tr>
-          <tr><td><code>output_schema</code></td><td>否</td><td>输出结构声明</td></tr>
+          <thead>
+            <tr><th>参数</th><th>必填</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>label</code></td><td>是</td><td>显示名称</td></tr>
+            <tr><td><code>description</code></td><td>是</td><td>节点类型功能描述</td></tr>
+            <tr><td><code>input_schema</code></td><td>否</td><td>输入参数声明，字典格式</td></tr>
+            <tr><td><code>output_schema</code></td><td>否</td><td>输出结构声明</td></tr>
+          </tbody>
         </table>
       </div>
     </el-drawer>

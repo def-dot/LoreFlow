@@ -16,7 +16,7 @@ output:
 nodes:
   agent:
     type: agent
-    label: 智能代理
+    label: 生活管家小助手
     description: LLM 自动调用工具回答问题
     inputs:
       system: >-
