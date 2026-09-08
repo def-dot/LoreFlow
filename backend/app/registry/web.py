@@ -18,12 +18,62 @@ from typing import Any
 
 from tavily import AsyncTavilyClient
 
+from app.registry.tools import tool
+
 from app.registry.core import NodeGroup, node_type
 from app.utils.http import http_client
 
 logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"""https?://[^\s<>"')\]]+""")
+
+
+# ---------------------------------------------------------------------------
+# 核心搜索逻辑
+# ---------------------------------------------------------------------------
+
+
+async def _tavily_search(query: str, max_results: int = 5) -> list[dict[str, str]]:
+    """调用 Tavily 搜索，返回 ``[{title, url, snippet}]``。"""
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        logger.warning("未设置 TAVILY_API_KEY 环境变量，跳过搜索")
+        return []
+
+    client = AsyncTavilyClient(api_key=api_key)
+    try:
+        response = await client.search(query=query, max_results=max_results)
+    except Exception as exc:
+        logger.warning("Tavily 搜索失败: %s", exc)
+        return []
+
+    return [
+        {"title": r["title"], "url": r["url"], "snippet": r.get("content", "")}
+        for r in response.get("results", [])
+        if r.get("title") and r.get("url")
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 工具注册 — agent 可通过 tools: [web_search] 调用
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    name="web_search",
+    description="搜索互联网获取最新信息，返回搜索结果列表（标题、链接、摘要）",
+    params={"query": "搜索关键词"},
+)
+async def web_search_tool(query: str) -> str:
+    """供 agent 节点调用的搜索工具。"""
+    results = await _tavily_search(query)
+    if not results:
+        return "未找到相关结果"
+
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}")
+    return "\n".join(lines)
 
 _CLEANUP_RES = [
     re.compile(r"<!--.*?-->", re.DOTALL),
@@ -61,49 +111,6 @@ async def _fetch_page(url: str) -> dict[str, str]:
 
     return {"url": url, "text": _html_to_text(html)[:_MAX_CHARS]}
 
-
-@node_type(
-    label="网络搜索",
-    description="调用 Tavily 搜索",
-    group=NodeGroup.WEB,
-    input_schema={
-        "prompt": {"type": "string", "required": False, "description": "搜索关键词"},
-    },
-    output_schema={
-        "type": "list",
-        "item": {
-            "type": "object",
-            "fields": {
-                "title": {"type": "string", "description": "搜索结果标题"},
-                "url": {"type": "string", "description": "结果链接"},
-                "snippet": {"type": "string", "description": "摘要"},
-            },
-        },
-    },
-)
-async def web_search(ctx: dict[str, Any]) -> list[dict[str, str]]:
-    prompt = ctx.get("prompt")
-    if not isinstance(prompt, str) or not prompt.strip():
-        return []
-
-    api_key = os.environ.get("TAVILY_API_KEY")
-    if not api_key:
-        logger.warning("未设置 TAVILY_API_KEY 环境变量，跳过搜索")
-        return []
-
-    client = AsyncTavilyClient(api_key=api_key)
-
-    try:
-        response = await client.search(query=prompt, max_results=5)
-    except Exception as exc:
-        logger.warning("Tavily 搜索失败: %s", exc)
-        return []
-
-    return [
-        {"title": r["title"], "url": r["url"], "snippet": r.get("content", "")}
-        for r in response.get("results", [])
-        if r.get("title") and r.get("url")
-    ]
 
 
 @node_type(

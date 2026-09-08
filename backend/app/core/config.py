@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     PLUGINS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "custom_plugins"
     PLUGINS_POLL_SECONDS: int = 3
 
+    # Agent Skills — 符合 agentskills.io 规范的技能目录
+    SKILLS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "skills"
+
     # 上传文件 — 文本文件落盘目录（file 参数先上传后引用）
     UPLOADS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "uploads"
     UPLOAD_MAX_MB: int = 20

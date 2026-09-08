@@ -1,0 +1,51 @@
+name: 工具链
+description: >
+  演示「工具 → LLM → 工具」链式调用：
+  查天气 → LLM 根据天气建议活动 → 搜索相关攻略。
+  三种工具各司其职，中间由 LLM 做决策衔接。
+
+inputs:
+  city:
+    required: true
+    label: 城市
+    description: 例如「北京」
+
+output:
+  weather: $weather.content
+  suggestion: $suggest.content
+  guide: $search.content
+
+nodes:
+  # ── 第一步：工具调用 — 查天气 ──────────────────────
+  weather:
+    type: agent
+    label: 查天气
+    inputs:
+      system: 查询城市天气，简洁报告。
+      prompt: $city 现在天气怎么样？
+      tools: [get_weather]
+      max_iterations: 3
+    timeout: 60
+
+  # ── 第二步：LLM — 根据天气推荐活动 ─────────────────
+  suggest:
+    type: llm_chat
+    label: 推荐活动
+    depends_on: [weather]
+    inputs:
+      system: >
+        根据天气推荐一种户外活动，只输出活动名称（如：爬山、逛公园、滑雪）。
+      prompt: $weather.content
+    timeout: 30
+
+  # ── 第三步：工具调用 — 搜索攻略 ────────────────────
+  search:
+    type: agent
+    label: 搜攻略
+    depends_on: [suggest]
+    inputs:
+      system: 搜索推荐活动的相关攻略和地点。
+      prompt: $city 有什么好的$suggest.content地点推荐？
+      tools: [web_search]
+      max_iterations: 3
+    timeout: 60

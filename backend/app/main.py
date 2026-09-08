@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
 from app.registry.plugins import load_plugins, watch_plugins
+from app.registry.skills import discover_skills
 from app.routers import health, node_types, pipelines, plugins, runs, uploads
 from app.services import orchestrator
 
@@ -34,6 +35,7 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
+    discover_skills(settings.SKILLS_DIR)
     watcher = asyncio.create_task(watch_plugins())
     try:
         await orchestrator.resume_stuck_runs()

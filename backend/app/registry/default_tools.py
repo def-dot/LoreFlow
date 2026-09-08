@@ -6,7 +6,7 @@ from app.registry.tools import tool
 from app.utils.http import http_client
 
 
-@tool(name="get_weather", description="查询指定城市的当前天气信息",
+@tool(description="查询指定城市的当前天气信息",
       params={"city": "城市名称，如北京、上海"})
 async def get_weather(city: str) -> str:
     """通过 wttr.in 查询实时天气。"""

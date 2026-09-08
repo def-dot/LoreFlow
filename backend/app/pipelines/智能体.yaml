@@ -1,0 +1,26 @@
+name: 智能体
+description: >
+  通用智能助手，根据问题自主决定使用哪些工具：查天气、搜索、计算等。
+
+inputs:
+  prompt:
+    required: true
+    multiline: true
+    label: 提示词
+    description: 用户输入的问题
+
+output:
+  reply: $agent.content
+
+nodes:
+  agent:
+    type: agent
+    label: 智能助手
+    description: 自主判断使用工具，直到问题解决
+    inputs:
+      system: >
+        你是通用智能助手。根据用户问题自主决定是否使用工具、使用哪个工具，
+        可以多次调用不同工具直到问题解决。
+      prompt: $prompt
+      max_iterations: 10
+    timeout: 300
