@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.config import settings
 from app.services.llm import llm_chat_call
 from app.registry.node_type import NodeGroup, node_type
 
@@ -49,7 +48,7 @@ async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any]:
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    model = str(ctx.get("model") or settings.DEFAULT_MODEL)
+    model = ctx.get("model") or None
     tools = ctx.get("tools") if isinstance(ctx.get("tools"), list) else None
     return await llm_chat_call(model, messages, tools=tools)
 
@@ -60,6 +59,7 @@ async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any]:
     group=NodeGroup.LLM,
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "待分类文本"},
+        "model": {"type": "string", "required": False, "description": "模型名（provider:model 格式）"},
         "classify_system": {"type": "string", "required": False, "description": "分类系统提示词"},
         "classify_labels": {"type": "list", "item": {"type": "string"}, "required": False, "description": "可选标签列表"},
     },
@@ -90,8 +90,9 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(labels, list) or not labels:
         labels = ["chat", "rag", "search", "human"]
 
+    model = ctx.get("model") or None
     raw = await llm_chat_call(
-        settings.DEFAULT_MODEL,
+        model,
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
     )
     text = raw["content"].strip().strip('"').lower()

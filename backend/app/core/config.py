@@ -1,5 +1,7 @@
 """应用配置 - 使用 pydantic Settings 管理环境变量"""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from pydantic import PostgresDsn
@@ -25,16 +27,8 @@ class Settings(BaseSettings):
     UPLOADS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "uploads"
     UPLOAD_MAX_MB: int = 20
 
-    # 默认模型（provider 名或 provider:model 格式）
-    DEFAULT_MODEL: str = "mimo"
-
-    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
-    OLLAMA_TIMEOUT_SECONDS: float = 300.0
-
-    # MiMo (OpenAI 兼容接口)
-    MIMO_BASE_URL: str = "https://token-plan-cn.xiaomimimo.com/v1"
-    MIMO_API_KEY: str = ""
-    MIMO_MODEL: str = "mimo-v2.5-pro"
+    # LLM Provider 配置文件路径（默认: 项目根目录 providers.yml）
+    PROVIDERS_FILE: Path = Path(__file__).resolve().parent.parent.parent.parent / "providers.yml"
 
     # Database
     POSTGRES_SERVER: str = "localhost"
@@ -68,7 +62,11 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASS: str = ""
 
-    model_config = {"env_file": "../.env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": "../.env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",  # 忽略 .env 中的未知字段
+    }
 
 
 settings = Settings()

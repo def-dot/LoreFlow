@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.config import settings
 from app.registry.node_type import NodeGroup, node_type
 from app.services.llm import llm_chat_call
 from app.registry.skills import SKILL_REGISTRY
@@ -116,7 +115,7 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串")
 
-    model = str(ctx.get("model") or settings.DEFAULT_MODEL)
+    model = ctx.get("model") or None
     max_iter = int(ctx.get("max_iterations") or 5)
 
     # --- 归一化 file_paths：统一为 upload ID 列表 ---

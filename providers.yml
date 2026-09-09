@@ -1,0 +1,21 @@
+# LLM Provider 配置
+# default_model: 全局默认模型（provider:model 格式）
+# 每个 provider 需要 base_url，其余可选
+
+default_model: mimo:mimo-v2.5-pro
+
+ollama:
+  base_url: http://127.0.0.1:11434
+  default_model: qwen2.5:latest
+  models:
+    - qwen2.5:latest
+    - llama3:8b
+    - mistral
+
+mimo:
+  base_url: https://token-plan-cn.xiaomimimo.com/v1
+  api_key: your-mimo-api-key
+  default_model: mimo-v2.5-pro
+  models:
+    - mimo-v2.5-pro
+    - mimo-v2-lite
