@@ -14,12 +14,12 @@ router = APIRouter(prefix="/uploads", route_class=UnifiedResponseRoute, tags=["u
 
 @router.post("", response_model=UploadOut, status_code=201)
 async def upload_file(
-    file: UploadFile = File(..., description="文本文件（.txt/.md/.markdown）"),
+    file: UploadFile = File(..., description="文本文件（.txt/.md/.markdown/.pdf）"),
 ) -> UploadOut:
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
     if suffix not in files.ALLOWED_SUFFIXES:
-        raise ValueError(f"不支持的文件类型 {suffix or '（无扩展名）'}：仅支持 .txt/.md/.markdown 文本文件")
+        raise ValueError(f"不支持的文件类型 {suffix or '（无扩展名）'}：仅支持 .txt/.md/.markdown/.pdf 文件")
     data = await file.read()
     if not data:
         raise ValueError("上传的文件内容为空")

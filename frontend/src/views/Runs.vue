@@ -6,6 +6,7 @@ import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
 import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
 import { toParamSpecs } from '@/api/pipelines'
+import { listSkills, listTools } from '@/api/registry'
 import { uploadFile, type UploadOut } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
 import { usePipelinesStore } from '@/stores/pipelines'
@@ -35,6 +36,9 @@ const uploadRefs = ref<Record<string, UploadOut>>({})
 const fileNames = ref<Record<string, string>>({})
 // file 参数上传中（防重复选择 + 按钮态）
 const uploading = ref<Record<string, boolean>>({})
+// 动态选项（按参数名自动从 API 加载）
+const dynamicOptions = ref<Record<string, { name: string; description: string }[]>>({})
+const selectedOptions = ref<Record<string, string[]>>({})
 // 声明了 params 的流水线默认表单模式；未声明的只有 JSON 文本
 const jsonMode = ref(false)
 
@@ -89,7 +93,35 @@ watch(
     fileNames.value = {}
     uploadRefs.value = {}
     inputsText.value = ''
+    selectedOptions.value = {}
   },
+)
+
+// 已知的动态选项源：参数名 → fetcher
+const DYNAMIC_OPTION_FETCHERS: Record<string, () => Promise<{ items: { name: string; description: string }[] }>> = {
+  skills: listSkills,
+  tools: listTools,
+}
+
+// 按参数名自动匹配：名字命中的自动拉取选项列表
+watch(
+  () => paramSpecs.value.map((s) => s.name).join(','),
+  async () => {
+    const specs = paramSpecs.value.filter((s) => s.name in DYNAMIC_OPTION_FETCHERS)
+    if (!specs.length) return
+    const results = await Promise.allSettled(
+      specs.map(async (s) => {
+        const { items } = await DYNAMIC_OPTION_FETCHERS[s.name]()
+        return { name: s.name, items }
+      }),
+    )
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        dynamicOptions.value[r.value.name] = r.value.items
+      }
+    }
+  },
+  { immediate: true },
 )
 
 // 默认值 → 预填文本：字符串原样，数字/布尔/JSON 值序列化后提交时由
@@ -122,6 +154,13 @@ const formInputs = computed(() => {
       const ref = uploadRefs.value[spec.name]
       if (!ref) continue
       value[spec.name] = { id: ref.id, filename: ref.filename }
+      continue
+    }
+    // 动态选项字段：提交 string[]，空数组 = 不传
+    if (spec.name in DYNAMIC_OPTION_FETCHERS) {
+      const selected = selectedOptions.value[spec.name]
+      if (!selected?.length) continue
+      value[spec.name] = selected
       continue
     }
     const raw = (paramValues.value[spec.name] ?? '').trim()
@@ -525,7 +564,7 @@ onUnmounted(() => {
                     {{ uploading[spec.name] ? '上传中…' : '选择文件' }}
                     <input
                       type="file"
-                      accept=".txt,.md,.markdown,text/plain"
+                      accept=".txt,.md,.markdown,.pdf,text/plain,application/pdf"
                       :disabled="uploading[spec.name]"
                       @change="onFilePicked(spec, $event)"
                     />
@@ -538,6 +577,27 @@ onUnmounted(() => {
                   </template>
                   <span v-else class="param-file-empty">{{ uploading[spec.name] ? '上传中，请稍候…' : '未选择文件' }}</span>
                 </div>
+                <el-select
+                  v-else-if="spec.name in DYNAMIC_OPTION_FETCHERS"
+                  v-model="selectedOptions[spec.name]"
+                  multiple
+                  filterable
+                  collapse-tags
+                  collapse-tags-tooltip
+                  placeholder="请选择"
+                  size="small"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="opt in (dynamicOptions[spec.name] ?? [])"
+                    :key="opt.name"
+                    :label="opt.name"
+                    :value="opt.name"
+                  >
+                    <span>{{ opt.name }}</span>
+                    <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
+                  </el-option>
+                </el-select>
                 <el-input
                   v-else
                   v-model="paramValues[spec.name]"
@@ -754,6 +814,17 @@ onUnmounted(() => {
 .param-file-empty {
   font-size: 12px;
   color: var(--ink-3);
+}
+.option-desc {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--ink-3);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 .inputs-error {
   color: #ff8f8a;

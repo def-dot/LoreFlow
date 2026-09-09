@@ -1,10 +1,12 @@
 """上传端点与 rag_load 读盘解析 — 白名单/大小/空内容拒绝、编码探测、路径穿越、E2E。"""
 
 import asyncio
+from io import BytesIO
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from pypdf import PdfWriter
 
 from app.core.config import settings
 from app.registry.rag import rag_load
@@ -42,10 +44,27 @@ async def test_upload_stores_file(client: AsyncClient) -> None:
 
 
 async def test_upload_rejects_bad_extension(client: AsyncClient) -> None:
-    for filename in ("notes.pdf", "noext"):
+    for filename in ("notes.xlsx", "noext"):
         resp = await _upload(client, filename, b"data")
         assert resp.status_code == 400
         assert "不支持的文件类型" in resp.json()["msg"]
+
+
+async def test_upload_stores_pdf(client: AsyncClient) -> None:
+    """PDF 上传成功：返回 .pdf 后缀 id，磁盘字节一致。"""
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    buf = BytesIO()
+    writer.write(buf)
+    pdf_bytes = buf.getvalue()
+
+    resp = await _upload(client, "设定集.pdf", pdf_bytes)
+    assert resp.status_code == 201
+    doc = resp.json()["data"]
+    assert doc["id"].endswith(".pdf")
+    assert doc["filename"] == "设定集.pdf"
+    assert doc["size"] == len(pdf_bytes)
+    assert (settings.UPLOADS_DIR / doc["id"]).read_bytes() == pdf_bytes
 
 
 async def test_upload_rejects_empty(client: AsyncClient) -> None:

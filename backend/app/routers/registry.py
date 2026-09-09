@@ -1,0 +1,30 @@
+"""技能 / 工具目录 — 向前端枚举已注册的 skills 和 tools。"""
+
+from fastapi import APIRouter
+
+from app.core.response import UnifiedResponseRoute
+from app.registry.skills import SKILL_REGISTRY
+from app.registry.tools import TOOL_REGISTRY
+from app.schemas.registry import RegistryItemOut, RegistryListResponse
+
+router = APIRouter(prefix="", route_class=UnifiedResponseRoute, tags=["registry"])
+
+
+@router.get("/skills", response_model=RegistryListResponse)
+async def list_skills() -> RegistryListResponse:
+    return RegistryListResponse(
+        items=[
+            RegistryItemOut(name=s.name, description=s.description)
+            for s in SKILL_REGISTRY.values()
+        ]
+    )
+
+
+@router.get("/tools", response_model=RegistryListResponse)
+async def list_tools() -> RegistryListResponse:
+    return RegistryListResponse(
+        items=[
+            RegistryItemOut(name=t.name, description=t.description)
+            for t in TOOL_REGISTRY.values()
+        ]
+    )

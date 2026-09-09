@@ -1,0 +1,5 @@
+Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+Requirement already satisfied: pypdf in d:\programs\python\python312\lib\site-packages (5.6.0)
+
+[notice] A new release of pip is available: 24.3.1 -> 26.2.1
+[notice] To update, run: python.exe -m pip install --upgrade pip

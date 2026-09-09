@@ -1,4 +1,4 @@
-"""上传文件的磁盘存取与文本解码 — UTF-8 优先、GBK 兜底，无三方依赖。
+"""上传文件的磁盘存取与文本解码 — UTF-8 优先、GBK 兜底；PDF 用 pypdf 提取。
 
 settings 在函数内动态读取（不在 import 时固化），测试可
 ``monkeypatch.setattr(settings, "UPLOADS_DIR", tmp_path)`` 重定向。
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.core.config import settings
 
-ALLOWED_SUFFIXES = frozenset({".txt", ".md", ".markdown"})
+ALLOWED_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".pdf"})
 
 
 def decode_text(data: bytes) -> str:
@@ -30,6 +30,17 @@ def decode_text(data: bytes) -> str:
         return data.decode("utf-8", errors="replace")
 
 
+def _extract_pdf_text(data: bytes) -> str:
+    """从 PDF 二进制内容提取纯文本（逐页拼接）。"""
+    from io import BytesIO
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(data))
+    pages = [page.extract_text() or "" for page in reader.pages]
+    return "\n".join(pages)
+
+
 def save_upload(data: bytes, suffix: str) -> str:
     """惰性建目录并落盘，返回存储名 ``{uuid_hex}{suffix}``（后端起的键，非用户输入）。"""
     settings.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -39,7 +50,10 @@ def save_upload(data: bytes, suffix: str) -> str:
 
 
 def read_upload(upload_id: str) -> str:
-    """按存储名读全文文本（JSON 模式可手输任意 id，先防路径穿越与白名单外扩展名）。"""
+    """按存储名读全文文本（JSON 模式可手输任意 id，先防路径穿越与白名单外扩展名）。
+
+    PDF 文件使用 pypdf 提取文本，其余走 decode_text 编码探测链。
+    """
     if (
         not upload_id
         or "/" in upload_id
@@ -51,4 +65,6 @@ def read_upload(upload_id: str) -> str:
     path = settings.UPLOADS_DIR / upload_id
     if not path.is_file():
         raise ValueError(f"上传文件不存在或已被清理：{upload_id}")
+    if path.suffix.lower() == ".pdf":
+        return _extract_pdf_text(path.read_bytes())
     return decode_text(path.read_bytes())
