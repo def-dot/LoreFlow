@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from pypdf import PdfWriter
 
 from app.core.config import settings
-from app.registry.rag import rag_load
+from app.registry.node_types.rag import rag_load
 from app.utils.files import decode_text
 
 

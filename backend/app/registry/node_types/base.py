@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any
 
-from app.registry.core import NodeGroup, node_type
+from app.registry.node_type import NodeGroup, node_type
 
 logger = logging.getLogger(__name__)
 

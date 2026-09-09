@@ -1,10 +1,8 @@
 """
-内置工具
+通用工具 — 天气查询、计算器。
 """
 
-import asyncio
-
-from app.registry.tools import tool
+from app.registry.tool import tool
 from app.utils.http import http_client
 
 
@@ -36,28 +34,3 @@ async def calculator(expression: str = "") -> str:
         return str(eval(expression))
     except Exception:
         return f"计算错误：无法计算表达式 {expression}"
-
-
-@tool(description="执行 Python 代码并返回输出",
-      params={"code": "要执行的 Python 代码"})
-async def run_code(code: str) -> str:
-    """在子进程中执行 Python 代码，返回 stdout 和 stderr。"""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "python", "-c", code,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
-        parts: list[str] = []
-        if stdout:
-            parts.append(stdout.decode(errors="replace"))
-        if stderr:
-            parts.append(f"[stderr]\n{stderr.decode(errors='replace')}")
-        if proc.returncode != 0:
-            parts.append(f"[exit code] {proc.returncode}")
-        return "\n".join(parts) or "(无输出)"
-    except asyncio.TimeoutError:
-        return "执行超时（60 秒）"
-    except Exception as exc:
-        return f"执行失败：{type(exc).__name__}: {exc}"

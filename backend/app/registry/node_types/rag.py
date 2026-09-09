@@ -8,7 +8,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from app.registry.core import NodeGroup, node_type
+from app.registry.node_type import NodeGroup, node_type
 from app.utils import files
 
 
@@ -163,4 +163,3 @@ async def rag_retrieve(ctx: dict[str, Any]) -> list[dict[str, str]]:
     prompt = str(ctx.get("prompt", ""))
     ranked = sorted(_MOCK_KB, key=lambda c: -sum(prompt.count(k) for k in c["keywords"]))
     return [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]
-

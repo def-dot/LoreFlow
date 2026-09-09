@@ -8,10 +8,10 @@ import logging
 from typing import Any
 
 from app.core.config import settings
-from app.registry.core import NodeGroup, node_type
-from app.registry.llm import _ollama_chat
+from app.registry.node_type import NodeGroup, node_type
+from app.services.llm import llm_chat_call
 from app.registry.skills import SKILL_REGISTRY
-from app.registry.tools import TOOL_REGISTRY, execute_tool_calls
+from app.registry.tool import TOOL_REGISTRY, execute_tool_calls
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +104,9 @@ def _build_skill_prompt(skill_names: list[str]) -> str | None:
         "type": "object",
         "fields": {
             "content": {"type": "string", "description": "LLM 最终回复文本"},
-            "iterations": {"type": "integer", "description": "实际迭代次数"},
-            "all_tool_calls": {
+            "messages": {
                 "type": "list",
-                "description": "所有迭代中执行的工具调用记录",
+                "description": "完整会话记录（system/user/assistant/tool 消息）",
             },
         },
     },
@@ -117,8 +116,14 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串")
 
-    model = str(ctx.get("model") or settings.OLLAMA_MODEL)
+    model = str(ctx.get("model") or settings.DEFAULT_MODEL)
     max_iter = int(ctx.get("max_iterations") or 5)
+
+    # --- 归一化 file_paths：统一为 upload ID 列表 ---
+    raw_files = ctx.get("file_paths") or []
+    if isinstance(raw_files, dict):
+        raw_files = [raw_files]
+    file_ids: list[str] = [f["id"] for f in raw_files]
 
     messages: list[dict[str, str]] = []
     system = ctx.get("system")
@@ -130,14 +135,14 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
         system = f"{skill_prompt}\n\n{system}" if system else skill_prompt
 
     parts: list[str] = []
-    file_paths: list[str] = ctx.get("file_paths") or []
-    if file_paths:
-        parts.append("已上传文件：\n" + "\n".join(f"- {p}" for p in file_paths))
+    if file_ids:
+        # Docker 沙箱用容器内路径，否则用宿主机完整路径
+        parts.append("已上传文件：\n" + "\n".join(f"- /uploads/{fid}" for fid in file_ids))
     if isinstance(context, str) and context.strip():
         parts.append(f"参考资料：\n{context}")
     parts.append(f"用户问题：{prompt}")
     user_prompt = "\n\n".join(parts)
-    
+
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": user_prompt})
@@ -150,22 +155,21 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
                 tool_names.append(t)
     tools = _build_tools(tool_names)
 
-    all_tool_calls: list[dict[str, Any]] = []
     content = ""
 
     for iteration in range(1, max_iter + 1):
         logger.info("[agent] iteration %d / %d", iteration, max_iter)
 
-        result = await _ollama_chat(model, messages, tools=tools)
+        result = await llm_chat_call(model, messages, tools=tools)
         content = result["content"]
         tool_calls = result.get("tool_calls", [])
 
         if not tool_calls:
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             logger.info("[agent] finished after %d iteration(s)", iteration)
             break
 
         tool_results = await execute_tool_calls(tool_calls)
-        all_tool_calls.extend(tool_results)
 
         messages.append({
             "role": "assistant",
@@ -175,13 +179,12 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
         for tr in tool_results:
             messages.append({
                 "role": "tool",
-                "content": str(tr["output"]),
+                "content": f"[{tr['tool_name']}] {tr['output']}",
             })
     else:
         logger.warning("[agent] max iterations (%d) reached", max_iter)
 
     return {
         "content": content,
-        "iterations": min(iteration, max_iter),
-        "all_tool_calls": all_tool_calls,
+        "messages": messages,
     }

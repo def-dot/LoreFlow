@@ -1,9 +1,5 @@
 """
-LLM 节点 — 调用本地 Ollama 服务（默认 http://localhost:11434）。
-
-输入约定：节点函数从共享上下文取值（YAML 顶层 ``inputs`` 声明 + 创建
-运行时提供），模型名可被 ``ctx["model"]`` 覆盖，缺省取 ``settings.OLLAMA_MODEL``。
-连接/超时/模型不存在统一转成中文 ValueError，节点结果里直接可读。
+LLM 节点 — llm_chat / llm_classify，调用 app.services.llm 的公共接口。
 """
 
 from __future__ import annotations
@@ -11,41 +7,14 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import settings
-from app.registry.core import NodeGroup, node_type
-from app.utils.http import http_client
-
-
-async def _ollama_chat(
-    model: str,
-    messages: list[dict[str, str]],
-    fmt: dict[str, Any] | str | None = None,
-    tools: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """POST /api/chat（非流式）→ ``{"content": str, "tool_calls": list}``。
-
-    fmt 透传 Ollama 的 format 约束（``"json"`` 或 JSON Schema）。
-    """
-    payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
-    if fmt is not None:
-        payload["format"] = fmt
-    if tools is not None:
-        payload["tools"] = tools
-    url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
-    resp = await http_client().post(url, json=payload)
-    resp.raise_for_status()
-    data = resp.json()
-
-    msg = data["message"]
-    return {
-        "content": str(msg.get("content", "")),
-        "tool_calls": msg.get("tool_calls", []),
-    }
+from app.services.llm import llm_chat_call
+from app.registry.node_type import NodeGroup, node_type
 
 
 @node_type(
     label="LLM 对话",
     group=NodeGroup.LLM,
-    description="调用本地 Ollama 模型生成回答，可选传入 tools 启用工具调用",
+    description="调用 LLM 模型生成回答，支持 Ollama / MiMo 等 OpenAI 兼容后端",
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "用户提示词"},
         "system": {"type": "string", "required": False, "description": "系统提示词"},
@@ -54,7 +23,7 @@ async def _ollama_chat(
         "tools": {
             "type": "list",
             "required": False,
-            "description": "工具定义列表（Ollama function calling 格式）",
+            "description": "工具定义列表（OpenAI function calling 格式）",
         },
     },
     output_schema={
@@ -80,9 +49,9 @@ async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any]:
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    model = str(ctx.get("model") or settings.OLLAMA_MODEL)
+    model = str(ctx.get("model") or settings.DEFAULT_MODEL)
     tools = ctx.get("tools") if isinstance(ctx.get("tools"), list) else None
-    return await _ollama_chat(model, messages, tools=tools)
+    return await llm_chat_call(model, messages, tools=tools)
 
 
 @node_type(
@@ -121,10 +90,9 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(labels, list) or not labels:
         labels = ["chat", "rag", "search", "human"]
 
-    raw = await _ollama_chat(
-        settings.OLLAMA_MODEL,
+    raw = await llm_chat_call(
+        settings.DEFAULT_MODEL,
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        fmt={"type": "string", "enum": labels},
     )
     text = raw["content"].strip().strip('"').lower()
     return {"intent": text, "raw": raw["content"].strip()}

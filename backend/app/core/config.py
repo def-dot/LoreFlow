@@ -19,15 +19,22 @@ class Settings(BaseSettings):
     PLUGINS_POLL_SECONDS: int = 3
 
     # Agent Skills — 符合 agentskills.io 规范的技能目录
-    SKILLS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "skills"
+    SKILLS_DIR: Path = Path(__file__).resolve().parent.parent / "registry" / "skills"
 
     # 上传文件 — 文本文件落盘目录（file 参数先上传后引用）
     UPLOADS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "uploads"
     UPLOAD_MAX_MB: int = 20
 
+    # 默认模型（provider 名或 provider:model 格式）
+    DEFAULT_MODEL: str = "mimo"
+
     OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
-    OLLAMA_MODEL: str = "qwen2.5:latest"
     OLLAMA_TIMEOUT_SECONDS: float = 300.0
+
+    # MiMo (OpenAI 兼容接口)
+    MIMO_BASE_URL: str = "https://token-plan-cn.xiaomimimo.com/v1"
+    MIMO_API_KEY: str = ""
+    MIMO_MODEL: str = "mimo-v2.5-pro"
 
     # Database
     POSTGRES_SERVER: str = "localhost"

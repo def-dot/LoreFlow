@@ -4,7 +4,7 @@ from typing import Any
 import re
 import json
 
-from app.registry.core import NodeGroup, node_type
+from app.registry.node_type import NodeGroup, node_type
 
 
 @node_type(

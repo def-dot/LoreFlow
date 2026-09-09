@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.registry.llm import final_answer, llm_classify
+from app.registry.node_types.llm import final_answer, llm_classify
 
 
 async def test_classify_human_keyword_short_circuits() -> None:

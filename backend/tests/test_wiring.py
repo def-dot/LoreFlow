@@ -10,7 +10,7 @@ import pytest
 
 from app.engine.declarative import load_dag
 from app.engine.validate import validate_config
-from app.registry.core import node_type, unregister
+from app.registry.node_type import node_type, unregister
 
 
 @pytest.fixture(autouse=True)

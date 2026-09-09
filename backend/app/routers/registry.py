@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.core.response import UnifiedResponseRoute
 from app.registry.skills import SKILL_REGISTRY
-from app.registry.tools import TOOL_REGISTRY
+from app.registry.tool import TOOL_REGISTRY
 from app.schemas.registry import RegistryItemOut, RegistryListResponse
 
 router = APIRouter(prefix="", route_class=UnifiedResponseRoute, tags=["registry"])

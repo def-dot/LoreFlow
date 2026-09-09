@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.core.response import UnifiedResponseRoute
 from app.registry import REGISTRY
-from app.registry.core import NodeGroup
+from app.registry.node_type import NodeGroup
 from app.schemas.node_types import NodeTypeListResponse, NodeTypeOut
 
 router = APIRouter(prefix="/node-types", route_class=UnifiedResponseRoute, tags=["node-types"])

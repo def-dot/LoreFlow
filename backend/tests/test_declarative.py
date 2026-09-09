@@ -804,10 +804,10 @@ async def _run_condition_yaml(
 ) -> dict[str, Any]:
     """桩掉 Ollama 跑真实 02_condition.yaml：classify_raw 控制 llm_classify 的
     模型输出（空串 = 预期不触达模型，如「人工」关键词短路）。"""
-    from app.registry import llm as llm_mod
+    from app.services import llm as llm_mod
 
-    async def fake_ollama(model: str, messages: list[dict[str, str]], fmt: Any = None, tools: Any = None) -> dict:
-        assert classify_raw, "本用例不应触达 Ollama"
+    async def fake_chat(model: str, messages: list[dict[str, str]], tools: Any = None) -> dict:
+        assert classify_raw, "本用例不应触达 LLM"
         system = next((m["content"] for m in messages if m["role"] == "system"), "")
         if "意图分类器" in system:
             content = classify_raw
@@ -817,7 +817,7 @@ async def _run_condition_yaml(
             content = "闲聊支路答复"
         return {"content": content, "tool_calls": []}
 
-    monkeypatch.setattr(llm_mod, "_ollama_chat", fake_ollama)
+    monkeypatch.setattr(llm_mod, "llm_chat_call", fake_chat)
     _, config = read_yaml(settings.PIPELINES_DIR / "02_condition.yaml")
     dag = load_dag(config)
     return await dag.run(inputs={"prompt": prompt})
