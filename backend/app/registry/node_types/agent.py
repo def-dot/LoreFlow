@@ -178,6 +178,7 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
         for tr in tool_results:
             messages.append({
                 "role": "tool",
+                "tool_call_id": tr["tool_call_id"],
                 "content": f"[{tr['tool_name']}] {tr['output']}",
             })
     else:

@@ -41,5 +41,5 @@ nodes:
       skills: $skills
       tools: $tools
       file_paths: $file
-      max_iterations: 10
+      max_iterations: 5
     timeout: 300

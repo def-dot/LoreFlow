@@ -14,7 +14,7 @@ ollama:
 
 mimo:
   base_url: https://token-plan-cn.xiaomimimo.com/v1
-  api_key: your-mimo-api-key
+  api_key: tp-ca8urd0ekskqst4n95vd1l2p06ldbth4f8okziv2ha9ltmgv
   default_model: mimo-v2.5-pro
   models:
     - mimo-v2.5-pro

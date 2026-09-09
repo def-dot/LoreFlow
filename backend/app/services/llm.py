@@ -78,12 +78,7 @@ async def llm_chat_call(
     data = resp.json()
 
     choice = data["choices"][0]["message"]
-    raw_calls = choice.get("tool_calls") or []
-    tool_calls = [
-        {"function": {"name": tc["function"]["name"], "arguments": tc["function"]["arguments"]}}
-        for tc in raw_calls
-    ]
     return {
         "content": str(choice.get("content", "")),
-        "tool_calls": tool_calls,
+        "tool_calls": choice.get("tool_calls") or [],
     }

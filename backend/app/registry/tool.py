@@ -107,6 +107,7 @@ async def execute_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str,
                 output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
 
         results.append({
+            "tool_call_id": tc.get("id", ""),
             "tool_name": name,
             "arguments": args,
             "output": str(output),
