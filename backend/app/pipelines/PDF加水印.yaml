@@ -1,0 +1,47 @@
+name: PDF加水印
+description: >
+  上传 PDF 文件，自动为每页添加文字水印，输出加水印后的文件。
+
+inputs:
+  file:
+    file: true
+    required: true
+    label: PDF文件
+    description: 上传需要加水印的 PDF 文件
+  watermark_text:
+    required: true
+    label: 水印文字
+    description: 水印内容，如"机密文件"、"仅供内部使用"
+    default: 机密文件
+
+output:
+  reply: $agent.content
+
+nodes:
+  agent:
+    type: agent
+    label: PDF水印处理
+    description: 读取 PDF 技能指令，使用 Python 代码为 PDF 添加文字水印
+    inputs:
+      system: >
+        你是一个 PDF 处理专家。你的任务是为用户上传的 PDF 文件添加文字水印。
+
+        工作流程：
+        1. 先用 read_file 工具读取 pdf 技能的 SKILL.md，学习 PDF 处理方法
+        2. 用 run_code 工具编写并执行 Python 代码完成水印添加
+        3. 水印要求：半透明、倾斜 45 度、覆盖每页中心区域
+        4. 输出文件保存到 uploads 目录，文件名带 _watermarked 后缀
+
+        注意：
+        - 使用 reportlab 生成水印 PDF（单页），再用 pypdf 的 merge_page 合并到每页
+        - uploads 目录路径通过上下文中的文件路径推断（取其父目录）
+        - 执行完成后告知用户输出文件的完整路径
+      prompt: $watermark_text
+      file_paths: $file
+      skills:
+        - pdf
+      tools:
+        - read_file
+        - run_code
+      max_iterations: 10
+    timeout: 300
