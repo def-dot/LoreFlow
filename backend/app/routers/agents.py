@@ -9,7 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.database import AsyncSessionLocal
 from app.core.response import UnifiedResponseRoute
 from app.models.agent import AgentRecord
-from app.schemas.agent import AgentCreate, AgentUpdate
+from app.schemas.agents import AgentCreate, AgentUpdate
 
 router = APIRouter(prefix="/agents", route_class=UnifiedResponseRoute, tags=["agents"])
 
