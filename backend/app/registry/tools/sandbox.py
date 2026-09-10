@@ -22,13 +22,15 @@ async def pip_install(packages: str) -> str:
     """在沙箱中 pip install，安装到持久化卷，后续 run_code 可用。"""
     if not packages.strip():
         return "未指定要安装的包"
+    tmp_dir = f"{DOCKER_PACKAGES_PATH}/.pip-tmp"
     cmd = [
         "docker", "run", "--rm",
         "--memory", "256m", "--cpus", "0.5",
+        "-e", f"TMPDIR={tmp_dir}",
         "-v", f"{SANDBOX_PACKAGES_VOLUME}:{DOCKER_PACKAGES_PATH}",
         SANDBOX_IMAGE,
-        "pip", "install", "--no-cache-dir", "--target", DOCKER_PACKAGES_PATH,
-        *packages.split(),
+        "sh", "-c",
+        f"mkdir -p {tmp_dir} && pip install --no-cache-dir --target {DOCKER_PACKAGES_PATH} {packages}",
     ]
     try:
         proc = await asyncio.create_subprocess_exec(

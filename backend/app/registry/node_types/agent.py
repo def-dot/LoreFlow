@@ -160,6 +160,8 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
         logger.info("[agent] iteration %d / %d", iteration, max_iter)
 
         result = await llm_chat_call(model, messages, tools=tools)
+        logger.info(result)
+        
         content = result["content"]
         tool_calls = result.get("tool_calls", [])
 
