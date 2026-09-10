@@ -1,8 +1,10 @@
 """Agent / 对话 相关请求/响应 schema。"""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
-from app.models.agent import ConversationRecord, MessageRecord
+from app.models.agent import MessageRecord
 
 
 # ── Agent ────────────────────────────────────────────────────────────────────
@@ -43,7 +45,12 @@ class ConversationCreate(BaseModel):
     title: str = ""
 
 
-class ConversationDetail(ConversationRecord):
+class ConversationDetail(BaseModel):
     """对话详情，包含消息列表。"""
 
+    id: int
+    agent_id: int
+    title: str = ""
+    created_at: datetime
+    updated_at: datetime | None = None
     messages: list[MessageRecord] = Field(default_factory=list)
