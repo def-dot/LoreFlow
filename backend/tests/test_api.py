@@ -1,6 +1,7 @@
 """API 集成测试 — run 生命周期 + 审批流 + 错误信封 + 重启恢复"""
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -230,7 +231,7 @@ async def test_list_runs_pagination(client: AsyncClient) -> None:
             name=f"p{i}",
             config_file="pipeline.yaml",
             mermaid="graph TD\n",
-            created_at=f"2026-01-0{i+1}T00:00:00",
+            created_at=datetime(2026, 1, i+1),
             status="completed",
             nodes={},
         )
@@ -265,7 +266,7 @@ async def test_list_runs_filters(client: AsyncClient) -> None:
                 name=f"f{i}",
                 config_file=config,
                 mermaid="graph TD\n",
-                created_at=f"2026-02-0{i + 1}T00:00:00",
+                created_at=datetime(2026, 2, i+1),
                 status=status,
                 nodes={},
             )
@@ -435,7 +436,7 @@ async def test_resume_stuck_run_alternate_config(client: AsyncClient) -> None:
         config_file="01_serial.yaml",
         definition=(settings.PIPELINES_DIR / "01_serial.yaml").read_text(encoding="utf-8"),
         mermaid="graph TD\n",
-        created_at="2026-01-01T00:00:00",
+        created_at=datetime(2026, 1, 1),
         status="running",
         nodes={},
         inputs={"document": {"id": _store_upload("北境要塞.md"), "filename": "北境要塞.md"}},
@@ -458,7 +459,7 @@ async def test_resume_stuck_run(client: AsyncClient) -> None:
         config_file="05_human_review.yaml",
         definition=(settings.PIPELINES_DIR / "05_human_review.yaml").read_text(encoding="utf-8"),
         mermaid="graph TD\n",
-        created_at="2026-01-01T00:00:00",
+        created_at=datetime(2026, 1, 1),
         status="running",
         nodes={
             # 新版 05 无 fetch 节点，直接用输入参数；空 nodes 表示刚开始执行

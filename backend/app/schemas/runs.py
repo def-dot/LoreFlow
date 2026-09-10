@@ -1,5 +1,6 @@
 """Pydantic 请求/响应模型 — /api/v1/runs 系列"""
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
@@ -12,16 +13,16 @@ class RunListItem(BaseModel):
 
     id: int
     name: str
-    created_at: str | None = None
-    finished_at: str | None = None
+    created_at: datetime | None = None
+    finished_at: datetime | None = None
     status: RunStatus
     error: str | None = None
     pipeline: str = ""  # 工作流名称（YAML 的 name 字段）
 
     @field_serializer("created_at", "finished_at")
-    def _format_dt(self, value: str | None) -> str | None:
-        """存储层是 ISO（带 T），响应层换成空格分隔的友好格式。"""
-        return value.replace("T", " ", 1) if value else value
+    def _format_dt(self, value: datetime | None) -> str | None:
+        """响应层用空格分隔的友好格式。"""
+        return value.strftime("%Y-%m-%d %H:%M:%S") if value else value
 
 
 class RunListSummary(BaseModel):

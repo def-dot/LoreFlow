@@ -83,7 +83,7 @@ async def run_pipeline(record: RunRecord, dag: DAG) -> None:
         values: dict[str, Any] = {
             "status": outcome,
             "output": output,
-            "finished_at": datetime.now().isoformat(timespec="seconds") if outcome is not RunStatus.REVIEWING else None,
+            "finished_at": datetime.now() if outcome is not RunStatus.REVIEWING else None,
             "error": error,
         }
 
@@ -126,7 +126,6 @@ async def create_run(
     record = RunRecord(
         name=name or dag.name,
         pipeline=dag.name,
-        created_at=datetime.now().isoformat(timespec="seconds"),
         status=RunStatus.RUNNING,
     )
     record.definition = text
@@ -163,7 +162,7 @@ async def cancel_run(run_id: int) -> None:
             .values(
                 status=RunStatus.CANCELLED,
                 error="用户手动取消",
-                finished_at=datetime.now().isoformat(timespec="seconds"),
+                finished_at=datetime.now(),
             )
         )
         await session.commit()

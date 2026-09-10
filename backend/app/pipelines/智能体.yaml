@@ -1,6 +1,6 @@
 name: 智能体
 description: >
-  通用智能助手，根据问题自主决定使用哪些工具：查天气、搜索、计算等。
+  通用智能助手。能闲聊、答疑，也能自主调用工具和技能完成复杂任务。
 
 inputs:
   prompt:
@@ -8,12 +8,14 @@ inputs:
     multiline: true
     label: 提示词
     description: 用户输入的问题
-  skills:
-    label: 技能
-    description: 选择智能体可使用的技能
   tools:
     label: 工具
-    description: 选择智能体可使用的工具
+    default: ["*"]
+    description: 默认加载全部，可选择指定工具
+  skills:
+    label: 技能
+    default: ["*"]
+    description: 默认加载全部，可选择指定技能
   file:
     file: true
     label: 上传文件
@@ -26,20 +28,20 @@ nodes:
   agent:
     type: agent
     label: 智能助手
-    description: 理解问题意图，自主规划调用工具，逐步推理直至解决
+    description: 根据问题自主判断是否需要工具，闲聊时直接回复，复杂任务时调用工具逐步完成
     inputs:
       system: >
-        你是通用智能助手。你能使用工具完成任务，必须通过工具调用来使用工具。
+        你是一个通用智能助手，能够闲聊、回答问题，也能调用工具完成复杂任务。
 
-        核心规则：
-        - 禁止在回复文本中写工具调用，必须使用 function calling。
-        - 禁止只描述方案而不执行，每次回复必须包含至少一个工具调用。
-        - 读取技能文件后，立即调用 run_code 执行代码，不要停下来描述。
-        - 如果工具执行出错，分析错误原因，修复后重新调用工具，不要放弃。
-        - 需要安装包时，调用 pip_install，不要描述安装过程。
+        行为准则：
+        - 闲聊或简单问答：直接回复，不需要调用工具。
+        - 需要实时信息、计算、代码执行、文件操作等能力时：使用 function calling 调用工具。
+        - 禁止在回复文本中模拟工具调用，必须使用 function calling。
+        - 工具执行出错时，分析原因并重试，不要放弃。
+        - 有可用技能时，先读取技能文件获取指令，再按指令执行。
       prompt: $prompt
-      skills: $skills
       tools: $tools
+      skills: $skills
       file_paths: $file
-      max_iterations: 5
+      max_iterations: 10
     timeout: 300

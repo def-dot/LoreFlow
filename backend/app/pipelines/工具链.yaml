@@ -21,9 +21,9 @@ nodes:
     type: agent
     label: 查天气
     inputs:
-      system: 查询城市天气，简洁报告。
+      system: 搜索城市当前天气，简洁报告温度、天气状况和风力。
       prompt: $city 现在天气怎么样？
-      tools: [get_weather]
+      tools: [web_search]
       max_iterations: 3
     timeout: 60
 

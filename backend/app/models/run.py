@@ -1,5 +1,6 @@
 """Database models — run records."""
 
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -27,8 +28,8 @@ class RunRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)  # 自增
     name: str = ""  # 任务名称（用户自定义或配置文件名）
     pipeline: str = ""  # 工作流名称（YAML 的 name 字段）
-    created_at: str | None = None
-    finished_at: str | None = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    finished_at: datetime | None = None
     # native_enum=False + values_callable：沿用 VARCHAR 列按 value 存取，兼容存量库
     status: RunStatus = Field(
         default=RunStatus.PENDING,

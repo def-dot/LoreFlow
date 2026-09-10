@@ -22,7 +22,6 @@ nodes:
         你是一个智能助手。你可以使用提供的工具来回答问题。
         如果问题不需要工具就能回答，直接回复即可。
       tools:
-        - get_weather
-        - calculator
+        - web_search
       max_iterations: 5
     timeout: 120

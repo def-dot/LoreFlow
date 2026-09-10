@@ -11,7 +11,9 @@ LLM 公共调用层 — 统一 OpenAI 兼容接口，支持多 provider 后端�
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import yaml
@@ -41,29 +43,31 @@ def list_models() -> dict[str, list[str]]:
     }
 
 
-async def llm_chat_call(
-    model: str | None,
-    messages: list[dict[str, str]],
-    tools: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """POST /chat/completions（非流式）→ ``{"content": str, "tool_calls": list}``。"""
+def _resolve_provider(model: str | None) -> tuple[str, str, str, str]:
+    """解析模型引用 → (provider_name, model_name, base_url, api_key)。"""
     cfg = _read_providers()
-
-    # 解析 model_str → provider_name + model_name
     model = model or cfg.get("default_model", "")
     if not model:
         raise ValueError("未指定模型且 providers.yml 未配置 default_model")
-    
-    provider_name, model_name = model.split(":", 1)
 
+    provider_name, model_name = model.split(":", 1)
     provider = cfg.get(provider_name)
     if not isinstance(provider, dict):
         raise ValueError(f"Unknown provider: {provider_name}")
 
     base_url = str(provider.get("base_url", "")).rstrip("/")
     api_key = str(provider.get("api_key", ""))
+    return provider_name, model_name, base_url, api_key
 
-    # 发请求
+
+async def llm_chat_call(
+    model: str | None,
+    messages: list[dict[str, str]],
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """POST /chat/completions（非流式）→ ``{"content": str, "tool_calls": list}``。"""
+    _, model_name, base_url, api_key = _resolve_provider(model)
+
     payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": False}
     if tools is not None:
         payload["tools"] = tools
@@ -82,3 +86,84 @@ async def llm_chat_call(
         "content": str(choice.get("content", "")),
         "tool_calls": choice.get("tool_calls") or [],
     }
+
+
+async def llm_chat_stream(
+    model: str | None,
+    messages: list[dict[str, str]],
+    tools: list[dict[str, Any]] | None = None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """POST /chat/completions（流式）→ 逐 chunk yield。
+
+    每个 yield 的 dict 包含：
+    - ``content``: 本 chunk 的增量文本（可能为空）
+    - ``tool_calls``: 累积的工具调用列表（仅 finish 时完整）
+    - ``finish_reason``: None 或 "stop" / "tool_calls"
+    """
+    _, model_name, base_url, api_key = _resolve_provider(model)
+
+    payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": True}
+    if tools is not None:
+        payload["tools"] = tools
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    logger.info("[llm:stream] %s", model_name)
+
+    # 累积 tool_calls 的缓冲区：index → {id, type, function: {name, arguments}}
+    tool_calls_buf: dict[int, dict[str, Any]] = {}
+
+    async with http_client().stream(
+        "POST", f"{base_url}/chat/completions", json=payload, headers=headers
+    ) as resp:
+        resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            if not line or not line.startswith("data: "):
+                continue
+            data_str = line[6:].strip()
+            if data_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+            finish_reason = chunk["choices"][0].get("finish_reason")
+
+            content = delta.get("content") or ""
+            raw_tool_calls = delta.get("tool_calls") or []
+
+            # 累积 tool_calls（OpenAI 流式：每个 delta 只包含增量片段）
+            for tc in raw_tool_calls:
+                idx = tc.get("index", 0)
+                if idx not in tool_calls_buf:
+                    tool_calls_buf[idx] = {
+                        "id": tc.get("id", ""),
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    }
+                entry = tool_calls_buf[idx]
+                if tc.get("id"):
+                    entry["id"] = tc["id"]
+                func_delta = tc.get("function", {})
+                if func_delta.get("name"):
+                    entry["function"]["name"] += func_delta["name"]
+                if func_delta.get("arguments"):
+                    entry["function"]["arguments"] += func_delta["arguments"]
+
+            yield {
+                "content": content,
+                "tool_calls": [tool_calls_buf[i] for i in sorted(tool_calls_buf)] if finish_reason else [],
+                "finish_reason": finish_reason,
+            }
+
+    # 清理：确保最后一次 yield 包含完整 tool_calls
+    if tool_calls_buf and not finish_reason:
+        yield {
+            "content": "",
+            "tool_calls": [tool_calls_buf[i] for i in sorted(tool_calls_buf)],
+            "finish_reason": "tool_calls",
+        }

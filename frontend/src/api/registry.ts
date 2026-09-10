@@ -12,3 +12,7 @@ export function listSkills(): Promise<{ items: RegistryItem[] }> {
 export function listTools(): Promise<{ items: RegistryItem[] }> {
   return api.get('/tools')
 }
+
+export function listModels(): Promise<Record<string, string[]>> {
+  return api.get('/models')
+}
