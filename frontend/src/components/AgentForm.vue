@@ -3,7 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
 import { listModels, listTools, listSkills } from '@/api/registry'
 import { ElMessage } from 'element-plus'
-import type { AgentCreate, AgentListItem } from '@/api/agents'
+import type { AgentListItem } from '@/api/agents'
 
 const props = defineProps<{
   agent?: AgentListItem | null
@@ -15,7 +15,8 @@ const emit = defineEmits<{
 
 const store = useAgentsStore()
 
-const form = ref<AgentCreate>({
+const form = ref<AgentListItem>({
+  id: 0,
   name: '',
   description: '',
   system_prompt: '',
@@ -23,6 +24,8 @@ const form = ref<AgentCreate>({
   tools: [],
   skills: [],
   max_iterations: 5,
+  created_at: null,
+  updated_at: null,
 })
 
 const saving = ref(false)

@@ -75,7 +75,7 @@ export const useAgentsStore = defineStore('agents', {
       return agent
     },
 
-    async updateAgent(id: number, data: AgentUpdate) {
+    async updateAgent(id: number, data: Partial<AgentListItem>) {
       const agent = await updateAgent(id, data)
       if (this.selectedAgent?.id === id) {
         this.selectedAgent = agent

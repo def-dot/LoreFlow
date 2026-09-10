@@ -56,10 +56,10 @@ export const listAgents = () => api.get<AgentListItem[]>('/agents')
 
 export const getAgent = (id: number) => api.get<AgentListItem>(`/agents/${id}`)
 
-export const createAgent = (data: AgentCreate) =>
+export const createAgent = (data: AgentListItem) =>
   api.post<AgentListItem>('/agents', data)
 
-export const updateAgent = (id: number, data: AgentUpdate) =>
+export const updateAgent = (id: number, data: Partial<AgentListItem>) =>
   api.put<AgentListItem>(`/agents/${id}`, data)
 
 export const deleteAgent = (id: number) => api.delete(`/agents/${id}`)
