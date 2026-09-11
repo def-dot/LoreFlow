@@ -76,13 +76,7 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     file_ids: list[str] = [f["id"] for f in raw_files]
 
     messages: list[dict[str, str]] = []
-    system = ctx.get("system")
     context = ctx.get("context")
-
-    # --- 技能目录注入 system prompt ---
-    skill_prompt = build_skill_prompt(ctx.get("skills") or [])
-    if skill_prompt:
-        system = f"{skill_prompt}\n\n{system}" if system else skill_prompt
 
     parts: list[str] = []
     if file_ids:
@@ -91,14 +85,18 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     if isinstance(context, str) and context.strip():
         parts.append(f"参考资料：\n{context}")
     parts.append(f"用户问题：{prompt}")
-    user_prompt = "\n\n".join(parts)
+    messages.append({"role": "user", "content": "\n\n".join(parts)})
 
-    if isinstance(system, str) and system.strip():
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": user_prompt})
+    # --- 技能目录 + system prompt 注入首条 ---
+    system = ctx.get("system")
+    skills = ctx.get("skills")
+    if system or skills:
+        skill_prompt = build_skill_prompt(skills) or ""
+        system_content = (system or "") + "\n\n" + skill_prompt
+        messages.insert(0, {"role": "system", "content": system_content.strip()})
 
     # --- 构建工具列表（有 skills 时自动注入 read_file + run_code）---
-    tool_names: list[str] = ctx.get("tools") or []
+    tool_names: list[str] = list(ctx.get("tools") or [])
     if ctx.get("skills") and "*" not in tool_names:
         for t in ("read_file", "run_code"):
             if t not in tool_names:

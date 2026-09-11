@@ -101,16 +101,24 @@ async def llm_chat_stream(
         async for line in resp.aiter_lines():
             if not line or not line.startswith("data: "):
                 continue
+            logger.info(f"data-------- {line}")
             data_str = line[6:].strip()
             if data_str == "[DONE]":
                 break
+
             try:
                 chunk = json.loads(data_str)
             except json.JSONDecodeError:
                 continue
+            
+            # delta = chunk.get("choices", [{}])[0].get("delta", {})
+            # finish_reason = chunk["choices"][0].get("finish_reason")
 
-            delta = chunk.get("choices", [{}])[0].get("delta", {})
-            finish_reason = chunk["choices"][0].get("finish_reason")
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta", {})
+            finish_reason = choices[0].get("finish_reason")
 
             content = delta.get("content") or ""
             raw_tool_calls = delta.get("tool_calls") or []

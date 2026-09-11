@@ -45,16 +45,14 @@ watch(
 
 // 选择对话
 async function selectConv(conv: ConversationListItem) {
+  store.pendingNewConversation = false
   await store.selectConversation(conv.id)
   scrollToBottom()
 }
 
-// 新建对话
-async function newConversation() {
-  if (!store.selectedAgent) return
-  const conv = await store.createConversation(store.selectedAgent.id)
-  await store.fetchConversations(agentId.value)
-  await store.selectConversation(conv.id)
+// 新建对话（仅前端状态，不调后端）
+function newConversation() {
+  store.newConversation()
 }
 
 // 发送消息
@@ -62,17 +60,16 @@ async function handleSend() {
   const text = inputText.value.trim()
   if ((!text && !pendingFiles.value.length) || store.streaming) return
 
-  // 如果没有当前对话，先创建
-  if (!store.currentConversation) {
-    await newConversation()
+  // 如果没有当前对话，标记为待新建（sendMessage 内部会真正创建）
+  if (!store.currentConversation && !store.pendingNewConversation) {
+    store.newConversation()
   }
-  if (!store.currentConversation) return
 
   const fileIds = pendingFiles.value.map((f) => f.id)
   const msg = text || '请查看附件'
   inputText.value = ''
   pendingFiles.value = []
-  await store.sendMessage(store.currentConversation.id, msg, fileIds)
+  await store.sendMessage(store.currentConversation?.id, msg, fileIds)
   scrollToBottom()
 }
 
@@ -140,17 +137,12 @@ function goBack() {
         </el-button>
       </div>
 
-      <div class="agent-info" v-if="store.selectedAgent">
-        <div class="agent-name">{{ store.selectedAgent.name }}</div>
-        <div class="agent-desc muted">{{ store.selectedAgent.description || '暂无描述' }}</div>
-      </div>
-
       <div class="conv-list">
         <div
           v-for="conv in store.conversations"
           :key="conv.id"
           class="conv-item"
-          :class="{ active: store.currentConversation?.id === conv.id }"
+          :class="{ active: !store.pendingNewConversation && store.currentConversation?.id === conv.id }"
           @click="selectConv(conv)"
         >
           <span class="conv-title">{{ conv.title || '新对话' }}</span>
@@ -168,15 +160,21 @@ function goBack() {
 
     <!-- 右侧：聊天区 -->
     <main class="chat-main">
-      <!-- 无对话状态 -->
-      <div v-if="!store.currentConversation" class="chat-empty">
-        <div class="empty-icon">💬</div>
-        <p>选择一个对话或创建新对话开始聊天</p>
-      </div>
+      <!-- 顶部：Agent 信息 -->
+      <header class="chat-header" v-if="store.selectedAgent">
+        <div class="header-agent-name">{{ store.selectedAgent.name }}</div>
+        <div class="header-agent-desc">{{ store.selectedAgent.description || '暂无描述' }}</div>
+      </header>
 
-      <!-- 对话界面 -->
-      <template v-else>
-        <div class="chat-messages" ref="chatContainer">
+      <!-- 消息区 -->
+      <div class="chat-messages" ref="chatContainer">
+        <!-- 无对话时的欢迎状态 -->
+        <div v-if="!store.currentConversation" class="chat-empty">
+          <div class="empty-icon">💬</div>
+          <p>发送消息开始与 {{ store.selectedAgent?.name }} 对话</p>
+        </div>
+
+        <template v-else>
           <ChatMessage
             v-for="(msg, i) in store.chatMessages"
             :key="i"
@@ -185,59 +183,59 @@ function goBack() {
           <div v-if="!store.chatMessages.length" class="chat-welcome muted">
             发送一条消息开始对话
           </div>
-        </div>
+        </template>
+      </div>
 
-        <div class="chat-input-area">
-          <!-- 待发送文件列表 -->
-          <div v-if="pendingFiles.length" class="pending-files">
-            <div v-for="(f, i) in pendingFiles" :key="i" class="pending-file">
-              <span class="file-name">📎 {{ f.name }}</span>
-              <button class="remove-file" @click="removePendingFile(i)" :disabled="store.streaming">×</button>
-            </div>
-          </div>
-
-          <div class="input-box">
-            <input
-              ref="fileInput"
-              type="file"
-              multiple
-              accept=".txt,.md,.markdown,.pdf"
-              style="display: none"
-              @change="handleFileSelect"
-            />
-            <textarea
-              v-model="inputText"
-              placeholder="输入消息..."
-              rows="1"
-              @keydown="handleKeydown"
-              :disabled="store.streaming"
-            />
-            <div class="input-actions">
-              <button
-                class="action-btn attach-btn"
-                @click="fileInput?.click()"
-                :disabled="store.streaming || uploading"
-                title="上传文件 (.txt/.md/.pdf)"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                </svg>
-              </button>
-              <button
-                class="action-btn send-btn"
-                :disabled="(!inputText.trim() && !pendingFiles.length) || store.streaming"
-                @click="handleSend"
-                title="发送"
-              >
-                <svg v-if="!store.streaming" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z"/>
-                </svg>
-                <span v-else class="stop-dot"></span>
-              </button>
-            </div>
+      <!-- 输入框：始终可见 -->
+      <div class="chat-input-area">
+        <div v-if="pendingFiles.length" class="pending-files">
+          <div v-for="(f, i) in pendingFiles" :key="i" class="pending-file">
+            <span class="file-name">📎 {{ f.name }}</span>
+            <button class="remove-file" @click="removePendingFile(i)" :disabled="store.streaming">×</button>
           </div>
         </div>
-      </template>
+
+        <div class="input-box">
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            accept=".txt,.md,.markdown,.pdf"
+            style="display: none"
+            @change="handleFileSelect"
+          />
+          <textarea
+            v-model="inputText"
+            placeholder="输入消息..."
+            rows="1"
+            @keydown="handleKeydown"
+            :disabled="store.streaming"
+          />
+          <div class="input-actions">
+            <button
+              class="action-btn attach-btn"
+              @click="fileInput?.click()"
+              :disabled="store.streaming || uploading"
+              title="上传文件 (.txt/.md/.pdf)"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </button>
+            <button
+              class="action-btn send-btn"
+              :disabled="(!inputText.trim() && !pendingFiles.length) || store.streaming"
+              @click="handleSend"
+              title="发送"
+            >
+              <svg v-if="!store.streaming" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z"/>
+              </svg>
+              <span v-else class="stop-dot"></span>
+            </button>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </template>
@@ -277,21 +275,6 @@ function goBack() {
 }
 .back-btn:hover {
   color: var(--ink);
-}
-
-.agent-info {
-  padding: 14px;
-  border-bottom: 1px solid var(--line);
-}
-.agent-info .agent-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-  margin-bottom: 4px;
-}
-.agent-info .agent-desc {
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .conv-list {
@@ -360,6 +343,27 @@ function goBack() {
   min-width: 0;
 }
 
+.chat-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-shrink: 0;
+}
+.chat-header .header-agent-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.chat-header .header-agent-desc {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-empty {
   flex: 1;
   display: flex;
@@ -378,6 +382,8 @@ function goBack() {
   flex: 1;
   overflow-y: auto;
   padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
 }
 
 .chat-welcome {

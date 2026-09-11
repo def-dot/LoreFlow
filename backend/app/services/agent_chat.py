@@ -12,16 +12,14 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncGenerator
-from datetime import datetime
 from typing import Any
 
 from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.models.agent import AgentRecord, ConversationRecord, MessageRecord
+from app.models.agent import AgentRecord, MessageRecord
 from app.registry.tool import execute_tool_calls
-from app.services.agent_tools import build_skill_prompt, build_tools
+from app.services.agent_tools import build_tools, build_skill_prompt
 from app.services.llm import llm_chat_stream
 
 logger = logging.getLogger(__name__)
@@ -60,25 +58,6 @@ async def _load_history(conversation_id: int) -> list[dict[str, str]]:
     return messages
 
 
-def _add_message(
-    session: AsyncSession,
-    conversation_id: int,
-    role: str,
-    content: str,
-    tool_calls: list[Any] | None = None,
-    tool_call_id: str | None = None,
-    tool_name: str | None = None,
-) -> None:
-    """往 session 里加一条消息（不 commit，由调用方统一提交）。"""
-    session.add(MessageRecord(
-        conversation_id=conversation_id,
-        role=role,
-        content=content,
-        tool_calls=tool_calls,
-        tool_call_id=tool_call_id,
-        tool_name=tool_name,
-    ))
-
 
 # ---------------------------------------------------------------------------
 # SSE
@@ -110,37 +89,24 @@ async def run_agent_chat(
     - ``event: error\\ndata: {"message": "..."}\\n\\n``
     """
 
-    # 1. 保存用户消息 + 更新对话时间 + 首条自动标题（一次 session）
+    # 1. 构建 user message 并持久化（异常时不会丢失）
     display_message = user_message
     if file_ids:
         file_list = "\n".join(f"- /uploads/{fid}" for fid in file_ids)
         display_message = f"[附件]\n{file_list}\n\n{user_message}"
 
     async with AsyncSessionLocal() as session:
-        _add_message(session, conversation_id, "user", display_message)
-
-        # 更新对话时间
-        conv = await session.get(ConversationRecord, conversation_id)
-        if conv:
-            conv.updated_at = datetime.now()
-            # 首条消息自动设标题
-            if not conv.title:
-                conv.title = user_message[:50]
-
+        session.add(MessageRecord(conversation_id=conversation_id, role="user", content=display_message))
         await session.commit()
 
-    # 2. 加载历史上下文
+    # 2. 加载历史（含刚写入的 user message）
     messages = await _load_history(conversation_id)
 
-    # 3. 构建 system prompt
-    system = agent.system_prompt or ""
-    skill_prompt = build_skill_prompt(agent.skills or [])
-    if skill_prompt:
-        system = f"{skill_prompt}\n\n{system}" if system else skill_prompt
-
-    if system:
-        if not messages or messages[0].get("role") != "system":
-            messages.insert(0, {"role": "system", "content": system})
+    # 3. 插入 system prompt
+    if agent.system_prompt or agent.skills:
+        skill_prompt = build_skill_prompt(agent.skills) or ""
+        system_prompt = (agent.system_prompt or "") + "\n\n" + skill_prompt
+        messages.insert(0, {"role": "system", "content": system_prompt.strip()})
 
     # 4. 构建工具列表
     tool_names: list[str] = list(agent.tools or [])
@@ -152,7 +118,7 @@ async def run_agent_chat(
 
     # 5. Agentic loop
     max_iter = agent.max_iterations or 5
-    final_content = ""
+    full_content = ""
 
     try:
         for iteration in range(1, max_iter + 1):
@@ -170,18 +136,19 @@ async def run_agent_chat(
                 if chunk.get("finish_reason") == "tool_calls" and chunk.get("tool_calls"):
                     current_tool_calls = chunk["tool_calls"]
 
+            # 本轮待持久化的消息（统一在循环末尾一次 session 写入）
+            pending_records: list[MessageRecord] = [
+                MessageRecord(
+                    conversation_id=conversation_id, role="assistant",
+                    content=full_content, tool_calls=current_tool_calls or None,
+                )
+            ]
+
             # 无工具调用 → 对话结束
             if not current_tool_calls:
-                final_content = full_content
-                async with AsyncSessionLocal() as session:
-                    _add_message(session, conversation_id, "assistant", full_content)
-                    conv = await session.get(ConversationRecord, conversation_id)
-                    if conv:
-                        conv.updated_at = datetime.now()
-                    await session.commit()
                 break
 
-            # 有工具调用
+            # 有工具调用 → 执行并收集结果
             for tc in current_tool_calls:
                 func = tc.get("function", {})
                 yield _sse("tool_start", {
@@ -189,33 +156,18 @@ async def run_agent_chat(
                     "arguments": func.get("arguments", ""),
                 })
 
-            # 执行工具
             tool_results = await execute_tool_calls(current_tool_calls)
 
-            # 保存 assistant + 所有 tool 结果 + 更新对话时间（一次 session）
-            async with AsyncSessionLocal() as session:
-                _add_message(
-                    session, conversation_id, "assistant", full_content,
-                    tool_calls=current_tool_calls,
-                )
-
-                for tr in tool_results:
-                    yield _sse("tool_end", {
-                        "tool_name": tr["tool_name"],
-                        "output": tr["output"][:500],
-                    })
-
-                    _add_message(
-                        session, conversation_id, "tool",
-                        f"[{tr['tool_name']}] {tr['output']}",
-                        tool_call_id=tr["tool_call_id"],
-                        tool_name=tr["tool_name"],
-                    )
-
-                conv = await session.get(ConversationRecord, conversation_id)
-                if conv:
-                    conv.updated_at = datetime.now()
-                await session.commit()
+            for tr in tool_results:
+                yield _sse("tool_end", {
+                    "tool_name": tr["tool_name"],
+                    "output": tr["output"][:500],
+                })
+                pending_records.append(MessageRecord(
+                    conversation_id=conversation_id, role="tool",
+                    content=f"[{tr['tool_name']}] {tr['output']}",
+                    tool_call_id=tr["tool_call_id"], tool_name=tr["tool_name"],
+                ))
 
             # 追加到上下文供下一轮 LLM 使用
             messages.append({
@@ -231,10 +183,14 @@ async def run_agent_chat(
                 })
         else:
             logger.warning("[agent_chat] max iterations (%d) reached for conv=%d", max_iter, conversation_id)
-            if not final_content:
-                final_content = full_content
 
-        yield _sse("done", {"content": final_content})
+        # 统一持久化 assistant + tool results（一次 session）
+        async with AsyncSessionLocal() as session:
+            for record in pending_records:
+                session.add(record)
+            await session.commit()
+
+        yield _sse("done", {"content": full_content})
 
     except Exception as exc:
         logger.exception("[agent_chat] error in conv=%d", conversation_id)

@@ -1,4 +1,4 @@
-default_model: mimosa:mimo-v2.5-pro
+default_model: mimo:mimo-v2.5-pro
 
 ollama:
   base_url: http://127.0.0.1:11434

@@ -52,6 +52,8 @@ export const useAgentsStore = defineStore('agents', {
     loading: false,
     chatLoading: false,
     streaming: false,
+    /** 点击"新对话"后尚未提交首条消息 */
+    pendingNewConversation: false,
   }),
 
   getters: {
@@ -110,6 +112,14 @@ export const useAgentsStore = defineStore('agents', {
       }))
     },
 
+    /** 仅进入"新对话"前端状态，不调后端 */
+    newConversation() {
+      this.currentConversation = null
+      this.chatMessages = []
+      this.pendingNewConversation = true
+    },
+
+    /** 实际创建对话（内部用，由 sendMessage 在提交首条消息时调） */
     async createConversation(agentId: number, title?: string) {
       const conv = await createConversation({ agent_id: agentId, title })
       await this.fetchConversations(agentId)
@@ -128,7 +138,16 @@ export const useAgentsStore = defineStore('agents', {
 
     // ----- Chat -----
 
-    async sendMessage(conversationId: number, message: string, fileIds: string[] = []) {
+    async sendMessage(conversationId: number | undefined, message: string, fileIds: string[] = []) {
+      // 若处于"新对话待提交"状态，先在后端真正创建对话
+      if (this.pendingNewConversation && this.selectedAgent) {
+        const title = message.length > 30 ? message.slice(0, 30) + '…' : message
+        const conv = await this.createConversation(this.selectedAgent.id, title)
+        this.currentConversation = conv
+        this.pendingNewConversation = false
+        conversationId = conv.id
+      }
+
       // 添加用户消息（含文件标记）
       const displayMsg = fileIds.length
         ? `[📎 ${fileIds.length} 个附件]\n${message}`

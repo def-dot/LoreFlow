@@ -22,7 +22,7 @@ class AgentRecord(SQLModel, table=True):
     skills: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     max_iterations: int = 5
     created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime | None = None
+    updated_at: datetime | None = Field(default=None, sa_column_kwargs={"onupdate": datetime.now})
 
 
 class ConversationRecord(SQLModel, table=True):
@@ -34,7 +34,7 @@ class ConversationRecord(SQLModel, table=True):
     agent_id: int = Field(index=True)
     title: str = ""
     created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime | None = None
+    updated_at: datetime | None = Field(default=None, sa_column_kwargs={"onupdate": datetime.now})
 
 
 class MessageRecord(SQLModel, table=True):
