@@ -94,11 +94,6 @@ async def llm_chat_stream(
     tools: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """POST /chat/completions（流式）→ 逐 chunk yield。
-
-    每个 yield 的 dict 包含：
-    - ``content``: 本 chunk 的增量文本（可能为空）
-    - ``tool_calls``: 累积的工具调用列表（仅 finish 时完整）
-    - ``finish_reason``: None 或 "stop" / "tool_calls"
     """
     _, model_name, base_url, api_key = _resolve_provider(model)
 
@@ -112,8 +107,7 @@ async def llm_chat_stream(
 
     logger.info("[llm:stream] %s", model_name)
 
-    # 累积 tool_calls 的缓冲区：index → {id, type, function: {name, arguments}}
-    tool_calls_buf: dict[int, dict[str, Any]] = {}
+    tool_calls: dict[int, dict[str, Any]] = {}
 
     async with http_client().stream(
         "POST", f"{base_url}/chat/completions", json=payload, headers=headers
@@ -135,35 +129,24 @@ async def llm_chat_stream(
 
             content = delta.get("content") or ""
             raw_tool_calls = delta.get("tool_calls") or []
-
-            # 累积 tool_calls（OpenAI 流式：每个 delta 只包含增量片段）
+            
+            """
+            {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"ge"}}]}}]}
+            {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"t_wea"}}]}}]}
+            {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"ther","arguments":"{\""}}]}}]}
+            {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"city"}}]}}]}
+            {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":\"北京\"}"}}]}}]}
+            """
             for tc in raw_tool_calls:
                 idx = tc.get("index", 0)
-                if idx not in tool_calls_buf:
-                    tool_calls_buf[idx] = {
-                        "id": tc.get("id", ""),
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    }
-                entry = tool_calls_buf[idx]
-                if tc.get("id"):
-                    entry["id"] = tc["id"]
-                func_delta = tc.get("function", {})
-                if func_delta.get("name"):
-                    entry["function"]["name"] += func_delta["name"]
-                if func_delta.get("arguments"):
-                    entry["function"]["arguments"] += func_delta["arguments"]
+                if idx not in tool_calls:
+                    tool_calls[idx] = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                tool_calls[idx]["id"] = tool_calls[idx]["id"] or tc.get("id", "")
+                tool_calls[idx]["function"]["name"] += tc.get("function", {}).get("name") or ""
+                tool_calls[idx]["function"]["arguments"] += tc.get("function", {}).get("arguments") or ""
 
             yield {
                 "content": content,
-                "tool_calls": [tool_calls_buf[i] for i in sorted(tool_calls_buf)] if finish_reason else [],
+                "tool_calls": [tool_calls[i] for i in sorted(tool_calls)] if finish_reason else [],
                 "finish_reason": finish_reason,
             }
-
-    # 清理：确保最后一次 yield 包含完整 tool_calls
-    if tool_calls_buf and not finish_reason:
-        yield {
-            "content": "",
-            "tool_calls": [tool_calls_buf[i] for i in sorted(tool_calls_buf)],
-            "finish_reason": "tool_calls",
-        }
