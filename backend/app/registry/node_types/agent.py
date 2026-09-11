@@ -9,7 +9,7 @@ from typing import Any
 
 from app.registry.node_type import NodeGroup, node_type
 from app.services.llm import llm_chat_call
-from app.registry.tool import execute_tool_calls
+from app.registry.tool import execute_tool_call
 from app.services.agent_tools import build_skill_prompt, build_tools
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
             logger.info("[agent] finished after %d iteration(s)", iteration)
             break
 
-        tool_results = await execute_tool_calls(tool_calls)
+        tool_results = [await execute_tool_call(tc) for tc in tool_calls]
 
         messages.append({
             "role": "assistant",

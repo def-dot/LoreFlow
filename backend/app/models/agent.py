@@ -20,7 +20,6 @@ class AgentRecord(SQLModel, table=True):
     model: str = ""  # provider:model 格式，空则用全局默认
     tools: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     skills: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    max_iterations: int = 5
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None, sa_column_kwargs={"onupdate": datetime.now})
 
@@ -48,5 +47,4 @@ class MessageRecord(SQLModel, table=True):
     content: str = Field(default="", sa_column=Column(Text))
     tool_calls: dict[str, Any] | list[Any] | None = Field(default=None, sa_column=Column(JSON))
     tool_call_id: str | None = None
-    tool_name: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)

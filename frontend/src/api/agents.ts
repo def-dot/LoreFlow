@@ -12,7 +12,6 @@ export interface AgentListItem {
   model: string
   tools: string[]
   skills: string[]
-  max_iterations: number
   created_at: string | null
   updated_at: string | null
 }
@@ -36,7 +35,6 @@ export interface MessageItem {
   content: string
   tool_calls?: any[] | null
   tool_call_id?: string | null
-  tool_name?: string | null
   created_at: string | null
 }
 

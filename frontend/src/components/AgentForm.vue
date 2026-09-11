@@ -23,7 +23,6 @@ const form = ref<AgentListItem>({
   model: '',
   tools: [],
   skills: [],
-  max_iterations: 5,
   created_at: null,
   updated_at: null,
 })
@@ -45,7 +44,6 @@ watch(
         model: a.model,
         tools: [...a.tools],
         skills: [...a.skills],
-        max_iterations: a.max_iterations,
       }
     } else {
       form.value = {
@@ -55,7 +53,6 @@ watch(
         model: '',
         tools: [],
         skills: [],
-        max_iterations: 5,
       }
     }
   },
@@ -207,15 +204,6 @@ async function handleSave() {
             <span class="muted" style="margin-left: 8px; font-size: 12px">{{ s.description }}</span>
           </el-option>
         </el-select>
-      </el-form-item>
-
-      <el-form-item label="最大工具循环次数">
-        <el-input-number
-          v-model="form.max_iterations"
-          :min="1"
-          :max="20"
-          controls-position="right"
-        />
       </el-form-item>
 
       <el-form-item>

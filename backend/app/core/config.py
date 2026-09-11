@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Agent Skills — 符合 agentskills.io 规范的技能目录
     SKILLS_DIR: Path = Path(__file__).resolve().parent.parent / "registry" / "skills"
 
+    # Agent 工具调用最大轮次
+    AGENT_MAX_ROUNDS: int = 10
+
     # 上传文件 — 文本文件落盘目录（file 参数先上传后引用）
     UPLOADS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "uploads"
     UPLOAD_MAX_MB: int = 20

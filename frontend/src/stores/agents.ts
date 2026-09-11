@@ -103,13 +103,14 @@ export const useAgentsStore = defineStore('agents', {
     async selectConversation(id: number) {
       this.currentConversation = await getConversation(id)
       // 转换为 ChatMessage
-      this.chatMessages = (this.currentConversation.messages || []).map((m) => ({
-        role: m.role,
-        content: m.content,
-        tool_calls: m.tool_calls,
-        tool_call_id: m.tool_call_id,
-        tool_name: m.tool_name,
-      }))
+      this.chatMessages = (this.currentConversation.messages || []).map((m) => {
+        const msg: any = { role: m.role, content: m.content, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id }
+        if (m.role === 'tool') {
+          const match = m.content.match(/^\[(.+?)]\s/)
+          if (match) msg.tool_name = match[1]
+        }
+        return msg
+      })
     },
 
     /** 仅进入"新对话"前端状态，不调后端 */

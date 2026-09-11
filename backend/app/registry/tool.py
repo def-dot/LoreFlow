@@ -84,32 +84,27 @@ def tool(
     return decorator
 
 
-async def execute_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """执行工具调用列表，返回结果。"""
-    results: list[dict[str, Any]] = []
-    for tc in tool_calls:
-        func_def = tc.get("function", {})
-        name = func_def.get("name", "")
-        args = func_def.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                args = {}
+async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
+    """执行单个工具调用，返回结果。"""
+    func_def = tc.get("function", {})
+    name = func_def.get("name", "")
+    try:
+        args = json.loads(func_def.get("arguments", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        args = {}
 
-        td = TOOL_REGISTRY.get(name)
-        if td is None:
-            output = f"未知工具：{name}（未在 TOOL_REGISTRY 中注册）"
-        else:
-            try:
-                output = await td.func(**args)
-            except Exception as exc:
-                output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+    td = TOOL_REGISTRY.get(name)
+    if td is None:
+        output = f"未知工具：{name}"
+    else:
+        try:
+            output = await td.func(**args)
+        except Exception as exc:
+            output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
 
-        results.append({
-            "tool_call_id": tc.get("id", ""),
-            "tool_name": name,
-            "arguments": args,
-            "output": str(output),
-        })
-    return results
+    return {
+        "tool_call_id": tc.get("id", ""),
+        "tool_name": name,
+        "arguments": args,
+        "output": str(output),
+    }

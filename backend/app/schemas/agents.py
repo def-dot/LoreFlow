@@ -18,7 +18,6 @@ class _AgentBody(BaseModel):
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
-    max_iterations: int = 5
 
 
 class AgentCreate(_AgentBody):

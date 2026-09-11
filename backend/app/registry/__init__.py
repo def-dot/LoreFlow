@@ -3,7 +3,7 @@
 """
 
 from .node_type import REGISTRY, NodeType, node_type, unregister
-from .tool import TOOL_REGISTRY, tool, execute_tool_calls
+from .tool import TOOL_REGISTRY, tool, execute_tool_call
 from .skills import SKILL_REGISTRY, SkillDef, discover_skills
 
 # 导入即触发注册
@@ -19,7 +19,7 @@ __all__ = [
     "SkillDef",
     "node_type",
     "tool",
-    "execute_tool_calls",
+    "execute_tool_call",
     "discover_skills",
     "unregister",
 ]
