@@ -390,10 +390,7 @@ function formatContent(text: string): string {
   color: var(--ink-3);
   font-family: var(--font-mono);
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 300px;
+  word-break: break-all;
 }
 
 .step-duration {

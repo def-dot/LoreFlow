@@ -124,11 +124,14 @@ async def run_agent_chat(
             logger.info("[agent_chat] conv=%d iteration=%d/%d", conversation_id, iteration, max_iter)
             total_rounds += 1
             full_content = ""
+            reasoning_content = ""
             current_tool_calls: list[dict[str, Any]] = []
+            exec_steps: list[dict[str, Any]] = []
 
             async for chunk in llm_chat_stream(agent.model or None, messages, tools=tools):
                 reasoning_delta = chunk.get("reasoning", "")
                 if reasoning_delta:
+                    reasoning_content += reasoning_delta
                     yield f'event: thinking\ndata: {json.dumps({"content": reasoning_delta}, ensure_ascii=False)}\n\n'
 
                 content_delta = chunk.get("content", "")
@@ -142,7 +145,9 @@ async def run_agent_chat(
             pending_records: list[MessageRecord] = [
                 MessageRecord(
                     conversation_id=conversation_id, role="assistant",
-                    content=full_content, tool_calls=current_tool_calls or None,
+                    content=full_content,
+                    reasoning_content=reasoning_content or None,
+                    tool_calls=current_tool_calls or None,
                 )
             ]
 
@@ -159,12 +164,26 @@ async def run_agent_chat(
                 tr = await execute_tool_call(tc)
                 duration_ms = int((time.monotonic() - _t0) * 1000)
                 tool_results.append(tr)
-                yield f'event: tool_end\ndata: {json.dumps({"tool_name": tr["tool_name"], "output": tr["output"][:500], "duration_ms": duration_ms}, ensure_ascii=False)}\n\n'
+                yield f'event: tool_end\ndata: {json.dumps({"tool_name": tr["tool_name"], "output": tr["output"], "duration_ms": duration_ms}, ensure_ascii=False)}\n\n'
+
+                exec_steps.append({
+                    "tool_name": tr["tool_name"],
+                    "arguments": func.get("arguments", ""),
+                    "output": tr["output"],
+                    "duration_ms": duration_ms,
+                    "status": "success",
+                })
                 pending_records.append(MessageRecord(
                     conversation_id=conversation_id, role="tool",
                     content=f"[{tr['tool_name']}] {tr['output']}",
                     tool_call_id=tr["tool_call_id"],
                 ))
+
+            # 把本轮执行步骤写入 assistant 消息（最后一条 assistant record）
+            for rec in reversed(pending_records):
+                if rec.role == "assistant":
+                    rec.execution_steps = exec_steps
+                    break
 
             messages.append({
                 "role": "assistant",

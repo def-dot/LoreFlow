@@ -10,10 +10,9 @@ import tempfile
 from app.core.config import settings
 from app.registry.tool import tool
 
-# 沙箱常量
-SANDBOX_IMAGE = "loreflow-sandbox"
+SANDBOX_IMAGE = "python:3.12-slim"
 SANDBOX_PACKAGES_VOLUME = "loreflow-sandbox-packages"
-DOCKER_PACKAGES_PATH = "/extra-packages"
+DOCKER_PACKAGES_PATH = "/opt/packages"
 
 
 @tool(description="在沙箱中安装 Python 包",
@@ -22,15 +21,13 @@ async def pip_install(packages: str) -> str:
     """在沙箱中 pip install，安装到持久化卷，后续 run_code 可用。"""
     if not packages.strip():
         return "未指定要安装的包"
-    tmp_dir = f"{DOCKER_PACKAGES_PATH}/.pip-tmp"
     cmd = [
         "docker", "run", "--rm",
         "--memory", "256m", "--cpus", "0.5",
-        "-e", f"TMPDIR={tmp_dir}",
         "-v", f"{SANDBOX_PACKAGES_VOLUME}:{DOCKER_PACKAGES_PATH}",
         SANDBOX_IMAGE,
         "sh", "-c",
-        f"mkdir -p {tmp_dir} && pip install --no-cache-dir --target {DOCKER_PACKAGES_PATH} {packages}",
+        f"pip install --no-cache-dir --target {DOCKER_PACKAGES_PATH} {packages}",
     ]
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -48,7 +45,7 @@ async def pip_install(packages: str) -> str:
         return f"安装失败：{type(exc).__name__}: {exc}"
 
 
-@tool(description="执行 Python 代码并返回输出",
+@tool(description="执行 Python 代码并返回输出。如需保存文件，写入 /uploads 目录。",
       params={"code": "要执行的 Python 代码"})
 async def run_code(code: str, timeout: int = 60) -> str:
     """在 Docker 沙箱中执行 Python 代码，返回 stdout 和 stderr。"""

@@ -127,8 +127,20 @@ export const useAgentsStore = defineStore('agents', {
           result.push({ role: 'user', content: m.content })
         } else if (m.role === 'assistant') {
           const msg: ChatMessage = { role: 'assistant', content: m.content }
-          // 从 tool_calls 重建 steps
-          if (m.tool_calls?.length) {
+          // 思考内容
+          if (m.reasoning_content) {
+            msg.thinking = m.reasoning_content
+          }
+          // 优先用 execution_steps（新数据），否则从 tool_calls + tool 消息回退重建（旧数据）
+          if (m.execution_steps?.length) {
+            msg.steps = m.execution_steps.map((s: any) => ({
+              tool_name: s.tool_name,
+              arguments: s.arguments || '',
+              output: s.output,
+              duration_ms: s.duration_ms,
+              status: s.status || 'success',
+            }))
+          } else if (m.tool_calls?.length) {
             msg.steps = m.tool_calls.map((tc: any) => ({
               tool_name: tc.function?.name || 'unknown',
               arguments: tc.function?.arguments || '',
@@ -137,13 +149,11 @@ export const useAgentsStore = defineStore('agents', {
           }
           result.push(msg)
         }
-        // tool 消息不再单独显示，其内容已通过 SSE 流式阶段的 tool_end 填入 steps
-        // 但历史数据中 tool 输出存在独立的 tool 消息里，需要回填到前一个 assistant 的最后一个 step
+        // 旧数据兼容：tool 消息的输出回填到前一个 assistant 的最后一个 step
         if (m.role === 'tool') {
           const match = m.content.match(/^\[(.+?)]\s([\s\S]*)$/)
           const toolName = match?.[1] || 'unknown'
           const output = match?.[2] || m.content
-          // 找前一个 assistant 消息中最后一个匹配的 step
           for (let i = result.length - 1; i >= 0; i--) {
             if (result[i].role === 'assistant') {
               const steps = result[i].steps
