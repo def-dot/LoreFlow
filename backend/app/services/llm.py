@@ -24,40 +24,15 @@ from app.utils.http import http_client
 logger = logging.getLogger(__name__)
 
 
-def _read_providers() -> dict[str, Any]:
-    """读取并返回 providers.yml 内容。"""
-    path = settings.PROVIDERS_FILE
-    if not path.is_file():
-        raise ValueError(f"Provider 配置文件不存在: {path}")
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
 def list_models() -> dict[str, list[str]]:
     """返回每个 provider 的可用模型列表。"""
-    cfg = _read_providers()
+    with open(settings.PROVIDERS_FILE, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
     return {
         name: p.get("models", [])
         for name, p in cfg.items()
         if isinstance(p, dict)
     }
-
-
-def _resolve_provider(model: str | None) -> tuple[str, str, str, str]:
-    """解析模型引用 → (provider_name, model_name, base_url, api_key)。"""
-    cfg = _read_providers()
-    model = model or cfg.get("default_model", "")
-    if not model:
-        raise ValueError("未指定模型且 providers.yml 未配置 default_model")
-
-    provider_name, model_name = model.split(":", 1)
-    provider = cfg.get(provider_name)
-    if not isinstance(provider, dict):
-        raise ValueError(f"Unknown provider: {provider_name}")
-
-    base_url = str(provider.get("base_url", "")).rstrip("/")
-    api_key = str(provider.get("api_key", ""))
-    return provider_name, model_name, base_url, api_key
 
 
 async def llm_chat_call(
@@ -66,18 +41,23 @@ async def llm_chat_call(
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """POST /chat/completions（非流式）→ ``{"content": str, "tool_calls": list}``。"""
-    _, model_name, base_url, api_key = _resolve_provider(model)
+    with open(settings.PROVIDERS_FILE, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    model = model or cfg.get("default_model", "")
+
+    provider, model_name = model.split(":")
+    provider_cfg = cfg.get(provider)
 
     payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": False}
     if tools is not None:
         payload["tools"] = tools
 
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    if provider_cfg.get("api_key"):
+        headers["Authorization"] = f"Bearer {provider_cfg['api_key']}"
 
     logger.info("[llm] %s", model_name)
-    resp = await http_client().post(f"{base_url}/chat/completions", json=payload, headers=headers)
+    resp = await http_client().post(f"{provider_cfg['base_url']}/chat/completions", json=payload, headers=headers)
     resp.raise_for_status()
     data = resp.json()
 
@@ -95,22 +75,27 @@ async def llm_chat_stream(
 ) -> AsyncGenerator[dict[str, Any], None]:
     """POST /chat/completions（流式）→ 逐 chunk yield。
     """
-    _, model_name, base_url, api_key = _resolve_provider(model)
+    with open(settings.PROVIDERS_FILE, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    model = model or cfg.get("default_model", "")
+
+    provider, model_name = model.split(":")
+    provider_cfg = cfg.get(provider)
 
     payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": True}
     if tools is not None:
         payload["tools"] = tools
 
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    if provider_cfg.get("api_key"):
+        headers["Authorization"] = f"Bearer {provider_cfg['api_key']}"
 
     logger.info("[llm:stream] %s", model_name)
 
     tool_calls: dict[int, dict[str, Any]] = {}
 
     async with http_client().stream(
-        "POST", f"{base_url}/chat/completions", json=payload, headers=headers
+        "POST", f"{provider_cfg['base_url']}/chat/completions", json=payload, headers=headers
     ) as resp:
         resp.raise_for_status()
         async for line in resp.aiter_lines():
