@@ -34,7 +34,7 @@ class ChatRequest(BaseModel):
     """发送聊天消息请求体。"""
 
     message: str
-    file_ids: list[int] = Field(default_factory=list)
+    file_ids: list[str] = Field(default_factory=list)
 
 
 class ConversationCreate(BaseModel):

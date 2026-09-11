@@ -123,6 +123,10 @@ async def run_agent_chat(
             current_tool_calls: list[dict[str, Any]] = []
 
             async for chunk in llm_chat_stream(agent.model or None, messages, tools=tools):
+                reasoning_delta = chunk.get("reasoning", "")
+                if reasoning_delta:
+                    yield f'event: thinking\ndata: {json.dumps({"content": reasoning_delta}, ensure_ascii=False)}\n\n'
+
                 content_delta = chunk.get("content", "")
                 if content_delta:
                     full_content += content_delta

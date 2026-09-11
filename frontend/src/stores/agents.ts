@@ -24,6 +24,7 @@ import {
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool'
   content: string
+  thinking?: string
   tool_calls?: any[] | null
   tool_call_id?: string | null
   tool_name?: string | null
@@ -155,26 +156,37 @@ export const useAgentsStore = defineStore('agents', {
         : message
       this.chatMessages.push({ role: 'user', content: displayMsg })
 
-      // 当前活跃的 assistant 消息引用（工具调用后会切换）
-      let activeMsg: ChatMessage = { role: 'assistant', content: '', streaming: true }
-      this.chatMessages.push(activeMsg)
+      // 当前活跃的 assistant 消息在数组中的索引
+      // 必须通过 this.chatMessages[idx] 访问（reactive Proxy），
+      // 不能持有 push 前的原始对象引用，否则 Vue 追踪不到变更。
+      this.chatMessages.push({ role: 'assistant', content: '', streaming: true })
+      let activeIdx = this.chatMessages.length - 1
       this.streaming = true
+
+      /** 获取当前活跃 assistant 消息（始终走 reactive Proxy） */
+      const getActive = (): ChatMessage => this.chatMessages[activeIdx]
 
       try {
         for await (const evt of sendChatMessage(conversationId, message, fileIds)) {
           switch (evt.event) {
             case 'token':
-              activeMsg.content += evt.data.content
+              getActive().content += evt.data.content
               break
-            case 'tool_start':
-              activeMsg.tool_calls = activeMsg.tool_calls || []
-              activeMsg.tool_calls.push({
+            case 'thinking':
+              if (!getActive().thinking) getActive().thinking = ''
+              getActive().thinking += evt.data.content
+              break
+            case 'tool_start': {
+              const msg = getActive()
+              msg.tool_calls = msg.tool_calls || []
+              msg.tool_calls.push({
                 function: {
                   name: evt.data.tool_name,
                   arguments: evt.data.arguments,
                 },
               })
               break
+            }
             case 'tool_end':
               // 工具结果消息
               this.chatMessages.push({
@@ -183,24 +195,24 @@ export const useAgentsStore = defineStore('agents', {
                 tool_name: evt.data.tool_name,
               })
               // 结束当前 assistant 消息的流式状态
-              activeMsg.streaming = false
+              getActive().streaming = false
               // 创建新的 assistant 占位（下一轮 LLM 回复）
-              activeMsg = { role: 'assistant', content: '', streaming: true }
-              this.chatMessages.push(activeMsg)
+              this.chatMessages.push({ role: 'assistant', content: '', streaming: true })
+              activeIdx = this.chatMessages.length - 1
               break
             case 'done':
-              activeMsg.content = evt.data.content || activeMsg.content
-              activeMsg.streaming = false
+              getActive().content = evt.data.content || getActive().content
+              getActive().streaming = false
               break
             case 'error':
-              activeMsg.content = `⚠️ ${evt.data.message}`
-              activeMsg.streaming = false
+              getActive().content = `⚠️ ${evt.data.message}`
+              getActive().streaming = false
               break
           }
         }
       } catch (err: any) {
-        activeMsg.content = `⚠️ ${err.message || '请求失败'}`
-        activeMsg.streaming = false
+        getActive().content = `⚠️ ${err.message || '请求失败'}`
+        getActive().streaming = false
       } finally {
         // 兜底：关闭所有未结束的 streaming
         for (const msg of this.chatMessages) {

@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { marked } from 'marked'
 import type { ChatMessage } from '@/stores/agents'
+
+// 流式场景下同步解析，避免闪烁
+marked.use({ async: false })
 
 const props = defineProps<{
   message: ChatMessage
@@ -8,10 +12,11 @@ const props = defineProps<{
 
 const showToolCalls = ref(false)
 const showToolOutput = ref(false)
+const showThinking = ref(false)
 </script>
 
 <template>
-  <div class="chat-msg" :class="[`role-${message.role}`, { streaming: message.streaming }]">
+  <div class="chat-msg" :class="[`role-${message.role}`, { streaming: message.streaming, thinking: message.streaming }]">
     <!-- 用户消息 -->
     <div v-if="message.role === 'user'" class="bubble user-bubble">
       <pre class="msg-text">{{ message.content }}</pre>
@@ -37,6 +42,15 @@ const showToolOutput = ref(false)
         </div>
       </div>
 
+      <!-- 思考内容折叠区 -->
+      <div v-if="message.thinking" class="thinking-section">
+        <button class="toggle-btn" @click="showThinking = !showThinking">
+          <span class="toggle-icon">{{ showThinking ? '▾' : '▸' }}</span>
+          💭 深度思考
+        </button>
+        <div v-if="showThinking" class="thinking-content" v-html="formatContent(message.thinking)" />
+      </div>
+
       <!-- 文本内容 -->
       <div v-if="message.content" class="msg-text" v-html="formatContent(message.content)" />
 
@@ -56,15 +70,9 @@ const showToolOutput = ref(false)
 </template>
 
 <script lang="ts">
-/** 简单的文本格式化：换行 → <br>，代码块保留 */
+/** Markdown → HTML（marked 已配置为同步模式） */
 function formatContent(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/```([\s\S]*?)```/g, '<pre class="code-block">$1</pre>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>')
+  return marked.parse(text) as string
 }
 </script>
 
@@ -114,18 +122,87 @@ function formatContent(text: string): string {
 
 .msg-text {
   margin: 0;
-  white-space: pre-wrap;
   font-family: inherit;
+  line-height: 1.7;
+  color: inherit;
 }
 
-.msg-text :deep(.code-block) {
+.msg-text :deep(p) {
+  margin: 0 0 8px;
+}
+.msg-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.msg-text :deep(h1),
+.msg-text :deep(h2),
+.msg-text :deep(h3),
+.msg-text :deep(h4) {
+  margin: 14px 0 6px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.msg-text :deep(h1) { font-size: 1.3em; }
+.msg-text :deep(h2) { font-size: 1.15em; }
+.msg-text :deep(h3) { font-size: 1.05em; }
+
+.msg-text :deep(ul),
+.msg-text :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+.msg-text :deep(li) {
+  margin: 2px 0;
+}
+
+.msg-text :deep(blockquote) {
+  margin: 6px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--ink-3);
+  background: rgba(77, 196, 178, 0.06);
+  border-radius: 0 4px 4px 0;
+}
+
+.msg-text :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 12px 0;
+}
+
+.msg-text :deep(table) {
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 12.5px;
+  width: 100%;
+}
+.msg-text :deep(th),
+.msg-text :deep(td) {
+  border: 1px solid var(--line);
+  padding: 5px 10px;
+  text-align: left;
+}
+.msg-text :deep(th) {
+  background: rgba(0, 0, 0, 0.06);
+  font-weight: 600;
+}
+
+.msg-text :deep(pre) {
   background: rgba(0, 0, 0, 0.2);
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 6px;
   font-family: var(--font-mono);
   font-size: 12px;
   overflow-x: auto;
   margin: 6px 0;
+  white-space: pre;
+}
+.msg-text :deep(pre code) {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
 }
 
 .msg-text :deep(code) {
@@ -136,8 +213,62 @@ function formatContent(text: string): string {
   font-size: 12.5px;
 }
 
+.msg-text :deep(a) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.msg-text :deep(a:hover) {
+  opacity: 0.85;
+}
+
+.msg-text :deep(img) {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
 .tool-calls-section {
   margin-bottom: 8px;
+}
+
+.thinking-section {
+  margin-bottom: 8px;
+}
+
+.thinking-content {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-left: 3px solid rgba(135, 144, 176, 0.4);
+  background: rgba(135, 144, 176, 0.06);
+  border-radius: 0 6px 6px 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  line-height: 1.6;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.thinking-content :deep(p) {
+  margin: 0 0 6px;
+}
+.thinking-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.thinking-content :deep(pre) {
+  background: rgba(0, 0, 0, 0.15);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.thinking-content :deep(code) {
+  background: rgba(0, 0, 0, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
 }
 
 .toggle-btn {
@@ -217,7 +348,24 @@ function formatContent(text: string): string {
   50% { opacity: 0; }
 }
 
-.streaming .assistant-bubble {
-  border-color: rgba(77, 196, 178, 0.3);
+/* Streaming: pulsing teal dot */
+.thinking {
+  position: relative;
+}
+.thinking::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 20px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(77, 196, 178, 0.5);
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
 }
 </style>

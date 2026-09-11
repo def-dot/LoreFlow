@@ -121,6 +121,7 @@ async def llm_chat_stream(
             finish_reason = choices[0].get("finish_reason")
 
             content = delta.get("content") or ""
+            reasoning = delta.get("reasoning_content") or ""
             raw_tool_calls = delta.get("tool_calls") or []
             
             """
@@ -140,6 +141,7 @@ async def llm_chat_stream(
 
             yield {
                 "content": content,
+                "reasoning": reasoning,
                 "tool_calls": [tool_calls[i] for i in sorted(tool_calls)] if finish_reason else [],
                 "finish_reason": finish_reason,
             }

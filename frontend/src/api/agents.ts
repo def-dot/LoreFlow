@@ -85,7 +85,7 @@ export const deleteConversation = (id: number) =>
 // ---------------------------------------------------------------------------
 
 export interface ChatEvent {
-  event: 'token' | 'tool_start' | 'tool_end' | 'done' | 'error'
+  event: 'token' | 'thinking' | 'tool_start' | 'tool_end' | 'done' | 'error'
   data: Record<string, any>
 }
 
@@ -98,7 +98,9 @@ export async function* sendChatMessage(
   message: string,
   fileIds: string[] = [],
 ): AsyncGenerator<ChatEvent> {
-  const resp = await fetch(`/api/v1/conversations/${conversationId}/chat`, {
+  // 绕过 Vite proxy 直连后端，避免 http-proxy 缓冲 SSE
+  const API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
+  const resp = await fetch(`${API_BASE}/api/v1/conversations/${conversationId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, file_ids: fileIds }),

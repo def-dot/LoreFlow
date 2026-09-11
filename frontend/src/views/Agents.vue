@@ -91,9 +91,6 @@ function enterChat(agentId: number) {
               <span v-for="s in agent.skills" :key="s" class="cap-tag skill-tag">{{ s }}</span>
             </div>
           </div>
-          <div v-if="!agent.tools?.length && !agent.skills?.length" class="cap-empty muted">
-            无工具 / 无技能
-          </div>
         </div>
 
         <div class="card-actions">
@@ -230,10 +227,6 @@ function enterChat(agentId: number) {
   background: rgba(240, 194, 75, 0.08);
   color: var(--amber);
   border: 1px solid rgba(240, 194, 75, 0.2);
-}
-
-.cap-empty {
-  font-size: 11px;
 }
 
 .card-actions {
