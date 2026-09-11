@@ -21,13 +21,29 @@ import {
 // Chat message with streaming state
 // ---------------------------------------------------------------------------
 
+/** 单个工具调用步骤 */
+export interface ToolStep {
+  tool_name: string
+  arguments: string
+  output?: string
+  duration_ms?: number
+  status: 'running' | 'success' | 'error'
+}
+
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'tool'
+  role: 'user' | 'assistant'
   content: string
   thinking?: string
-  tool_calls?: any[] | null
-  tool_call_id?: string | null
-  tool_name?: string | null
+  /** 工具调用步骤（替代原 tool_calls + 独立 tool 消息） */
+  steps?: ToolStep[]
+  /** 执行摘要（done 事件携带） */
+  summary?: {
+    total_rounds: number
+    total_tool_calls: number
+    total_duration_ms: number
+  }
+  /** 当前流式阶段 */
+  phase?: 'thinking' | 'tool' | 'token'
   /** 正在流式接收中 */
   streaming?: boolean
 }
@@ -103,15 +119,46 @@ export const useAgentsStore = defineStore('agents', {
 
     async selectConversation(id: number) {
       this.currentConversation = await getConversation(id)
-      // 转换为 ChatMessage
-      this.chatMessages = (this.currentConversation.messages || []).map((m) => {
-        const msg: any = { role: m.role, content: m.content, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id }
-        if (m.role === 'tool') {
-          const match = m.content.match(/^\[(.+?)]\s/)
-          if (match) msg.tool_name = match[1]
+      const raw = this.currentConversation.messages || []
+      const result: ChatMessage[] = []
+
+      for (const m of raw) {
+        if (m.role === 'user') {
+          result.push({ role: 'user', content: m.content })
+        } else if (m.role === 'assistant') {
+          const msg: ChatMessage = { role: 'assistant', content: m.content }
+          // 从 tool_calls 重建 steps
+          if (m.tool_calls?.length) {
+            msg.steps = m.tool_calls.map((tc: any) => ({
+              tool_name: tc.function?.name || 'unknown',
+              arguments: tc.function?.arguments || '',
+              status: 'success' as const,
+            }))
+          }
+          result.push(msg)
         }
-        return msg
-      })
+        // tool 消息不再单独显示，其内容已通过 SSE 流式阶段的 tool_end 填入 steps
+        // 但历史数据中 tool 输出存在独立的 tool 消息里，需要回填到前一个 assistant 的最后一个 step
+        if (m.role === 'tool') {
+          const match = m.content.match(/^\[(.+?)]\s([\s\S]*)$/)
+          const toolName = match?.[1] || 'unknown'
+          const output = match?.[2] || m.content
+          // 找前一个 assistant 消息中最后一个匹配的 step
+          for (let i = result.length - 1; i >= 0; i--) {
+            if (result[i].role === 'assistant') {
+              const steps = result[i].steps
+              if (steps?.length) {
+                const lastStep = steps[steps.length - 1]
+                if (lastStep.tool_name === toolName && !lastStep.output) {
+                  lastStep.output = output
+                }
+              }
+              break
+            }
+          }
+        }
+      }
+      this.chatMessages = result
     },
 
     /** 仅进入"新对话"前端状态，不调后端 */
@@ -169,41 +216,53 @@ export const useAgentsStore = defineStore('agents', {
       try {
         for await (const evt of sendChatMessage(conversationId, message, fileIds)) {
           switch (evt.event) {
-            case 'token':
-              getActive().content += evt.data.content
-              break
             case 'thinking':
               if (!getActive().thinking) getActive().thinking = ''
               getActive().thinking += evt.data.content
+              getActive().phase = 'thinking'
+              break
+            case 'token':
+              getActive().content += evt.data.content
+              getActive().phase = 'token'
               break
             case 'tool_start': {
               const msg = getActive()
-              msg.tool_calls = msg.tool_calls || []
-              msg.tool_calls.push({
-                function: {
-                  name: evt.data.tool_name,
-                  arguments: evt.data.arguments,
-                },
+              msg.steps = msg.steps || []
+              msg.steps.push({
+                tool_name: evt.data.tool_name,
+                arguments: evt.data.arguments,
+                status: 'running',
               })
+              msg.phase = 'tool'
               break
             }
-            case 'tool_end':
-              // 工具结果消息
-              this.chatMessages.push({
-                role: 'tool',
-                content: evt.data.output,
-                tool_name: evt.data.tool_name,
-              })
-              // 结束当前 assistant 消息的流式状态
-              getActive().streaming = false
-              // 创建新的 assistant 占位（下一轮 LLM 回复）
+            case 'tool_end': {
+              // 找当前 assistant 消息中最后一个 running 的 step
+              const msg = getActive()
+              const steps = msg.steps || []
+              const step = [...steps].reverse().find((s) => s.status === 'running')
+              if (step) {
+                step.output = evt.data.output
+                step.duration_ms = evt.data.duration_ms
+                step.status = 'success'
+              }
+              // 结束当前 assistant 消息，创建新的 assistant 占位（下一轮 LLM）
+              msg.streaming = false
               this.chatMessages.push({ role: 'assistant', content: '', streaming: true })
               activeIdx = this.chatMessages.length - 1
               break
-            case 'done':
-              getActive().content = evt.data.content || getActive().content
-              getActive().streaming = false
+            }
+            case 'done': {
+              const msg = getActive()
+              msg.content = evt.data.content || msg.content
+              msg.summary = {
+                total_rounds: evt.data.total_rounds,
+                total_tool_calls: evt.data.total_tool_calls,
+                total_duration_ms: evt.data.total_duration_ms,
+              }
+              msg.streaming = false
               break
+            }
             case 'error':
               getActive().content = `⚠️ ${evt.data.message}`
               getActive().streaming = false

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -114,11 +115,14 @@ async def run_agent_chat(
     # 5. Agentic loop
     max_iter = settings.AGENT_MAX_ROUNDS
     full_content = ""
+    total_rounds = 0
+    total_tool_calls = 0
+    _chat_start = time.monotonic()
 
     try:
         for iteration in range(1, max_iter + 1):
             logger.info("[agent_chat] conv=%d iteration=%d/%d", conversation_id, iteration, max_iter)
-
+            total_rounds += 1
             full_content = ""
             current_tool_calls: list[dict[str, Any]] = []
 
@@ -145,14 +149,17 @@ async def run_agent_chat(
             if not current_tool_calls:
                 break
 
+            total_tool_calls += len(current_tool_calls)
             tool_results: list[dict[str, Any]] = []
             for tc in current_tool_calls:
                 func = tc.get("function", {})
                 yield f'event: tool_start\ndata: {json.dumps({"tool_name": func.get("name", ""), "arguments": func.get("arguments", "")}, ensure_ascii=False)}\n\n'
 
+                _t0 = time.monotonic()
                 tr = await execute_tool_call(tc)
+                duration_ms = int((time.monotonic() - _t0) * 1000)
                 tool_results.append(tr)
-                yield f'event: tool_end\ndata: {json.dumps({"tool_name": tr["tool_name"], "output": tr["output"][:500]}, ensure_ascii=False)}\n\n'
+                yield f'event: tool_end\ndata: {json.dumps({"tool_name": tr["tool_name"], "output": tr["output"][:500], "duration_ms": duration_ms}, ensure_ascii=False)}\n\n'
                 pending_records.append(MessageRecord(
                     conversation_id=conversation_id, role="tool",
                     content=f"[{tr['tool_name']}] {tr['output']}",
@@ -178,7 +185,8 @@ async def run_agent_chat(
                 session.add(record)
             await session.commit()
 
-        yield f'event: done\ndata: {json.dumps({"content": full_content}, ensure_ascii=False)}\n\n'
+        total_ms = int((time.monotonic() - _chat_start) * 1000)
+        yield f'event: done\ndata: {json.dumps({"content": full_content, "total_rounds": total_rounds, "total_tool_calls": total_tool_calls, "total_duration_ms": total_ms}, ensure_ascii=False)}\n\n'
 
     except Exception as exc:
         logger.exception("[agent_chat] error in conv=%d", conversation_id)

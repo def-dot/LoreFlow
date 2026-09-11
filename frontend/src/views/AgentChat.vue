@@ -163,38 +163,19 @@ function goBack() {
     </aside>
 
     <!-- 右侧：聊天区 -->
-    <main class="chat-main">
+    <main class="chat-main" :class="{ 'chat-empty': !store.chatMessages.length }">
       <!-- 消息区 -->
       <div class="chat-messages" ref="chatContainer">
-        <!-- 欢迎状态：无对话 -->
-        <div v-if="!store.currentConversation" class="welcome">
-          <svg class="welcome-pattern" width="160" height="160" viewBox="0 0 160 160" fill="none" aria-hidden="true">
-            <defs>
-              <pattern id="agent-dot-grid" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
-                <circle cx="2" cy="2" r="1.2" fill="rgba(77,196,178,0.2)"/>
-                <circle cx="10" cy="10" r="0.8" fill="rgba(77,196,178,0.08)"/>
-              </pattern>
-            </defs>
-            <circle cx="80" cy="80" r="78" fill="url(#agent-dot-grid)" stroke="rgba(77,196,178,0.12)" stroke-width="1"/>
-            <circle cx="80" cy="80" r="50" fill="url(#agent-dot-grid)" stroke="rgba(77,196,178,0.08)" stroke-width="1"/>
-            <circle cx="80" cy="80" r="22" fill="rgba(77,196,178,0.04)" stroke="rgba(77,196,178,0.15)" stroke-width="1"/>
-            <circle cx="80" cy="80" r="4" fill="rgba(77,196,178,0.3)"/>
-          </svg>
-          <div class="welcome-name">{{ store.selectedAgent?.name }}</div>
-          <div class="welcome-desc">{{ store.selectedAgent?.description || '输入消息开始对话' }}</div>
-          <div class="welcome-actions">
-            <button class="welcome-action" @click="inputText = '你好，请介绍一下你能做什么'">了解能力</button>
-            <button class="welcome-action" @click="inputText = '请帮我分析一下当前项目'">快速开始</button>
-          </div>
-        </div>
+        <ChatMessage
+          v-for="(msg, i) in store.chatMessages"
+          :key="i"
+          :message="msg"
+        />
+      </div>
 
-        <template v-else>
-          <ChatMessage
-            v-for="(msg, i) in store.chatMessages"
-            :key="i"
-            :message="msg"
-          />
-        </template>
+      <div v-if="!store.chatMessages.length" class="empty-hint">
+        <span class="empty-hint-name">{{ store.selectedAgent?.name }}</span>
+        <span class="empty-hint-text">发送消息开始对话</span>
       </div>
 
       <!-- 输入框 -->
@@ -410,6 +391,17 @@ function goBack() {
   flex-direction: column;
   min-width: 0;
 }
+.chat-main.chat-empty {
+  align-items: center;
+  justify-content: center;
+}
+.chat-main.chat-empty .chat-messages {
+  display: none;
+}
+.chat-main.chat-empty .chat-input-area {
+  width: 100%;
+  max-width: 640px;
+}
 
 /* ---- Messages ---- */
 .chat-messages {
@@ -420,51 +412,22 @@ function goBack() {
   flex-direction: column;
 }
 
-/* ---- Welcome ---- */
-.welcome {
-  flex: 1;
+.empty-hint {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  gap: 6px;
+  opacity: 0.45;
 }
-.welcome-pattern {
-  opacity: 0.8;
-}
-.welcome-name {
+.empty-hint-name {
   font-family: var(--font-mono);
-  font-size: 22px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--ink);
-  letter-spacing: -0.01em;
 }
-.welcome-desc {
-  font-size: 14px;
-  color: var(--ink-3);
-  max-width: 320px;
-  text-align: center;
-  line-height: 1.5;
-}
-.welcome-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-}
-.welcome-action {
-  background: rgba(77, 196, 178, 0.06);
-  border: 1px solid var(--line);
-  border-radius: 100px;
-  padding: 8px 20px;
+.empty-hint-text {
   font-size: 13px;
-  color: var(--ink-2);
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-}
-.welcome-action:hover {
-  border-color: rgba(77, 196, 178, 0.25);
-  background: rgba(77, 196, 178, 0.1);
-  color: var(--ink);
+  color: var(--ink-3);
 }
 
 /* ================================================================
@@ -472,14 +435,13 @@ function goBack() {
    ================================================================ */
 .chat-input-area {
   padding: 12px 24px 20px;
-  background: var(--panel);
 }
 
 .input-bar {
   display: flex;
   align-items: center;
   gap: 4px;
-  max-width: 800px;
+  max-width: 640px;
   margin: 0 auto;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -603,9 +565,6 @@ function goBack() {
 @media (max-width: 768px) {
   .conv-sidebar {
     width: 200px;
-  }
-  .welcome-name {
-    font-size: 18px;
   }
 }
 </style>

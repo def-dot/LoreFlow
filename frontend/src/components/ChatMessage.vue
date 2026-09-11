@@ -10,39 +10,70 @@ const props = defineProps<{
   message: ChatMessage
 }>()
 
-const showToolCalls = ref(false)
-const showToolOutput = ref(false)
 const showThinking = ref(false)
+const showSteps = ref(false)
+
+/** 格式化工具参数为可读文本 */
+function formatArgs(args: string): string {
+  try {
+    const obj = JSON.parse(args)
+    return Object.entries(obj)
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+      .join(', ')
+  } catch {
+    return args
+  }
+}
+
+/** 格式化耗时 */
+function formatDuration(ms?: number): string {
+  if (ms == null) return ''
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+/** 格式化总耗时 */
+function formatTotalDuration(ms?: number): string {
+  if (ms == null) return ''
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60000)
+  const s = Math.round((ms % 60000) / 1000)
+  return `${m}m${s}s`
+}
+
+/** 流式阶段文案 */
+function phaseLabel(phase?: string): string {
+  switch (phase) {
+    case 'thinking': return '💭 思考中…'
+    case 'tool': return '🔧 执行工具…'
+    case 'token': return '✏️ 生成回复…'
+    default: return '⏳ 处理中…'
+  }
+}
+
+/** markdown → HTML */
+function formatContent(text: string): string {
+  return marked.parse(text) as string
+}
 </script>
 
 <template>
-  <div class="chat-msg" :class="[`role-${message.role}`, { streaming: message.streaming, thinking: message.streaming }]">
+  <div class="chat-msg" :class="[`role-${message.role}`, { streaming: message.streaming }]">
     <!-- 用户消息 -->
     <div v-if="message.role === 'user'" class="bubble user-bubble">
       <pre class="msg-text">{{ message.content }}</pre>
     </div>
 
-    <!-- Assistant 消息 -->
+    <!-- Assistant 消息（含完整执行过程） -->
     <div v-else-if="message.role === 'assistant'" class="bubble assistant-bubble">
-      <!-- 工具调用折叠区 -->
-      <div v-if="message.tool_calls?.length" class="tool-calls-section">
-        <button class="toggle-btn" @click="showToolCalls = !showToolCalls">
-          <span class="toggle-icon">{{ showToolCalls ? '▾' : '▸' }}</span>
-          🔧 调用了 {{ message.tool_calls.length }} 个工具
-        </button>
-        <div v-if="showToolCalls" class="tool-calls-list">
-          <div
-            v-for="(tc, i) in message.tool_calls"
-            :key="i"
-            class="tool-call-item"
-          >
-            <span class="tool-name">{{ tc.function?.name || 'unknown' }}</span>
-            <code class="tool-args">{{ tc.function?.arguments || '' }}</code>
-          </div>
-        </div>
+      <!-- 流式状态栏 -->
+      <div v-if="message.streaming" class="stream-status">
+        <span class="stream-dot" />
+        {{ phaseLabel(message.phase) }}
       </div>
 
-      <!-- 思考内容折叠区 -->
+      <!-- 思考内容（可折叠） -->
       <div v-if="message.thinking" class="thinking-section">
         <button class="toggle-btn" @click="showThinking = !showThinking">
           <span class="toggle-icon">{{ showThinking ? '▾' : '▸' }}</span>
@@ -51,30 +82,47 @@ const showThinking = ref(false)
         <div v-if="showThinking" class="thinking-content" v-html="formatContent(message.thinking)" />
       </div>
 
-      <!-- 文本内容 -->
+      <!-- 工具调用步骤（时间线） -->
+      <div v-if="message.steps?.length" class="steps-section">
+        <button class="toggle-btn" @click="showSteps = !showSteps">
+          <span class="toggle-icon">{{ showSteps ? '▾' : '▸' }}</span>
+          🔧 调用了 {{ message.steps.length }} 个工具
+        </button>
+        <div v-if="showSteps" class="steps-timeline">
+          <div
+            v-for="(step, i) in message.steps"
+            :key="i"
+            class="step-item"
+            :class="`step-${step.status}`"
+          >
+            <div class="step-header">
+              <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
+              <span class="step-name">{{ step.tool_name }}</span>
+              <span class="step-args">{{ formatArgs(step.arguments) }}</span>
+              <span class="step-duration" v-if="step.duration_ms != null">{{ formatDuration(step.duration_ms) }}</span>
+            </div>
+            <div v-if="step.output && showSteps" class="step-output">
+              <pre>{{ step.output }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 最终回复文本（始终可见） -->
       <div v-if="message.content" class="msg-text" v-html="formatContent(message.content)" />
 
       <!-- 流式光标 -->
-      <span v-if="message.streaming && !message.tool_calls?.length" class="cursor">▊</span>
-    </div>
+      <span v-if="message.streaming && message.phase === 'token'" class="cursor">▊</span>
 
-    <!-- Tool 结果消息 -->
-    <div v-else-if="message.role === 'tool'" class="bubble tool-bubble">
-      <button class="toggle-btn small" @click="showToolOutput = !showToolOutput">
-        <span class="toggle-icon">{{ showToolOutput ? '▾' : '▸' }}</span>
-        ⚙️ {{ message.tool_name || '工具' }} 返回结果
-      </button>
-      <pre v-if="showToolOutput" class="tool-output">{{ message.content }}</pre>
+      <!-- 执行摘要 -->
+      <div v-if="message.summary" class="execution-summary">
+        {{ message.summary.total_rounds }} 轮思考 ·
+        {{ message.summary.total_tool_calls }} 次工具调用 ·
+        {{ formatTotalDuration(message.summary.total_duration_ms) }}
+      </div>
     </div>
   </div>
 </template>
-
-<script lang="ts">
-/** Markdown → HTML（marked 已配置为同步模式） */
-function formatContent(text: string): string {
-  return marked.parse(text) as string
-}
-</script>
 
 <style scoped>
 .chat-msg {
@@ -85,8 +133,7 @@ function formatContent(text: string): string {
 .role-user {
   justify-content: flex-end;
 }
-.role-assistant,
-.role-tool {
+.role-assistant {
   justify-content: flex-start;
 }
 
@@ -111,15 +158,31 @@ function formatContent(text: string): string {
   color: var(--ink-2);
 }
 
-.tool-bubble {
-  background: rgba(135, 144, 176, 0.08);
-  border: 1px solid var(--line);
-  color: var(--ink-3);
-  max-width: 70%;
-  padding: 8px 12px;
+/* ---- 流式状态栏 ---- */
+.stream-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
+  color: var(--ink-3);
+  margin-bottom: 8px;
 }
 
+.stream-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(77, 196, 178, 0.5);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* ---- 消息文本 ---- */
 .msg-text {
   margin: 0;
   font-family: inherit;
@@ -228,10 +291,7 @@ function formatContent(text: string): string {
   margin: 4px 0;
 }
 
-.tool-calls-section {
-  margin-bottom: 8px;
-}
-
+/* ---- 思考区 ---- */
 .thinking-section {
   margin-bottom: 8px;
 }
@@ -271,6 +331,96 @@ function formatContent(text: string): string {
   font-size: 11.5px;
 }
 
+/* ---- 工具步骤时间线 ---- */
+.steps-section {
+  margin-bottom: 8px;
+}
+
+.steps-timeline {
+  margin-top: 8px;
+  padding-left: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.04);
+  border-left: 3px solid var(--line);
+}
+
+.step-running {
+  border-left-color: var(--accent);
+}
+
+.step-success {
+  border-left-color: rgba(77, 196, 178, 0.6);
+}
+
+.step-error {
+  border-left-color: var(--danger, #e74c3c);
+}
+
+.step-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.step-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.step-name {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.step-args {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+.step-duration {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.step-output {
+  margin-top: 2px;
+}
+
+.step-output pre {
+  margin: 0;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 150px;
+  overflow-y: auto;
+  color: var(--ink-3);
+}
+
+/* ---- 折叠按钮 ---- */
 .toggle-btn {
   background: none;
   border: none;
@@ -285,57 +435,21 @@ function formatContent(text: string): string {
 .toggle-btn:hover {
   color: var(--ink-2);
 }
-.toggle-btn.small {
-  font-size: 11.5px;
-}
 
 .toggle-icon {
   font-size: 10px;
 }
 
-.tool-calls-list {
-  margin-top: 6px;
-  padding-left: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.tool-call-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.tool-name {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.tool-args {
-  font-family: var(--font-mono);
+/* ---- 执行摘要 ---- */
+.execution-summary {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
   font-size: 11px;
   color: var(--ink-3);
-  max-width: 400px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.tool-output {
-  margin: 6px 0 0;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 6px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  white-space: pre-wrap;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
+/* ---- 流式光标 ---- */
 .cursor {
   display: inline-block;
   animation: blink 1s step-end infinite;
@@ -346,26 +460,5 @@ function formatContent(text: string): string {
 
 @keyframes blink {
   50% { opacity: 0; }
-}
-
-/* Streaming: pulsing teal dot */
-.thinking {
-  position: relative;
-}
-.thinking::after {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 20px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 6px rgba(77, 196, 178, 0.5);
-  animation: thinking-pulse 1.2s ease-in-out infinite;
-}
-@keyframes thinking-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.8); }
 }
 </style>
