@@ -167,7 +167,7 @@ async function handleSave() {
           filterable
           allow-create
           default-first-option
-          placeholder="选择工具（留空=无工具，*=全部）"
+          placeholder="选择工具"
           style="width: 100%"
         >
           <el-option label="* 全部工具" value="*" />
@@ -178,7 +178,7 @@ async function handleSave() {
             :value="t.name"
           >
             <span>{{ t.name }}</span>
-            <span class="muted" style="margin-left: 8px; font-size: 12px">{{ t.description }}</span>
+            <span class="opt-desc">{{ t.description || '暂无描述' }}</span>
           </el-option>
         </el-select>
       </el-form-item>
@@ -190,7 +190,7 @@ async function handleSave() {
           filterable
           allow-create
           default-first-option
-          placeholder="选择技能（留空=无技能，*=全部）"
+          placeholder="选择技能"
           style="width: 100%"
         >
           <el-option label="* 全部技能" value="*" />
@@ -201,7 +201,7 @@ async function handleSave() {
             :value="s.name"
           >
             <span>{{ s.name }}</span>
-            <span class="muted" style="margin-left: 8px; font-size: 12px">{{ s.description }}</span>
+            <span v-if="s.description" class="opt-desc">{{ s.description }}</span>
           </el-option>
         </el-select>
       </el-form-item>
@@ -218,5 +218,20 @@ async function handleSave() {
 <style scoped>
 .agent-form {
   padding: 16px 0;
+}
+</style>
+
+<style>
+/* el-option 内容在 body 的 teleported popover 里，scoped 无法覆盖 */
+.opt-desc {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
 }
 </style>
