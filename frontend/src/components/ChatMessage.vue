@@ -11,6 +11,22 @@ const props = defineProps<{
 }>()
 
 const showProcess = ref(false)
+const expandedSteps = ref<Set<string>>(new Set())
+
+function stepKey(ri: number, si: number): string {
+  return `${ri}-${si}`
+}
+function toggleStep(ri: number, si: number): void {
+  const k = stepKey(ri, si)
+  if (expandedSteps.value.has(k)) {
+    expandedSteps.value.delete(k)
+  } else {
+    expandedSteps.value.add(k)
+  }
+}
+function isStepExpanded(ri: number, si: number): boolean {
+  return expandedSteps.value.has(stepKey(ri, si))
+}
 
 /** 格式化工具参数为可读文本 */
 function formatArgs(args: string): string {
@@ -93,14 +109,16 @@ function formatContent(text: string): string {
                   class="step-item"
                   :class="`step-${step.status}`"
                 >
-                  <div class="step-header">
+                  <div class="step-header" @click="toggleStep(ri, si)">
                     <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
                     <span class="step-name">{{ step.tool_name }}</span>
                     <span class="step-args">{{ formatArgs(step.arguments) }}</span>
                     <span class="step-duration" v-if="step.duration_ms != null">{{ formatDuration(step.duration_ms) }}</span>
+                    <span v-if="step.output || step.arguments" class="step-toggle">{{ isStepExpanded(ri, si) ? '▾' : '▸' }}</span>
                   </div>
-                  <div v-if="step.output" class="step-output">
-                    <pre>{{ step.output }}</pre>
+                  <div v-if="isStepExpanded(ri, si) && (step.arguments || step.output)" class="step-detail">
+                    <pre v-if="step.arguments" class="detail-input">{{ formatArgs(step.arguments) }}</pre>
+                    <pre v-if="step.output" class="detail-output" :class="{ 'is-error': step.status === 'error' }">{{ step.output }}</pre>
                   </div>
                 </div>
               </div>
@@ -389,6 +407,7 @@ function formatContent(text: string): string {
   align-items: baseline;
   gap: 6px;
   flex-wrap: wrap;
+  cursor: pointer;
 }
 
 .step-icon {
@@ -417,21 +436,46 @@ function formatContent(text: string): string {
   flex-shrink: 0;
 }
 
-.step-output {
-  margin-top: 2px;
+.step-toggle {
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-left: 4px;
+  flex-shrink: 0;
 }
 
-.step-output pre {
+.step-detail {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step-detail pre {
   margin: 0;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 4px;
+  padding: 8px 10px;
+  border-radius: 5px;
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.55;
   white-space: pre-wrap;
-  max-height: 150px;
+  max-height: 200px;
   overflow-y: auto;
-  color: var(--ink-3);
+}
+
+.detail-input {
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: var(--ink-2);
+}
+
+.detail-output {
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--ink-2);
+}
+
+.detail-output.is-error {
+  background: rgba(231, 76, 60, 0.08);
+  color: var(--danger, #e74c3c);
 }
 
 /* ---- 折叠按钮 ---- */

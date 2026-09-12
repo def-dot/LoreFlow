@@ -27,11 +27,6 @@ from app.services.llm import llm_chat_stream
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# 消息存取
-# ---------------------------------------------------------------------------
-
-
 async def _load_history(conversation_id: int) -> list[dict[str, str]]:
     """从 messages 表加载历史消息为 OpenAI messages 格式。"""
     async with AsyncSessionLocal() as session:
@@ -58,16 +53,6 @@ async def _load_history(conversation_id: int) -> list[dict[str, str]]:
                 "content": row.content,
             })
     return messages
-
-
-
-# ---------------------------------------------------------------------------
-# SSE
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# 对话执行
-# ---------------------------------------------------------------------------
 
 
 async def run_agent_chat(
