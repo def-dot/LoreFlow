@@ -4,11 +4,12 @@
 规范核心：
 - 技能 = 包含 SKILL.md 的目录（frontmatter + markdown 指令体）
 - 目录结构：SKILL.md + scripts/ + references/ + assets/
-- agent 通过 read_file 工具按需读取 SKILL.md 加载完整指令
+- agent 通过 load_skill 工具按需加载完整指令
 
 本模块提供：
 - ``SKILL_REGISTRY`` 全局注册表（name → SkillDef）
 - ``discover_skills()`` 扫描目录发现技能
+- ``load_skill()`` 工具函数，供 agent 按需加载技能指令
 """
 
 from __future__ import annotations
@@ -42,7 +43,6 @@ class SkillDef:
     metadata: dict[str, str] = field(default_factory=dict)
 
 
-#: 全局技能注册表：name → SkillDef
 SKILL_REGISTRY: dict[str, SkillDef] = {}
 
 

@@ -155,6 +155,6 @@ def build_skill_prompt(skill_names: list[str]) -> str | None:
     )
     return (
         "以下技能提供特定任务的专业指令。当任务匹配某个技能的描述时，"
-        "使用 read_file 工具读取对应 location 的 SKILL.md 加载完整指令。"
+        "使用 load_skill 工具加载完整指令。"
         f"\n\n<available_skills>\n{catalog}\n</available_skills>"
     )
