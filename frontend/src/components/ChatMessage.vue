@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { marked } from 'marked'
 import type { ChatMessage } from '@/stores/agents'
 
@@ -10,8 +10,7 @@ const props = defineProps<{
   message: ChatMessage
 }>()
 
-const showThinking = ref(false)
-const showSteps = ref(false)
+const showProcess = ref(false)
 
 /** 格式化工具参数为可读文本 */
 function formatArgs(args: string): string {
@@ -73,38 +72,40 @@ function formatContent(text: string): string {
         {{ phaseLabel(message.phase) }}
       </div>
 
-      <!-- 思考内容（可折叠） -->
-      <div v-if="message.thinking" class="thinking-section">
-        <button class="toggle-btn" @click="showThinking = !showThinking">
-          <span class="toggle-icon">{{ showThinking ? '▾' : '▸' }}</span>
-          💭 深度思考
+      <!-- 过程（思考 + 工具调用，可折叠） -->
+      <div v-if="message.rounds?.some(r => r.thinking || r.steps?.length)" class="process-section">
+        <button class="toggle-btn" @click="showProcess = !showProcess">
+          <span class="toggle-icon">{{ showProcess ? '▾' : '▸' }}</span>
+          🧠 推理过程
         </button>
-        <div v-if="showThinking" class="thinking-content" v-html="formatContent(message.thinking)" />
-      </div>
-
-      <!-- 工具调用步骤（时间线） -->
-      <div v-if="message.steps?.length" class="steps-section">
-        <button class="toggle-btn" @click="showSteps = !showSteps">
-          <span class="toggle-icon">{{ showSteps ? '▾' : '▸' }}</span>
-          🔧 调用了 {{ message.steps.length }} 个工具
-        </button>
-        <div v-if="showSteps" class="steps-timeline">
-          <div
-            v-for="(step, i) in message.steps"
-            :key="i"
-            class="step-item"
-            :class="`step-${step.status}`"
-          >
-            <div class="step-header">
-              <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
-              <span class="step-name">{{ step.tool_name }}</span>
-              <span class="step-args">{{ formatArgs(step.arguments) }}</span>
-              <span class="step-duration" v-if="step.duration_ms != null">{{ formatDuration(step.duration_ms) }}</span>
+        <div v-if="showProcess" class="process-content">
+          <template v-for="(round, ri) in message.rounds" :key="ri">
+            <div v-if="round.thinking || round.steps?.length" class="round-block">
+              <div v-if="(message.rounds?.filter(r => r.thinking || r.steps?.length).length ?? 0) > 1" class="round-label">
+                第 {{ ri + 1 }} 轮
+              </div>
+              <div v-if="round.thinking" class="thinking-content" v-html="formatContent(round.thinking)" />
+              <div v-if="round.content" class="round-content" v-html="formatContent(round.content)" />
+              <div v-if="round.steps?.length" class="steps-timeline">
+                <div
+                  v-for="(step, si) in round.steps"
+                  :key="si"
+                  class="step-item"
+                  :class="`step-${step.status}`"
+                >
+                  <div class="step-header">
+                    <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
+                    <span class="step-name">{{ step.tool_name }}</span>
+                    <span class="step-args">{{ formatArgs(step.arguments) }}</span>
+                    <span class="step-duration" v-if="step.duration_ms != null">{{ formatDuration(step.duration_ms) }}</span>
+                  </div>
+                  <div v-if="step.output" class="step-output">
+                    <pre>{{ step.output }}</pre>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div v-if="step.output && showSteps" class="step-output">
-              <pre>{{ step.output }}</pre>
-            </div>
-          </div>
+          </template>
         </div>
       </div>
 
@@ -116,8 +117,6 @@ function formatContent(text: string): string {
 
       <!-- 执行摘要 -->
       <div v-if="message.summary" class="execution-summary">
-        {{ message.summary.total_rounds }} 轮思考 ·
-        {{ message.summary.total_tool_calls }} 次工具调用 ·
         {{ formatTotalDuration(message.summary.total_duration_ms) }}
       </div>
     </div>
@@ -291,9 +290,31 @@ function formatContent(text: string): string {
   margin: 4px 0;
 }
 
-/* ---- 思考区 ---- */
-.thinking-section {
+/* ---- 推理过程 ---- */
+.process-section {
   margin-bottom: 8px;
+}
+
+.round-block {
+  margin-top: 8px;
+}
+
+.round-label {
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  padding: 4px 0 2px;
+  border-top: 1px dashed var(--border, #ddd);
+  margin-bottom: 6px;
+}
+
+.round-content {
+  margin-top: 6px;
+  padding: 6px 12px;
+  border-left: 2px solid rgba(100, 100, 100, 0.25);
+  font-size: 12px;
+  color: var(--ink-2, #666);
+  line-height: 1.5;
+  opacity: 0.85;
 }
 
 .thinking-content {
@@ -332,10 +353,6 @@ function formatContent(text: string): string {
 }
 
 /* ---- 工具步骤时间线 ---- */
-.steps-section {
-  margin-bottom: 8px;
-}
-
 .steps-timeline {
   margin-top: 8px;
   padding-left: 4px;

@@ -1,33 +1,11 @@
-import httpx
-import json
+import os 
+pdf_path = "./backend/uploads/4cda2831c945403f8b8cf77ad64d881e.pdf" 
+print(f"文件存在: {os.path.exists(pdf_path)}") 
+print(f"文件大小: {os.path.getsize(pdf_path)} bytes") # 读取PDF内容 
 
-resp = httpx.post(
-    "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
-    headers={
-        "Authorization": "Bearer tp-ca8urd0ekskqst4n95vd1l2p06ldbth4f8okziv2ha9ltmgv",
-        "Content-Type": "application/json",
-    },
-    json={
-        "model": "mimo-v2.5-pro",
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024."
-            },
-            {
-                "role": "user",
-                "content": "please introduce yourself"
-            }
-        ],
-        "max_completion_tokens": 1024,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream": False,
-        "stop": None,
-        "frequency_penalty": 0,
-        "presence_penalty": 0,
-    },
-    timeout=60,
-)
-
-print(json.dumps(resp.json(), indent=2, ensure_ascii=False))
+from pypdf import PdfReader 
+reader = PdfReader(pdf_path) 
+print(f"页数: {len(reader.pages)}") # 提取第一页文本 
+page = reader.pages[0] 
+text = page.extract_text() 
+print(f"第一页文本预览:\n{text[:500]}...")

@@ -4,7 +4,6 @@
 
 import asyncio
 import os
-import re
 import tempfile
 
 from app.core.config import settings
@@ -15,7 +14,7 @@ SANDBOX_PACKAGES_VOLUME = "loreflow-sandbox-packages"
 DOCKER_PACKAGES_PATH = "/opt/packages"
 
 
-@tool(description="在沙箱中安装 Python 包",
+@tool(description="在沙箱中安装 Python 包。run_code 报 ModuleNotFoundError 时用此工具安装缺失包",
       params={"packages": "要安装的包名，空格分隔，如 'scipy scikit-learn'"})
 async def pip_install(packages: str) -> str:
     """在沙箱中 pip install，安装到持久化卷，后续 run_code 可用。"""
@@ -29,20 +28,15 @@ async def pip_install(packages: str) -> str:
         "sh", "-c",
         f"pip install --no-cache-dir --target {DOCKER_PACKAGES_PATH} {packages}",
     ]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-        if proc.returncode != 0:
-            return f"安装失败：\n{stderr.decode(errors='replace')}"
-        return f"已安装：{packages}"
-    except asyncio.TimeoutError:
-        return "安装超时（120 秒）"
-    except Exception as exc:
-        return f"安装失败：{type(exc).__name__}: {exc}"
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    if proc.returncode != 0:
+        raise RuntimeError(f"pip install 失败：\n{stderr.decode()}")
+    return f"{stdout.decode().strip()}，已安装：{packages}"
 
 
 @tool(description="执行 Python 代码并返回输出。如需保存文件，写入 /uploads 目录。",
@@ -77,24 +71,10 @@ async def run_code(code: str, timeout: int = 60) -> str:
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
-        parts: list[str] = []
-        if stdout:
-            parts.append(stdout.decode(errors="replace"))
-        stderr_text = stderr.decode(errors="replace") if stderr else ""
-        if stderr_text:
-            parts.append(f"[stderr]\n{stderr_text}")
         if proc.returncode != 0:
-            parts.append(f"[exit code] {proc.returncode}")
-            # 缺少模块时提示用 pip_install 安装
-            if "ModuleNotFoundError" in stderr_text:
-                m = re.search(r"No module named '(\S+)'", stderr_text)
-                pkg = m.group(1) if m else "???"
-                parts.append(f"提示：请先调用 pip_install 安装 {pkg}，再重新调用 run_code。")
-        return "\n".join(parts) or "(无输出)"
+            raise RuntimeError(stderr.decode())
 
-    except asyncio.TimeoutError:
-        return f"执行超时（{timeout} 秒）"
-    except Exception as exc:
-        return f"执行失败：{type(exc).__name__}: {exc}"
+        return stdout.decode().strip()
+
     finally:
         os.unlink(code_file)

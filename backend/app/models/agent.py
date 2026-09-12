@@ -3,7 +3,6 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import ConfigDict
 from sqlalchemy import JSON, Column, Text
 from sqlmodel import Field, SQLModel
 
@@ -46,7 +45,6 @@ class MessageRecord(SQLModel, table=True):
     role: str = Field(max_length=20)  # user / assistant / tool
     content: str = Field(default="", sa_column=Column(Text))
     reasoning_content: str | None = Field(default=None, sa_column=Column(Text))
-    tool_calls: dict[str, Any] | list[Any] | None = Field(default=None, sa_column=Column(JSON))
+    tool_calls: list[Any] | None = Field(default=None, sa_column=Column(JSON))
     tool_call_id: str | None = None
-    execution_steps: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.now)

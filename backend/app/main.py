@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
@@ -80,6 +81,9 @@ app.include_router(registry.router, prefix=API_V1)
 app.include_router(agents.router, prefix=API_V1)
 app.include_router(conversations.router, prefix=API_V1)
 app.include_router(health.router, prefix=API_V1)
+
+# 静态文件：/uploads/*
+app.mount("/uploads", StaticFiles(directory=settings.UPLOADS_DIR), name="uploads")
 
 
 if __name__ == "__main__":

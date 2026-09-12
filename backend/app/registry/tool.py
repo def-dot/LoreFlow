@@ -94,17 +94,21 @@ async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
         args = {}
 
     td = TOOL_REGISTRY.get(name)
+    status = "success"
     if td is None:
         output = f"未知工具：{name}"
+        status = "error"
     else:
         try:
             output = await td.func(**args)
         except Exception as exc:
             output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+            status = "error"
 
     return {
         "tool_call_id": tc.get("id", ""),
         "tool_name": name,
         "arguments": args,
         "output": str(output),
+        "status": status,
     }

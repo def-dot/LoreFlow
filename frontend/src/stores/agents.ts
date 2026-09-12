@@ -30,16 +30,20 @@ export interface ToolStep {
   status: 'running' | 'success' | 'error'
 }
 
+/** 一轮 agentic 循环的数据 */
+export interface RoundData {
+  thinking?: string
+  content?: string
+  steps?: ToolStep[]
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
-  thinking?: string
-  /** 工具调用步骤（替代原 tool_calls + 独立 tool 消息） */
-  steps?: ToolStep[]
+  /** 按轮分组的过程数据（思考 + 工具调用） */
+  rounds?: RoundData[]
   /** 执行摘要（done 事件携带） */
   summary?: {
-    total_rounds: number
-    total_tool_calls: number
     total_duration_ms: number
   }
   /** 当前流式阶段 */
@@ -120,53 +124,56 @@ export const useAgentsStore = defineStore('agents', {
     async selectConversation(id: number) {
       this.currentConversation = await getConversation(id)
       const raw = this.currentConversation.messages || []
-      const result: ChatMessage[] = []
 
+      // 按 user 消息分组为 turns
+      const turns: MessageItem[][] = []
+      let currentTurn: MessageItem[] = []
       for (const m of raw) {
         if (m.role === 'user') {
-          result.push({ role: 'user', content: m.content })
-        } else if (m.role === 'assistant') {
-          const msg: ChatMessage = { role: 'assistant', content: m.content }
-          // 思考内容
-          if (m.reasoning_content) {
-            msg.thinking = m.reasoning_content
-          }
-          // 优先用 execution_steps（新数据），否则从 tool_calls + tool 消息回退重建（旧数据）
-          if (m.execution_steps?.length) {
-            msg.steps = m.execution_steps.map((s: any) => ({
-              tool_name: s.tool_name,
-              arguments: s.arguments || '',
-              output: s.output,
-              duration_ms: s.duration_ms,
-              status: s.status || 'success',
-            }))
-          } else if (m.tool_calls?.length) {
-            msg.steps = m.tool_calls.map((tc: any) => ({
-              tool_name: tc.function?.name || 'unknown',
-              arguments: tc.function?.arguments || '',
-              status: 'success' as const,
-            }))
-          }
-          result.push(msg)
+          if (currentTurn.length) turns.push(currentTurn)
+          currentTurn = [m]
+        } else {
+          currentTurn.push(m)
         }
-        // 旧数据兼容：tool 消息的输出回填到前一个 assistant 的最后一个 step
-        if (m.role === 'tool') {
-          const match = m.content.match(/^\[(.+?)]\s([\s\S]*)$/)
-          const toolName = match?.[1] || 'unknown'
-          const output = match?.[2] || m.content
-          for (let i = result.length - 1; i >= 0; i--) {
-            if (result[i].role === 'assistant') {
-              const steps = result[i].steps
-              if (steps?.length) {
-                const lastStep = steps[steps.length - 1]
-                if (lastStep.tool_name === toolName && !lastStep.output) {
-                  lastStep.output = output
-                }
-              }
-              break
-            }
+      }
+      if (currentTurn.length) turns.push(currentTurn)
+
+      const result: ChatMessage[] = []
+      for (const turn of turns) {
+        const userMsg = turn.find(m => m.role === 'user')
+        const assistantMsgs = turn.filter(m => m.role === 'assistant')
+        const toolMsgs = turn.filter(m => m.role === 'tool')
+
+        if (userMsg) result.push({ role: 'user', content: userMsg.content })
+
+        // 把每个 assistant 消息和它对应的 tool 消息配对为 rounds
+        const rounds: RoundData[] = []
+        for (const a of assistantMsgs) {
+          const round: RoundData = {}
+          if (a.reasoning_content) round.thinking = a.reasoning_content
+          if (a.tool_calls?.length) {
+            round.steps = a.tool_calls.map((tc: any) => {
+              const toolMsg = toolMsgs.find(t => t.tool_call_id === tc.id)
+              return {
+                tool_name: tc.function?.name || 'unknown',
+                arguments: tc.function?.arguments || '',
+                output: toolMsg?.content || '',
+                status: 'success' as const,
+              } as ToolStep
+            })
+          } else {
+            round.content = a.content
           }
+          rounds.push(round)
         }
+
+        const finalAssistant = assistantMsgs.find(a => !a.tool_calls?.length)
+        const hasProcess = rounds.some(r => r.thinking || r.steps?.length)
+        result.push({
+          role: 'assistant',
+          content: finalAssistant?.content || '',
+          rounds: hasProcess ? rounds : undefined,
+        })
       }
       this.chatMessages = result
     },
@@ -224,50 +231,70 @@ export const useAgentsStore = defineStore('agents', {
       const getActive = (): ChatMessage => this.chatMessages[activeIdx]
 
       try {
+        // 追踪当前轮次索引（thinking 到达时若当前轮已有 steps 则开新轮）
+        let roundIdx = 0
+        // 各轮累积的 content（done 时归位最后一轮）
+        let roundContentBuf = ''
+        const ensureRound = () => {
+          const msg = getActive()
+          msg.rounds = msg.rounds || [{ thinking: '' }]
+          return msg
+        }
+        const currentRound = () => getActive().rounds![roundIdx]
+
         for await (const evt of sendChatMessage(conversationId, message, fileIds)) {
           switch (evt.event) {
-            case 'thinking':
-              if (!getActive().thinking) getActive().thinking = ''
-              getActive().thinking += evt.data.content
-              getActive().phase = 'thinking'
+            case 'thinking': {
+              const msg = ensureRound()
+              // 当前轮已有 steps → 新一轮开始，把已累积 content 归入前一轮
+              if (msg.rounds![roundIdx].steps?.length) {
+                msg.rounds![roundIdx].content = roundContentBuf || undefined
+                roundContentBuf = ''
+                roundIdx++
+                msg.rounds!.push({ thinking: '' })
+              }
+              const round = msg.rounds![roundIdx]
+              round.thinking = (round.thinking || '') + evt.data.content
+              msg.phase = 'thinking'
               break
+            }
             case 'token':
+              ensureRound()
               getActive().content += evt.data.content
+              roundContentBuf += evt.data.content
               getActive().phase = 'token'
               break
             case 'tool_start': {
-              const msg = getActive()
-              msg.steps = msg.steps || []
-              msg.steps.push({
+              const round = currentRound()
+              round.steps = round.steps || []
+              round.steps.push({
                 tool_name: evt.data.tool_name,
                 arguments: evt.data.arguments,
                 status: 'running',
               })
-              msg.phase = 'tool'
+              getActive().phase = 'tool'
               break
             }
             case 'tool_end': {
-              // 找当前 assistant 消息中最后一个 running 的 step
-              const msg = getActive()
-              const steps = msg.steps || []
+              const round = currentRound()
+              const steps = round.steps || []
               const step = [...steps].reverse().find((s) => s.status === 'running')
               if (step) {
                 step.output = evt.data.output
                 step.duration_ms = evt.data.duration_ms
-                step.status = 'success'
+                step.status = evt.data.status || 'success'
               }
-              // 结束当前 assistant 消息，创建新的 assistant 占位（下一轮 LLM）
-              msg.streaming = false
-              this.chatMessages.push({ role: 'assistant', content: '', streaming: true })
-              activeIdx = this.chatMessages.length - 1
               break
             }
             case 'done': {
               const msg = getActive()
+              // 最终 content 归入最后一轮
+              const lastRound = msg.rounds?.[msg.rounds.length - 1]
+              if (lastRound && !lastRound.content) {
+                lastRound.content = evt.data.content || roundContentBuf || undefined
+              }
               msg.content = evt.data.content || msg.content
               msg.summary = {
-                total_rounds: evt.data.total_rounds,
-                total_tool_calls: evt.data.total_tool_calls,
                 total_duration_ms: evt.data.total_duration_ms,
               }
               msg.streaming = false

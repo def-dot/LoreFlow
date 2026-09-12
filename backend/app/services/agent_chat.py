@@ -115,18 +115,16 @@ async def run_agent_chat(
     # 5. Agentic loop
     max_iter = settings.AGENT_MAX_ROUNDS
     full_content = ""
-    total_rounds = 0
-    total_tool_calls = 0
     _chat_start = time.monotonic()
 
     try:
+        final_content = ""
+
         for iteration in range(1, max_iter + 1):
             logger.info("[agent_chat] conv=%d iteration=%d/%d", conversation_id, iteration, max_iter)
-            total_rounds += 1
             full_content = ""
             reasoning_content = ""
             current_tool_calls: list[dict[str, Any]] = []
-            exec_steps: list[dict[str, Any]] = []
 
             async for chunk in llm_chat_stream(agent.model or None, messages, tools=tools):
                 reasoning_delta = chunk.get("reasoning", "")
@@ -142,19 +140,20 @@ async def run_agent_chat(
                 if chunk.get("tool_calls"):
                     current_tool_calls = chunk["tool_calls"]
 
-            pending_records: list[MessageRecord] = [
-                MessageRecord(
-                    conversation_id=conversation_id, role="assistant",
-                    content=full_content,
-                    reasoning_content=reasoning_content or None,
-                    tool_calls=current_tool_calls or None,
-                )
-            ]
+            final_content = full_content
 
             if not current_tool_calls:
+                # 最终回复，入库
+                async with AsyncSessionLocal() as session:
+                    session.add(MessageRecord(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=full_content,
+                        reasoning_content=reasoning_content or None,
+                    ))
+                    await session.commit()
                 break
 
-            total_tool_calls += len(current_tool_calls)
             tool_results: list[dict[str, Any]] = []
             for tc in current_tool_calls:
                 func = tc.get("function", {})
@@ -163,27 +162,29 @@ async def run_agent_chat(
                 _t0 = time.monotonic()
                 tr = await execute_tool_call(tc)
                 duration_ms = int((time.monotonic() - _t0) * 1000)
+                tr["arguments"] = func.get("arguments", "")
+                tr["duration_ms"] = duration_ms
                 tool_results.append(tr)
-                yield f'event: tool_end\ndata: {json.dumps({"tool_name": tr["tool_name"], "output": tr["output"], "duration_ms": duration_ms}, ensure_ascii=False)}\n\n'
 
-                exec_steps.append({
-                    "tool_name": tr["tool_name"],
-                    "arguments": func.get("arguments", ""),
-                    "output": tr["output"],
-                    "duration_ms": duration_ms,
-                    "status": "success",
-                })
-                pending_records.append(MessageRecord(
-                    conversation_id=conversation_id, role="tool",
-                    content=f"[{tr['tool_name']}] {tr['output']}",
-                    tool_call_id=tr["tool_call_id"],
+                yield f'event: tool_end\ndata: {json.dumps({"tool_name": tr["tool_name"], "output": tr["output"], "duration_ms": duration_ms, "status": tr.get("status", "success")}, ensure_ascii=False)}\n\n'
+
+            # 本轮 assistant + tool 消息入库
+            async with AsyncSessionLocal() as session:
+                session.add(MessageRecord(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=full_content,
+                    reasoning_content=reasoning_content or None,
+                    tool_calls=current_tool_calls,
                 ))
-
-            # 把本轮执行步骤写入 assistant 消息（最后一条 assistant record）
-            for rec in reversed(pending_records):
-                if rec.role == "assistant":
-                    rec.execution_steps = exec_steps
-                    break
+                for tr in tool_results:
+                    session.add(MessageRecord(
+                        conversation_id=conversation_id,
+                        role="tool",
+                        content=tr["output"],
+                        tool_call_id=tr["tool_call_id"],
+                    ))
+                await session.commit()
 
             messages.append({
                 "role": "assistant",
@@ -194,18 +195,13 @@ async def run_agent_chat(
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tr["tool_call_id"],
-                    "content": f"[{tr['tool_name']}] {tr['output']}",
+                    "content": tr["output"],
                 })
         else:
             logger.warning("[agent_chat] max iterations (%d) reached for conv=%d", max_iter, conversation_id)
 
-        async with AsyncSessionLocal() as session:
-            for record in pending_records:
-                session.add(record)
-            await session.commit()
-
         total_ms = int((time.monotonic() - _chat_start) * 1000)
-        yield f'event: done\ndata: {json.dumps({"content": full_content, "total_rounds": total_rounds, "total_tool_calls": total_tool_calls, "total_duration_ms": total_ms}, ensure_ascii=False)}\n\n'
+        yield f'event: done\ndata: {json.dumps({"content": full_content, "total_duration_ms": total_ms}, ensure_ascii=False)}\n\n'
 
     except Exception as exc:
         logger.exception("[agent_chat] error in conv=%d", conversation_id)

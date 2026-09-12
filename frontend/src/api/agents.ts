@@ -36,7 +36,6 @@ export interface MessageItem {
   reasoning_content?: string | null
   tool_calls?: any[] | null
   tool_call_id?: string | null
-  execution_steps?: any[] | null
   created_at: string | null
 }
 
