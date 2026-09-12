@@ -98,7 +98,7 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
     # --- 构建工具列表（有 skills 时自动注入 load_skill + run_code）---
     tool_names: list[str] = list(ctx.get("tools") or [])
     if ctx.get("skills") and "*" not in tool_names:
-        for t in ("load_skill", "run_code"):
+        for t in ("filesystem__read_file", "run_code"):
             if t not in tool_names:
                 tool_names.append(t)
     tools = build_tools(tool_names)

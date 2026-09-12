@@ -92,7 +92,7 @@ async def run_agent_chat(
     # 4. 构建工具列表
     tool_names: list[str] = list(agent.tools or [])
     if agent.skills and "*" not in tool_names:
-        for t in ("load_skill", "run_code"):
+        for t in ("filesystem__read_file", "run_code"):
             if t not in tool_names:
                 tool_names.append(t)
     tools = build_tools(tool_names)
