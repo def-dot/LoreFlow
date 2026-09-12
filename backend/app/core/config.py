@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Agent Skills — 符合 agentskills.io 规范的技能目录
     SKILLS_DIR: Path = Path(__file__).resolve().parent.parent / "registry" / "skills"
 
+    # MCP — Model Context Protocol 服务器配置
+    MCP_CONFIG: Path = Path(__file__).resolve().parent.parent.parent / "mcp.yml"
+
     # Agent 工具调用最大轮次
     AGENT_MAX_ROUNDS: int = 10
 

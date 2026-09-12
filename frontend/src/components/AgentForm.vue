@@ -29,7 +29,7 @@ const form = ref<AgentListItem>({
 
 const saving = ref(false)
 const models = ref<Record<string, string[]>>({})
-const allTools = ref<{ name: string; description: string }[]>([])
+const allTools = ref<{ name: string; description: string; type: string }[]>([])
 const allSkills = ref<{ name: string; description: string }[]>([])
 
 // 编辑模式：回填
@@ -73,6 +73,7 @@ async function loadOptions() {
     allTools.value = (toolsResp.items || []).map((t) => ({
       name: t.name,
       description: t.description || '',
+      type: t.type || 'tool',
     }))
     allSkills.value = (skillsResp.items || []).map((s) => ({
       name: s.name,
@@ -174,10 +175,11 @@ async function handleSave() {
           <el-option
             v-for="t in allTools"
             :key="t.name"
-            :label="t.name"
+            :label="t.type === 'workflow' ? `⚡ ${t.name}` : t.name"
             :value="t.name"
           >
             <span>{{ t.name }}</span>
+            <span v-if="t.type === 'workflow'" class="opt-badge workflow-badge">workflow</span>
             <span class="opt-desc">{{ t.description || '暂无描述' }}</span>
           </el-option>
         </el-select>
@@ -233,5 +235,20 @@ async function handleSave() {
   white-space: nowrap;
   display: inline-block;
   vertical-align: bottom;
+}
+
+.opt-badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  border-radius: 3px;
+  vertical-align: middle;
+  line-height: 1.6;
+}
+
+.workflow-badge {
+  background: rgba(120, 100, 255, 0.12);
+  color: #7c6aff;
+  border: 1px solid rgba(120, 100, 255, 0.25);
 }
 </style>

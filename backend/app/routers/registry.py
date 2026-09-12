@@ -9,6 +9,8 @@ from app.registry.skills import SKILL_REGISTRY
 from app.registry.tool import TOOL_REGISTRY
 from app.schemas.registry import RegistryItemOut, RegistryListResponse
 from app.services.llm import list_models
+from app.services import pipelines as pipeline_service
+from app.services.mcp_client import list_mcp_tools
 
 router = APIRouter(prefix="", route_class=UnifiedResponseRoute, tags=["registry"])
 
@@ -25,12 +27,21 @@ async def list_skills() -> RegistryListResponse:
 
 @router.get("/tools", response_model=RegistryListResponse)
 async def list_tools() -> RegistryListResponse:
-    return RegistryListResponse(
-        items=[
-            RegistryItemOut(name=t.name, description=t.description)
-            for t in TOOL_REGISTRY.values()
-        ]
-    )
+    items = [
+        RegistryItemOut(name=t.name, description=t.description)
+        for t in TOOL_REGISTRY.values()
+    ]
+    # MCP 远程工具
+    for td in list_mcp_tools():
+        items.append(RegistryItemOut(name=td.name, description=td.description))
+    # Pipeline 工作流
+    for entry in pipeline_service.list_pipelines():
+        items.append(RegistryItemOut(
+            name=entry["name"],
+            description=entry.get("description") or "",
+            type="workflow",
+        ))
+    return RegistryListResponse(items=items)
 
 
 @router.get("/models")

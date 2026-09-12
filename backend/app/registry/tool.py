@@ -95,15 +95,44 @@ async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
 
     td = TOOL_REGISTRY.get(name)
     status = "success"
-    if td is None:
-        output = f"未知工具：{name}"
-        status = "error"
-    else:
+    if td is not None:
         try:
             output = await td.func(**args)
         except Exception as exc:
             output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
             status = "error"
+    else:
+        # 尝试 MCP 工具
+        from app.services.mcp_client import get_mcp_tool
+
+        mcp = get_mcp_tool(name)
+        if mcp is not None:
+            original_name, session = mcp
+            try:
+                result = await session.call_tool(original_name, args)
+                output = "\n".join(
+                    item.text if hasattr(item, "text") else str(item)
+                    for item in (result.content or [])
+                ) or "(无输出)"
+                if getattr(result, "isError", False):
+                    status = "error"
+            except Exception as exc:
+                output = f"MCP 工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+                status = "error"
+        else:
+            # 尝试 Pipeline 工作流
+            from app.services.agent_tools import _resolve_pipeline_tool
+
+            ptd = _resolve_pipeline_tool(name)
+            if ptd is not None:
+                try:
+                    output = await ptd.func(**args)
+                except Exception as exc:
+                    output = f"工作流 {name} 执行失败：{type(exc).__name__}: {exc}"
+                    status = "error"
+            else:
+                output = f"未知工具：{name}"
+                status = "error"
 
     return {
         "tool_call_id": tc.get("id", ""),

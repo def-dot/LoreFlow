@@ -1,0 +1,15 @@
+# MCP 服务器配置
+# 每个条目连接一个 MCP server，其工具自动注册到 agent 工具列表。
+#
+# transport:
+#   sse   — HTTP SSE 远程服务（url 必填）
+#   stdio — 本地子进程（command + args 必填）
+#
+servers: []
+  # - name: github
+  #   transport: sse
+  #   url: http://localhost:3001/sse
+  # - name: filesystem
+  #   transport: stdio
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]

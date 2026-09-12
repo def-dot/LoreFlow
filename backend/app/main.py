@@ -38,6 +38,7 @@ from app.routers import (
     uploads,
 )
 from app.services import orchestrator
+from app.services.mcp_client import init_mcp, shutdown_mcp
 
 setup_logging()
 logger = get_logger(__name__)
@@ -49,9 +50,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     discover_skills(settings.SKILLS_DIR)
     watcher = asyncio.create_task(watch_plugins())
     try:
+        await init_mcp(settings.MCP_CONFIG)
+    except Exception:
+        logger.exception("MCP 初始化失败")
+    try:
         await orchestrator.resume_stuck_runs()
         yield
     finally:
+        await shutdown_mcp()
         watcher.cancel()
         with suppress(asyncio.CancelledError):
             await watcher
