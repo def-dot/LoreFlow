@@ -1,15 +1,12 @@
 """插件加载 — load_plugins 扫描目录：新增/更新/清理删除/坏文件容错（启动与重载同路径）"""
 
-import asyncio
 import sys
 import time
-from contextlib import suppress
 from pathlib import Path
 
 import pytest
 
 import app.registry.plugins as plugin_loader
-from app.core.config import settings
 from app.registry import REGISTRY
 
 
@@ -62,35 +59,6 @@ def test_load_plugins_scans_directory(monkeypatch, tmp_path, isolated_registry) 
 def test_load_plugins_missing_dir(monkeypatch, tmp_path, isolated_registry) -> None:
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path / "no_such_dir")
     plugin_loader.load_plugins()  # 目录不存在只告警，不抛异常
-
-
-async def _wait_until(predicate, timeout: float = 5.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        if predicate():
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError("条件在超时内未满足")
-
-
-async def test_watch_plugins_auto_reloads(monkeypatch, tmp_path, isolated_registry) -> None:
-    """后台轮询发现目录变化后自动重扫：放文件即生效，无需手动触发。"""
-    _write(tmp_path / "a.py", '@node_type(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
-    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
-    monkeypatch.setattr(settings, "PLUGINS_POLL_SECONDS", 0.01)
-    plugin_loader.load_plugins()
-
-    task = asyncio.create_task(plugin_loader.watch_plugins())
-    try:
-        await asyncio.sleep(0)  # 让 watcher 先运行到记录初始签名，再写文件
-        _write(tmp_path / "b.py", '@node_type(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
-        await _wait_until(lambda: "b_probe" in REGISTRY)
-        assert "a_probe" in REGISTRY
-    finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
 
 
 def test_sync_adds_new_file(monkeypatch, tmp_path, isolated_registry) -> None:

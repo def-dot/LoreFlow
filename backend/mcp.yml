@@ -5,11 +5,8 @@
 #   sse   — HTTP SSE 远程服务（url 必填）
 #   stdio — 本地子进程（command + args 必填）
 #
-servers: []
-  # - name: github
-  #   transport: sse
-  #   url: http://localhost:3001/sse
-  # - name: filesystem
-  #   transport: stdio
-  #   command: npx
-  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+servers:
+  - name: filesystem
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "D:/rag/LoreFlow"]

@@ -2,8 +2,6 @@
 
 - :func:`load_plugins` 启动时（lifespan）调用一次；坏文件跳过并记录
   error（本次加载全部撤销）
-- :func:`watch_plugins` 后台轮询目录签名，变化时自动重扫——多 worker
-  各自轮询、最终一致，插件发布 = 放文件，无需重启或手动重载
 
 插件文件只需用 ``@node`` 装饰器定义函数：导入即注册进 ``REGISTRY``。
 只扫描目录顶层的 *.py（下划线前缀跳过），不支持子包。
@@ -11,7 +9,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import sys
 from dataclasses import dataclass
@@ -47,26 +44,6 @@ def load_plugins() -> None:
     _LOADED.clear()
     for path in sorted(p for p in plugins_dir.glob("*.py") if not p.name.startswith("_")):
         _load(path)
-
-
-async def watch_plugins() -> None:
-    """后台轮询插件目录：签名变化时自动重扫（供 lifespan 创建任务）。
-    """
-    last = _dir_signature(plugins_dir)
-    while True:
-        await asyncio.sleep(settings.PLUGINS_POLL_SECONDS)
-        signature = _dir_signature(plugins_dir)
-        if signature != last:
-            last = signature
-            load_plugins()
-
-
-def _dir_signature(plugins_dir: Path) -> tuple[tuple[str, int, int], ...]:
-    """目录内容签名：(文件名, mtime_ns, 大小)；任何增删改都会改变签名。"""
-    return tuple(
-        (p.name, p.stat().st_mtime_ns, p.stat().st_size)
-        for p in sorted(p for p in plugins_dir.glob("*.py") if not p.name.startswith("_"))
-    )
 
 
 def list_plugins() -> list[PluginInfo]:

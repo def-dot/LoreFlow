@@ -50,9 +50,8 @@ async def upload_plugin(
     target = PLUGINS_DIR / filename
     target.write_bytes(data)
 
-    # 等热加载轮询发现变化（最多等一轮）
-    import asyncio
-    await asyncio.sleep(settings.PLUGINS_POLL_SECONDS + 0.5)
+    # 立即重载插件
+    plugin_loader.load_plugins()
 
     # 返回加载结果
     for p in plugin_loader.list_plugins():

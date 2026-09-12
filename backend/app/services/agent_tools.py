@@ -10,12 +10,9 @@ from typing import Any
 
 from app.registry.tool import TOOL_REGISTRY, ToolDef, ParamDef
 from app.registry.skills import SKILL_REGISTRY
-from app.services.mcp_client import list_mcp_tools
 
 
 logger = logging.getLogger(__name__)
-
-_TYPE_MAP = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 # Pipeline 轮询等待参数
 _PIPELINE_POLL_INTERVAL = 2.0   # 秒
@@ -25,7 +22,7 @@ _PIPELINE_POLL_TIMEOUT = 300.0  # 5 分钟
 def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
     """构建 OpenAI 格式工具列表。['*'] → 全部（含 MCP），[] → 无。
 
-    Pipeline 名称不在 TOOL_REGISTRY / MCP 中时，动态包装为工具。
+    Pipeline 名称不在 TOOL_REGISTRY 中时，动态包装为工具。
     '*' 通配符不包含 pipeline（需显式选择）。
     """
     select_all = "*" in tools_input
@@ -35,7 +32,6 @@ def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
 
     result: list[dict[str, Any]] = []
 
-    # 本地工具
     for name in tool_names:
         td = TOOL_REGISTRY.get(name)
         if td is not None:
@@ -47,18 +43,6 @@ def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
             result.append(_tooldef_to_openai(ptd))
         else:
             logger.warning("未知工具：%s", name)
-
-    # MCP 工具
-    mcp_tools = list_mcp_tools()
-    if select_all:
-        for td in mcp_tools:
-            result.append(_tooldef_to_openai(td))
-    else:
-        mcp_names = {td.name for td in mcp_tools}
-        for name in tools_input:
-            if name in mcp_names:
-                td = next(t for t in mcp_tools if t.name == name)
-                result.append(_tooldef_to_openai(td))
 
     return result or None
 
@@ -85,12 +69,9 @@ def _resolve_pipeline_tool(name: str) -> ToolDef | None:
     for pname, spec in params_cfg.items():
         if not isinstance(spec, dict):
             continue
-        ptype = {"string": str, "integer": int, "number": float, "boolean": bool}.get(
-            spec.get("type", "string"), str
-        )
         param_defs.append(ParamDef(
             name=pname,
-            param_type=ptype,
+            param_type=spec.get("type", "string"),
             description=spec.get("description") or "",
             required=spec.get("required", True),
         ))
@@ -139,7 +120,7 @@ def _tooldef_to_openai(td: ToolDef) -> dict[str, Any]:
     schema: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
     for p in td.params:
         schema["properties"][p.name] = {
-            "type": _TYPE_MAP.get(p.param_type, "string"),
+            "type": p.param_type,
             "description": p.description,
         }
         if p.required:

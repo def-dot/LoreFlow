@@ -25,7 +25,7 @@ class ParamDef:
     """工具参数定义。"""
 
     name: str
-    param_type: type = str
+    param_type: str = "string"
     description: str = ""
     required: bool = True
 
@@ -61,6 +61,8 @@ def tool(
     参数类型从函数签名自动提取（支持 str/int/float/bool），
     描述通过 ``params`` 传入。
     """
+    _TYPE_TO_STR: dict[type, str] = {str: "string", int: "integer", float: "number", bool: "boolean"}
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = name or func.__name__
         descriptions = params or {}
@@ -71,7 +73,7 @@ def tool(
                 annotation = param.annotation if param.annotation is not inspect.Parameter.empty else str
                 param_defs.append(ParamDef(
                     name=pname,
-                    param_type=annotation,
+                    param_type=_TYPE_TO_STR.get(annotation, "string"),
                     description=descriptions.get(pname, ""),
                     required=param.default is inspect.Parameter.empty,
                 ))
@@ -102,37 +104,19 @@ async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
             output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
             status = "error"
     else:
-        # 尝试 MCP 工具
-        from app.services.mcp_client import get_mcp_tool
+        # 尝试 Pipeline 工作流
+        from app.services.agent_tools import _resolve_pipeline_tool
 
-        mcp = get_mcp_tool(name)
-        if mcp is not None:
-            original_name, session = mcp
+        ptd = _resolve_pipeline_tool(name)
+        if ptd is not None:
             try:
-                result = await session.call_tool(original_name, args)
-                output = "\n".join(
-                    item.text if hasattr(item, "text") else str(item)
-                    for item in (result.content or [])
-                ) or "(无输出)"
-                if getattr(result, "isError", False):
-                    status = "error"
+                output = await ptd.func(**args)
             except Exception as exc:
-                output = f"MCP 工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+                output = f"工作流 {name} 执行失败：{type(exc).__name__}: {exc}"
                 status = "error"
         else:
-            # 尝试 Pipeline 工作流
-            from app.services.agent_tools import _resolve_pipeline_tool
-
-            ptd = _resolve_pipeline_tool(name)
-            if ptd is not None:
-                try:
-                    output = await ptd.func(**args)
-                except Exception as exc:
-                    output = f"工作流 {name} 执行失败：{type(exc).__name__}: {exc}"
-                    status = "error"
-            else:
-                output = f"未知工具：{name}"
-                status = "error"
+            output = f"未知工具：{name}"
+            status = "error"
 
     return {
         "tool_call_id": tc.get("id", ""),

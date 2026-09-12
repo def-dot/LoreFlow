@@ -13,9 +13,8 @@ Run::
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
-from app.registry.plugins import load_plugins, watch_plugins
+from app.registry.plugins import load_plugins
 from app.registry.skills import discover_skills
 from app.routers import (
     agents,
@@ -48,7 +47,6 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
     discover_skills(settings.SKILLS_DIR)
-    watcher = asyncio.create_task(watch_plugins())
     try:
         await init_mcp(settings.MCP_CONFIG)
     except Exception:
@@ -58,9 +56,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
     finally:
         await shutdown_mcp()
-        watcher.cancel()
-        with suppress(asyncio.CancelledError):
-            await watcher
 
 
 app = FastAPI(

@@ -18,7 +18,6 @@ class Settings(BaseSettings):
 
     # Node plugins — 自定义插件目录
     PLUGINS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "custom_plugins"
-    PLUGINS_POLL_SECONDS: int = 3
 
     # Agent Skills — 符合 agentskills.io 规范的技能目录
     SKILLS_DIR: Path = Path(__file__).resolve().parent.parent / "registry" / "skills"
