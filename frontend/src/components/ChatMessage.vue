@@ -54,6 +54,8 @@ function formatArgs(args: string): string {
   }
 }
 
+
+
 /** 格式化耗时 */
 function formatDuration(ms?: number): string {
   if (ms == null) return ''
@@ -86,17 +88,17 @@ function formatContent(text: string): string {
 
     <!-- Assistant 消息（含完整执行过程） -->
     <div v-else-if="message.role === 'assistant'" class="bubble assistant-bubble">
-      <!-- 流式状态：思考中（尚无推理数据时） -->
-      <div v-if="message.streaming && !hasProcess" class="stream-status">
-        <span class="stream-dot" />
-        💭 思考中…
-      </div>
-
       <!-- 推理过程（思考 + 工具步骤，统一折叠） -->
-      <div v-if="hasProcess" class="process-section">
+      <div v-if="hasProcess || (message.streaming && message.phase === 'thinking')" class="process-section">
         <button class="toggle-btn" @click="toggleProcess">
-          <span class="toggle-icon">{{ showProcess ? '▾' : '▸' }}</span>
-          🧠 推理过程
+          <template v-if="message.streaming">
+            <span class="stream-dot" />
+            💭 思考中…
+          </template>
+          <template v-else>
+            <span class="toggle-icon">{{ showProcess ? '▾' : '▸' }}</span>
+            🧠 推理过程
+          </template>
         </button>
         <div v-if="showProcess" class="process-content">
           <template v-for="(round, ri) in message.rounds" :key="ri">
@@ -179,16 +181,7 @@ function formatContent(text: string): string {
   color: var(--ink-2);
 }
 
-/* ---- 流式状态栏 ---- */
-.stream-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--ink-3);
-  margin-bottom: 8px;
-}
-
+/* ---- 流式指示 ---- */
 .stream-dot {
   width: 6px;
   height: 6px;

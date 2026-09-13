@@ -95,12 +95,10 @@ async def agent(ctx: dict[str, Any]) -> dict[str, Any]:
         system_content = (system or "") + "\n\n" + skill_prompt
         messages.insert(0, {"role": "system", "content": system_content.strip()})
 
-    # --- 构建工具列表（有 skills 时自动注入 load_skill + run_code）---
+    # --- 构建工具列表（有 skills 时自动注入 load_skill）---
     tool_names: list[str] = list(ctx.get("tools") or [])
-    if ctx.get("skills") and "*" not in tool_names:
-        for t in ("filesystem__read_file", "run_code"):
-            if t not in tool_names:
-                tool_names.append(t)
+    if ctx.get("skills") and "*" not in tool_names and "load_skill" not in tool_names:
+        tool_names.append("load_skill")
     tools = build_tools(tool_names)
 
     content = ""

@@ -47,4 +47,5 @@ class MessageRecord(SQLModel, table=True):
     reasoning_content: str | None = Field(default=None, sa_column=Column(Text))
     tool_calls: list[Any] | None = Field(default=None, sa_column=Column(JSON))
     tool_call_id: str | None = None
+    duration_ms: int | None = None
     created_at: datetime = Field(default_factory=datetime.now)

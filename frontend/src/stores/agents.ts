@@ -158,6 +158,7 @@ export const useAgentsStore = defineStore('agents', {
                 tool_name: tc.function?.name || 'unknown',
                 arguments: tc.function?.arguments || '',
                 output: toolMsg?.content || '',
+                duration_ms: toolMsg?.duration_ms,
                 status: 'success' as const,
               } as ToolStep
             })

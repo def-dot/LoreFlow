@@ -91,10 +91,8 @@ async def run_agent_chat(
 
     # 4. 构建工具列表
     tool_names: list[str] = list(agent.tools or [])
-    if agent.skills and "*" not in tool_names:
-        for t in ("filesystem__read_file", "run_code"):
-            if t not in tool_names:
-                tool_names.append(t)
+    if agent.skills and "*" not in tool_names and "load_skill" not in tool_names:
+        tool_names.append("load_skill")
     tools = build_tools(tool_names)
 
     # 5. Agentic loop
@@ -103,7 +101,6 @@ async def run_agent_chat(
     _chat_start = time.monotonic()
 
     try:
-        final_content = ""
 
         for iteration in range(1, max_iter + 1):
             logger.info("[agent_chat] conv=%d iteration=%d/%d", conversation_id, iteration, max_iter)
@@ -125,7 +122,6 @@ async def run_agent_chat(
                 if chunk.get("tool_calls"):
                     current_tool_calls = chunk["tool_calls"]
 
-            final_content = full_content
 
             if not current_tool_calls:
                 # 最终回复，入库
@@ -168,6 +164,7 @@ async def run_agent_chat(
                         role="tool",
                         content=tr["output"],
                         tool_call_id=tr["tool_call_id"],
+                        duration_ms=tr.get("duration_ms"),
                     ))
                 await session.commit()
 
