@@ -10,56 +10,36 @@ const props = defineProps<{
   message: ChatMessage
 }>()
 
-const showThinking = ref(false)
-const expandedSteps = ref<Set<string>>(new Set())
-/** 用户是否手动切换过思考过程（阻止自动展开覆盖） */
-let userToggledThinking = false
+const showProcess = ref(false)
+/** 用户是否手动切换过（阻止自动展开覆盖） */
+let userToggled = false
 
-/** 是否存在思考内容 */
-const hasThinking = computed(() =>
-  props.message.rounds?.some(r => r.thinking)
-)
-/** 是否存在工具步骤 */
-const hasSteps = computed(() =>
-  props.message.rounds?.some(r => r.steps?.length)
+/** 是否存在推理过程（思考或工具步骤） */
+const hasProcess = computed(() =>
+  props.message.rounds?.some(r => r.thinking || r.steps?.length)
 )
 
-/** 流式进行时自动展开思考，完成后自动折叠 */
+/** 流式进行时自动展开，完成后自动折叠 */
 watch(() => props.message.streaming, (streaming) => {
-  if (streaming && hasThinking.value) {
-    showThinking.value = true
-    userToggledThinking = false
+  if (streaming && hasProcess.value) {
+    showProcess.value = true
+    userToggled = false
   } else if (!streaming) {
-    showThinking.value = false
-    userToggledThinking = false
+    showProcess.value = false
+    userToggled = false
   }
 })
 
-/** 思考内容到达时自动展开（流式中） */
-watch(hasThinking, (has) => {
-  if (has && props.message.streaming && !userToggledThinking) {
-    showThinking.value = true
+/** 推理数据到达时自动展开（流式中） */
+watch(hasProcess, (has) => {
+  if (has && props.message.streaming && !userToggled) {
+    showProcess.value = true
   }
 })
 
-function toggleThinking() {
-  userToggledThinking = true
-  showThinking.value = !showThinking.value
-}
-
-function stepKey(ri: number, si: number): string {
-  return `${ri}-${si}`
-}
-function toggleStep(ri: number, si: number): void {
-  const k = stepKey(ri, si)
-  if (expandedSteps.value.has(k)) {
-    expandedSteps.value.delete(k)
-  } else {
-    expandedSteps.value.add(k)
-  }
-}
-function isStepExpanded(ri: number, si: number): boolean {
-  return expandedSteps.value.has(stepKey(ri, si))
+function toggleProcess() {
+  userToggled = true
+  showProcess.value = !showProcess.value
 }
 
 /** 格式化工具参数为可读文本 */
@@ -106,60 +86,49 @@ function formatContent(text: string): string {
 
     <!-- Assistant 消息（含完整执行过程） -->
     <div v-else-if="message.role === 'assistant'" class="bubble assistant-bubble">
-      <!-- 流式状态：思考中（尚无思考内容时） -->
-      <div v-if="message.streaming && message.phase === 'thinking' && !hasThinking" class="stream-status">
+      <!-- 流式状态：思考中（尚无推理数据时） -->
+      <div v-if="message.streaming && !hasProcess" class="stream-status">
         <span class="stream-dot" />
         💭 思考中…
       </div>
 
-      <!-- 思考过程（可折叠，流式中展开，完成后折叠） -->
-      <div v-if="hasThinking" class="thinking-section">
-        <button class="toggle-btn" @click="toggleThinking">
-          <span class="toggle-icon">{{ showThinking ? '▾' : '▸' }}</span>
-          🧠 思考过程
+      <!-- 推理过程（思考 + 工具步骤，统一折叠） -->
+      <div v-if="hasProcess" class="process-section">
+        <button class="toggle-btn" @click="toggleProcess">
+          <span class="toggle-icon">{{ showProcess ? '▾' : '▸' }}</span>
+          🧠 推理过程
         </button>
-        <div v-if="showThinking" class="process-content">
+        <div v-if="showProcess" class="process-content">
           <template v-for="(round, ri) in message.rounds" :key="ri">
-            <div v-if="round.thinking" class="round-block">
-              <div v-if="(message.rounds?.filter(r => r.thinking).length ?? 0) > 1" class="round-label">
-                第 {{ ri + 1 }} 轮
+            <div v-if="round.thinking || round.steps?.length" class="round-block">
+              <div v-if="round.thinking">
+                <div v-if="(message.rounds?.filter(r => r.thinking).length ?? 0) > 1" class="round-label">
+                  第 {{ ri + 1 }} 轮
+                </div>
+                <div class="thinking-content" v-html="formatContent(round.thinking)" />
+                <div v-if="round.content" class="round-content" v-html="formatContent(round.content)" />
               </div>
-              <div class="thinking-content" v-html="formatContent(round.thinking)" />
-              <div v-if="round.content" class="round-content" v-html="formatContent(round.content)" />
+              <div v-if="round.steps?.length" class="steps-timeline">
+                <div
+                  v-for="(step, si) in round.steps"
+                  :key="si"
+                  class="step-item"
+                  :class="`step-${step.status}`"
+                >
+                  <div class="step-header">
+                    <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
+                    <span class="step-name">{{ step.tool_name }}</span>
+                    <span class="step-duration" v-if="step.duration_ms != null">{{ formatDuration(step.duration_ms) }}</span>
+                  </div>
+                  <div v-if="step.arguments || step.output" class="step-detail">
+                    <pre v-if="step.arguments" class="detail-input">{{ formatArgs(step.arguments) }}</pre>
+                    <pre v-if="step.output" class="detail-output" :class="{ 'is-error': step.status === 'error' }">{{ step.output }}</pre>
+                  </div>
+                </div>
+              </div>
             </div>
           </template>
         </div>
-      </div>
-
-      <!-- 工具调用步骤（始终可见，不折叠） -->
-      <div v-if="hasSteps" class="steps-section">
-        <template v-for="(round, ri) in message.rounds" :key="ri">
-          <div v-if="round.steps?.length" class="round-block">
-            <div v-if="(message.rounds?.filter(r => r.steps?.length).length ?? 0) > 1" class="round-label">
-              第 {{ ri + 1 }} 轮
-            </div>
-            <div class="steps-timeline">
-              <div
-                v-for="(step, si) in round.steps"
-                :key="si"
-                class="step-item"
-                :class="`step-${step.status}`"
-              >
-                <div class="step-header" @click="toggleStep(ri, si)">
-                  <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
-                  <span class="step-name">{{ step.tool_name }}</span>
-                  <span class="step-args">{{ formatArgs(step.arguments) }}</span>
-                  <span class="step-duration" v-if="step.duration_ms != null">{{ formatDuration(step.duration_ms) }}</span>
-                  <span v-if="step.output || step.arguments" class="step-toggle">{{ isStepExpanded(ri, si) ? '▾' : '▸' }}</span>
-                </div>
-                <div v-if="isStepExpanded(ri, si) && (step.arguments || step.output)" class="step-detail">
-                  <pre v-if="step.arguments" class="detail-input">{{ formatArgs(step.arguments) }}</pre>
-                  <pre v-if="step.output" class="detail-output" :class="{ 'is-error': step.status === 'error' }">{{ step.output }}</pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        </template>
       </div>
 
       <!-- 最终回复文本（始终可见） -->
@@ -343,13 +312,9 @@ function formatContent(text: string): string {
   margin: 4px 0;
 }
 
-/* ---- 思考过程 & 工具步骤 ---- */
-.thinking-section {
+/* ---- 推理过程 ---- */
+.process-section {
   margin-bottom: 8px;
-}
-
-.steps-section {
-  margin-bottom: 4px;
 }
 
 .round-block {
@@ -446,7 +411,6 @@ function formatContent(text: string): string {
   align-items: baseline;
   gap: 6px;
   flex-wrap: wrap;
-  cursor: pointer;
 }
 
 .step-icon {
@@ -472,13 +436,6 @@ function formatContent(text: string): string {
   color: var(--ink-3);
   font-size: 11px;
   margin-left: auto;
-  flex-shrink: 0;
-}
-
-.step-toggle {
-  font-size: 10px;
-  color: var(--ink-3);
-  margin-left: 4px;
   flex-shrink: 0;
 }
 
