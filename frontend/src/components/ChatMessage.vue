@@ -97,7 +97,7 @@ function formatContent(text: string): string {
           </template>
           <template v-else>
             <span class="toggle-icon">{{ showProcess ? '▾' : '▸' }}</span>
-            🧠 推理过程
+            🧠 思考过程
           </template>
         </button>
         <div v-if="showProcess" class="process-content">
@@ -120,7 +120,7 @@ function formatContent(text: string): string {
                   <div class="step-header">
                     <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
                     <span class="step-name">{{ step.tool_name }}</span>
-                    <span class="step-duration" v-if="step.duration_ms != null">{{ formatDuration(step.duration_ms) }}</span>
+                    <span class="step-duration" v-if="step.duration_ms != null">耗时：{{ formatDuration(step.duration_ms) }}</span>
                   </div>
                   <div v-if="step.arguments || step.output" class="step-detail">
                     <pre v-if="step.arguments" class="detail-input">{{ formatArgs(step.arguments) }}</pre>
