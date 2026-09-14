@@ -19,8 +19,8 @@ const showUpload = ref(false)
 
 // 上传弹窗状态
 const selectedFiles = ref<File[]>([])
-const selectedKbId = ref<number | null>(null)
-const newKbName = ref('')
+const kbInput = ref('')
+const matchedKbId = ref<number | null>(null)
 
 onMounted(loadData)
 
@@ -32,9 +32,25 @@ async function loadData() {
 
 function openUpload() {
   selectedFiles.value = []
-  selectedKbId.value = kbs.value.length ? kbs.value[0].id : null
-  newKbName.value = ''
+  kbInput.value = ''
+  matchedKbId.value = null
   showUpload.value = true
+}
+
+function fetchKbSuggestions(query: string, cb: (results: { value: string; id: number }[]) => void) {
+  const q = query.trim().toLowerCase()
+  const matches = kbs.value
+    .filter((kb) => kb.name.toLowerCase().includes(q))
+    .map((kb) => ({ value: kb.name, id: kb.id }))
+  cb(matches)
+}
+
+function onKbSelect(item: { value: string; id: number }) {
+  matchedKbId.value = item.id
+}
+
+function onKbInput() {
+  matchedKbId.value = null
 }
 
 function onFileChange(e: Event) {
@@ -48,15 +64,20 @@ async function handleUpload() {
     return
   }
 
-  let kbId = selectedKbId.value
+  let kbId = matchedKbId.value
   if (!kbId) {
-    const name = newKbName.value.trim()
+    const name = kbInput.value.trim()
     if (!name) {
-      ElMessage.warning('请选择知识库或输入新名称')
+      ElMessage.warning('请选择或输入知识库名称')
       return
     }
-    const created = await createKnowledgeBase({ name })
-    kbId = created.id
+    const existing = kbs.value.find((k) => k.name === name)
+    if (existing) {
+      kbId = existing.id
+    } else {
+      const created = await createKnowledgeBase({ name })
+      kbId = created.id
+    }
   }
 
   uploading.value = true
@@ -124,17 +145,16 @@ function statusType(s: string) {
     <el-dialog v-model="showUpload" title="上传文档" width="420px">
       <el-form label-position="top">
         <el-form-item label="知识库">
-          <el-select
-            v-model="selectedKbId"
-            filterable
-            clearable
-            placeholder="选择已有知识库"
+          <el-autocomplete
+            v-model="kbInput"
+            :fetch-suggestions="fetchKbSuggestions"
+            placeholder="选择已有知识库或输入新名称"
             style="width: 100%"
-          >
-            <el-option v-for="kb in kbs" :key="kb.id" :label="kb.name" :value="kb.id" />
-          </el-select>
-          <div v-if="!selectedKbId" class="new-kb-hint">
-            <el-input v-model="newKbName" placeholder="输入新知识库名称" />
+            @select="onKbSelect"
+            @input="onKbInput"
+          />
+          <div v-if="kbInput && !matchedKbId" class="new-kb-hint">
+            将新建知识库「{{ kbInput.trim() }}」
           </div>
         </el-form-item>
         <el-form-item label="文件">

@@ -7,6 +7,11 @@
 #   stdio — 本地子进程（command + args 必填）
 #
 servers:
+  - name: 系统监控MCP
+    transport: stdio
+    command: python
+    args: ["backend/mcp_servers/system_monitor.py", "--logs-dir", "backend/logs"]
+
   - name: 文件系统MCP
     transport: stdio
     command: npx
