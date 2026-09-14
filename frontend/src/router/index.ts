@@ -4,6 +4,7 @@ import Plugins from '@/views/Plugins.vue'
 import Pipelines from '@/views/Pipelines.vue'
 import Agents from '@/views/Agents.vue'
 import AgentChat from '@/views/AgentChat.vue'
+import Knowledge from '@/views/Knowledge.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -13,6 +14,7 @@ const router = createRouter({
     { path: '/pipelines', name: 'pipelines', component: Pipelines },
     { path: '/agents', name: 'agents', component: Agents },
     { path: '/agents/:id/chat', name: 'agent-chat', component: AgentChat },
+    { path: '/knowledge', name: 'knowledge', component: Knowledge },
   ],
 })
 

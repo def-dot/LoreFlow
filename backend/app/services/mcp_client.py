@@ -51,6 +51,12 @@ async def _connect_server(server_cfg: dict[str, Any]) -> None:
                 command=server_cfg["command"],
                 args=server_cfg.get("args", []),
             )))
+        elif transport == "http":
+            from mcp.client.streamable_http import streamablehttp_client
+
+            read, write, _ = await stack.enter_async_context(
+                streamablehttp_client(server_cfg["url"])
+            )
         else:
             logger.warning("[mcp] 未知 transport: %s（服务器 %s）", transport, name)
             return
@@ -61,7 +67,6 @@ async def _connect_server(server_cfg: dict[str, Any]) -> None:
         tools_result = await session.list_tools()
         registered = 0
         for t in tools_result.tools:
-            prefixed = f"{name}__{t.name}"
 
             def _make_call(sess: ClientSession, tool_name: str):
                 async def _call(**kwargs: Any) -> str:
@@ -76,12 +81,13 @@ async def _connect_server(server_cfg: dict[str, Any]) -> None:
                 return _call
 
             td = ToolDef(
-                name=prefixed,
+                name=t.name,
                 func=_make_call(session, t.name),
                 description=t.description or "",
+                group=name,
                 params=_schema_to_params(t.inputSchema),
             )
-            TOOL_REGISTRY[prefixed] = td
+            TOOL_REGISTRY[t.name] = td
             registered += 1
 
         _stacks.append(stack)

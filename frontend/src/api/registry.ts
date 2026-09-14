@@ -3,14 +3,20 @@ import { api } from './request'
 export interface RegistryItem {
   name: string
   description: string
-  type: string  // "tool" | "workflow"
 }
 
-export function listSkills(): Promise<{ items: RegistryItem[] }> {
+export interface ToolOut {
+  name: string
+  label: string
+  description: string
+  group: string
+}
+
+export function listSkills(): Promise<RegistryItem[]> {
   return api.get('/skills')
 }
 
-export function listTools(): Promise<{ items: RegistryItem[] }> {
+export function listTools(): Promise<ToolOut[]> {
   return api.get('/tools')
 }
 

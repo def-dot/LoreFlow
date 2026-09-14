@@ -33,6 +33,7 @@ async def _tavily_search(query: str, max_results: int = 5) -> list[dict[str, str
 
 @tool(
     name="web_search",
+    label="网络搜索",
     description="搜索互联网获取最新信息，返回搜索结果列表（标题、链接、摘要）",
     params={"query": "搜索关键词"},
 )

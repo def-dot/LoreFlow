@@ -20,7 +20,7 @@ _PIPELINE_POLL_TIMEOUT = 300.0  # 5 分钟
 
 
 def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
-    """构建 OpenAI 格式工具列表。['*'] → 全部（含 MCP），[] → 无。
+    """构建 OpenAI 格式工具列表。['*'] → 全部，[] → 无。
 
     Pipeline 名称不在 TOOL_REGISTRY 中时，动态包装为工具。
     '*' 通配符不包含 pipeline（需显式选择）。

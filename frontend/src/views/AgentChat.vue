@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentsStore } from '@/stores/agents'
 import { uploadFile } from '@/api/uploads'
+import { listTools } from '@/api/registry'
 import ChatMessage from '@/components/ChatMessage.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ConversationListItem } from '@/api/agents'
@@ -17,11 +18,14 @@ const chatContainer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<{ id: string; name: string }[]>([])
 const uploading = ref(false)
+const toolLabels = ref<Record<string, string>>({})
 
-// 加载 Agent 和对话列表
+// 加载 Agent、对话列表和工具标签
 onMounted(async () => {
   await store.selectAgent(agentId.value)
   await store.fetchConversations(agentId.value)
+  const tools = await listTools()
+  toolLabels.value = Object.fromEntries(tools.map((t) => [t.name, t.label]))
 })
 
 // 滚动到底部
@@ -170,6 +174,7 @@ function goBack() {
           v-for="(msg, i) in store.chatMessages"
           :key="i"
           :message="msg"
+          :tool-labels="toolLabels"
         />
       </div>
 

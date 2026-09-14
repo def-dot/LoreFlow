@@ -99,8 +99,8 @@ watch(
 
 // 已知的动态选项源：参数名 → fetcher
 const DYNAMIC_OPTION_FETCHERS: Record<string, () => Promise<{ items: { name: string; description: string }[] }>> = {
-  skills: listSkills,
-  tools: listTools,
+  skills: async () => ({ items: await listSkills() }),
+  tools: async () => ({ items: await listTools() }),
 }
 
 // 按参数名自动匹配：名字命中的自动拉取选项列表

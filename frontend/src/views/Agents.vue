@@ -1,20 +1,60 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentsStore } from '@/stores/agents'
 import AgentForm from '@/components/AgentForm.vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import type { AgentListItem } from '@/api/agents'
+import { listTools, type ToolOut } from '@/api/registry'
 
 const router = useRouter()
 const store = useAgentsStore()
 
 const showDrawer = ref(false)
 const editingAgent = ref<AgentListItem | null>(null)
+const allTools = ref<ToolOut[]>([])
 
-onMounted(() => {
+onMounted(async () => {
   store.fetchAgents()
+  allTools.value = await listTools()
 })
+
+/** 将工具名列表压缩为显示标签：
+ *  全选的组 → 组名
+ *  部分选 → 组名 (N)
+ *  未分组 → label（显示名）
+ */
+function compressTools(tools: string[]): string[] {
+  const set = new Set(tools)
+  const grouped = new Map<string, ToolOut[]>()
+  const labelMap = new Map<string, string>()
+  for (const t of allTools.value) {
+    if (t.group) {
+      const arr = grouped.get(t.group) || []
+      arr.push(t)
+      grouped.set(t.group, arr)
+    } else {
+      labelMap.set(t.name, t.label)
+    }
+  }
+  const labels: string[] = []
+  for (const [g, members] of [...grouped.entries()].sort()) {
+    const names = members.map((m) => m.name)
+    const selected = names.filter((n) => set.has(n))
+    if (!selected.length) continue
+    names.forEach((n) => set.delete(n))
+    labels.push(selected.length === names.length ? g : `${g} (${selected.length})`)
+  }
+  for (const name of set) {
+    labels.push(labelMap.get(name) || name)
+  }
+  return labels
+}
+
+function toolDisplay(tools: string[]) {
+  const compressed = compressTools(tools)
+  return { shown: compressed.slice(0, 5), more: compressed.length > 5 ? compressed.length - 5 : 0 }
+}
 
 function openCreate() {
   editingAgent.value = null
@@ -82,7 +122,8 @@ function enterChat(agentId: number) {
           <div class="cap-section" v-if="agent.tools?.length">
             <span class="cap-label">🔧 工具</span>
             <div class="cap-tags">
-              <span v-for="t in agent.tools" :key="t" class="cap-tag tool-tag">{{ t }}</span>
+              <span v-for="t in toolDisplay(agent.tools).shown" :key="t" class="cap-tag tool-tag">{{ t }}</span>
+              <span v-if="toolDisplay(agent.tools).more" class="cap-tag tool-tag more-tag">+{{ toolDisplay(agent.tools).more }}</span>
             </div>
           </div>
           <div class="cap-section" v-if="agent.skills?.length">
@@ -221,6 +262,10 @@ function enterChat(agentId: number) {
   background: rgba(77, 196, 178, 0.1);
   color: var(--accent);
   border: 1px solid rgba(77, 196, 178, 0.2);
+}
+.more-tag {
+  opacity: 0.7;
+  font-style: italic;
 }
 
 .skill-tag {

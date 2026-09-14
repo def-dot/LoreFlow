@@ -3,10 +3,22 @@
 #
 # transport:
 #   sse   — HTTP SSE 远程服务（url 必填）
+#   http  — Streamable HTTP 远程服务（url 必填，如 http://localhost:8080/mcp）
 #   stdio — 本地子进程（command + args 必填）
 #
 servers:
-  - name: filesystem
+  - name: 文件系统MCP
     transport: stdio
     command: npx
     args: ["-y", "@modelcontextprotocol/server-filesystem", "D:/rag/LoreFlow"]
+
+  - name: 数据库MCP
+    transport: stdio
+    command: npx
+    args:
+      - "-y"
+      - "@bytebase/dbhub@latest"
+      - "--transport"
+      - "stdio"
+      - "--dsn"
+      - "postgresql://postgres:postgres@localhost:5432/loreflow?sslmode=disable"

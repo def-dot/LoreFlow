@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { listModels, listTools, listSkills } from '@/api/registry'
+import { listModels, listTools, listSkills, type ToolOut } from '@/api/registry'
+import { listKnowledgeBases, type KnowledgeBase } from '@/api/knowledge'
 import { ElMessage } from 'element-plus'
 import type { AgentListItem } from '@/api/agents'
 
@@ -15,22 +16,57 @@ const emit = defineEmits<{
 
 const store = useAgentsStore()
 
-const form = ref<AgentListItem>({
-  id: 0,
+const form = ref({
   name: '',
   description: '',
   system_prompt: '',
   model: '',
-  tools: [],
-  skills: [],
-  created_at: null,
-  updated_at: null,
+  tools: [] as string[],
+  skills: [] as string[],
+  kb_id: null as number | null,
 })
 
 const saving = ref(false)
 const models = ref<Record<string, string[]>>({})
-const allTools = ref<{ name: string; description: string; type: string }[]>([])
+const allTools = ref<ToolOut[]>([])
 const allSkills = ref<{ name: string; description: string }[]>([])
+const knowledgeBases = ref<KnowledgeBase[]>([])
+const toolTreeRef = ref<any>(null)
+
+interface TreeNode {
+  id: string
+  label: string
+  description?: string
+  children?: TreeNode[]
+}
+
+const toolTreeData = computed<TreeNode[]>(() => {
+  const grouped = new Map<string, ToolOut[]>()
+  const ungrouped: TreeNode[] = []
+  for (const t of allTools.value) {
+    if (t.group) {
+      const arr = grouped.get(t.group) || []
+      arr.push(t)
+      grouped.set(t.group, arr)
+    } else {
+      ungrouped.push({ id: t.name, label: t.label, description: t.description })
+    }
+  }
+  const children: TreeNode[] = [...ungrouped]
+  for (const [g, tools] of [...grouped.entries()].sort()) {
+    children.push({
+      id: `__group_${g}__`,
+      label: g,
+      children: tools.map((t) => ({ id: t.name, label: t.label, description: t.description })),
+    })
+  }
+  return [{ id: '*', label: '全部工具', children }]
+})
+
+const toolExpandedKeys = computed(() => {
+  const root = toolTreeData.value[0]
+  return root ? [root.id] : []
+})
 
 // 编辑模式：回填
 watch(
@@ -44,6 +80,7 @@ watch(
         model: a.model,
         tools: [...a.tools],
         skills: [...a.skills],
+        kb_id: a.kb_id ?? null,
       }
     } else {
       form.value = {
@@ -53,8 +90,11 @@ watch(
         model: '',
         tools: [],
         skills: [],
+        kb_id: null,
       }
     }
+    // 同步树勾选状态（等 tree 渲染后）
+    nextTick(() => syncTreeFromForm())
   },
   { immediate: true },
 )
@@ -64,23 +104,40 @@ const isEdit = computed(() => !!props.agent?.id)
 // 加载可用模型、工具、技能
 async function loadOptions() {
   try {
-    const [m, toolsResp, skillsResp] = await Promise.all([
+    const [m, toolsResp, skillsResp, kbs] = await Promise.all([
       listModels(),
       listTools(),
       listSkills(),
+      listKnowledgeBases(),
     ])
     models.value = m
-    allTools.value = (toolsResp.items || []).map((t) => ({
-      name: t.name,
-      description: t.description || '',
-      type: t.type || 'tool',
-    }))
-    allSkills.value = (skillsResp.items || []).map((s) => ({
+    allTools.value = toolsResp || []
+    allSkills.value = (skillsResp || []).map((s) => ({
       name: s.name,
       description: s.description || '',
     }))
+    knowledgeBases.value = kbs
+    // options 加载完成后同步树（编辑模式下回填）
+    nextTick(() => syncTreeFromForm())
   } catch {
     // 静默失败
+  }
+}
+
+// 树勾选 → 同步到 form.tools（只存叶子节点工具名）
+function syncFormFromTree() {
+  const tree = toolTreeRef.value
+  if (!tree) return
+  form.value.tools = (tree.getCheckedKeys() as string[])
+    .filter((k) => k !== '*' && !k.startsWith('__group_'))
+}
+
+// form.tools → 同步到树勾选
+function syncTreeFromForm() {
+  const tree = toolTreeRef.value
+  if (!tree) return
+  for (const t of form.value.tools) {
+    tree.setChecked(t, true, false)
   }
 }
 
@@ -162,27 +219,23 @@ async function handleSave() {
       </el-form-item>
 
       <el-form-item label="工具">
-        <el-select
-          v-model="form.tools"
-          multiple
-          filterable
-          allow-create
-          default-first-option
-          placeholder="选择工具"
-          style="width: 100%"
+        <el-tree
+          ref="toolTreeRef"
+          :data="toolTreeData"
+          show-checkbox
+          node-key="id"
+          :default-expanded-keys="toolExpandedKeys"
+          :props="{ children: 'children', label: 'label' }"
+          class="tool-tree"
+          @check="syncFormFromTree"
         >
-          <el-option label="* 全部工具" value="*" />
-          <el-option
-            v-for="t in allTools"
-            :key="t.name"
-            :label="t.type === 'workflow' ? `⚡ ${t.name}` : t.name"
-            :value="t.name"
-          >
-            <span>{{ t.name }}</span>
-            <span v-if="t.type === 'workflow'" class="opt-badge workflow-badge">workflow</span>
-            <span class="opt-desc">{{ t.description || '暂无描述' }}</span>
-          </el-option>
-        </el-select>
+          <template #default="{ node, data }">
+            <span class="tree-node">
+              <span>{{ data.label }}</span>
+              <span v-if="data.description" class="tree-desc">{{ data.description }}</span>
+            </span>
+          </template>
+        </el-tree>
       </el-form-item>
 
       <el-form-item label="技能">
@@ -208,6 +261,25 @@ async function handleSave() {
         </el-select>
       </el-form-item>
 
+      <el-form-item label="知识库">
+        <el-select
+          v-model="form.kb_id"
+          placeholder="不关联知识库"
+          clearable
+          style="width: 100%"
+        >
+          <el-option
+            v-for="kb in knowledgeBases"
+            :key="kb.id"
+            :label="kb.name"
+            :value="kb.id"
+          >
+            <span>{{ kb.name }}</span>
+            <span v-if="kb.description" class="opt-desc">{{ kb.description }}</span>
+          </el-option>
+        </el-select>
+      </el-form-item>
+
       <el-form-item>
         <el-button type="primary" :loading="saving" @click="handleSave">
           {{ isEdit ? '保存修改' : '创建 Agent' }}
@@ -221,6 +293,31 @@ async function handleSave() {
 .agent-form {
   padding: 16px 0;
 }
+
+.tool-tree {
+  width: 100%;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.tree-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.tree-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 </style>
 
 <style>
@@ -235,20 +332,5 @@ async function handleSave() {
   white-space: nowrap;
   display: inline-block;
   vertical-align: bottom;
-}
-
-.opt-badge {
-  margin-left: 6px;
-  padding: 0 5px;
-  font-size: 10px;
-  border-radius: 3px;
-  vertical-align: middle;
-  line-height: 1.6;
-}
-
-.workflow-badge {
-  background: rgba(120, 100, 255, 0.12);
-  color: #7c6aff;
-  border: 1px solid rgba(120, 100, 255, 0.25);
 }
 </style>

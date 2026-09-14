@@ -25,6 +25,7 @@ const runsStore = useRunsStore()
       <router-link to="/pipelines" class="nav-link" :class="{ active: route.name === 'pipelines' }">工作流</router-link>
       <router-link to="/plugins" class="nav-link" :class="{ active: route.name === 'plugins' }">节点类型</router-link>
       <router-link to="/agents" class="nav-link" :class="{ active: route.name === 'agents' || route.name === 'agent-chat' }">智能体</router-link>
+      <router-link to="/knowledge" class="nav-link" :class="{ active: route.name === 'knowledge' }">知识库</router-link>
     </nav>
     <router-view />
   </div>

@@ -37,6 +37,8 @@ class ToolDef:
     name: str
     func: Callable[..., Any]
     description: str = ""
+    label: str = ""
+    group: str = ""
     params: list[ParamDef] = field(default_factory=list)
 
 
@@ -47,14 +49,16 @@ TOOL_REGISTRY: dict[str, ToolDef] = {}
 def tool(
     name: str | None = None,
     description: str = "",
+    label: str = "",
+    group: str = "",
     params: dict[str, str] | None = None,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[Callable[..., Any]], Callable[...,[Any]]]:
     """工具注册装饰器：将异步函数注册为可被 LLM 调用的工具。
 
     用法::
 
         @tool(name="get_weather", description="查询城市天气",
-              params={"city": "城市名称，如北京、上海"})
+              group="utils", params={"city": "城市名称，如北京、上海"})
         async def get_weather(city: str) -> str:
             return f"{city}：晴，25°C"
 
@@ -79,7 +83,7 @@ def tool(
                 ))
         except Exception as exc:
             logger.warning("工具 %s 参数解析失败：%s", tool_name, exc)
-        td = ToolDef(name=tool_name, func=func, description=description, params=param_defs)
+        td = ToolDef(name=tool_name, func=func, description=description, label=label, group=group, params=param_defs)
         TOOL_REGISTRY[tool_name] = td
         setattr(func, "__tool_def__", td)
         return func

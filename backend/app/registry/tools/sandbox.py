@@ -15,6 +15,7 @@ DOCKER_PACKAGES_PATH = "/opt/packages"
 
 
 @tool(description="在沙箱中安装 Python 包。run_code 报 ModuleNotFoundError 时用此工具安装缺失包",
+      label="依赖安装",
       params={"packages": "要安装的包名，空格分隔，如 'scipy scikit-learn'"})
 async def pip_install(packages: str) -> str:
     """在沙箱中 pip install，安装到持久化卷，后续 run_code 可用。"""
@@ -40,6 +41,7 @@ async def pip_install(packages: str) -> str:
 
 
 @tool(description="执行 Python 代码并返回输出。如需保存文件，写入 /uploads 目录。",
+      label="代码执行",
       params={"code": "要执行的 Python 代码"})
 async def run_code(code: str, timeout: int = 60) -> str:
     """在 Docker 沙箱中执行 Python 代码，返回 stdout 和 stderr。"""

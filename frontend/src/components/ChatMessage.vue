@@ -8,6 +8,7 @@ marked.use({ async: false })
 
 const props = defineProps<{
   message: ChatMessage
+  toolLabels?: Record<string, string>
 }>()
 
 const showProcess = ref(false)
@@ -119,7 +120,7 @@ function formatContent(text: string): string {
                 >
                   <div class="step-header">
                     <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
-                    <span class="step-name">{{ step.tool_name }}</span>
+                    <span class="step-name">{{ toolLabels?.[step.tool_name] || step.tool_name }}</span>
                     <span class="step-duration" v-if="step.duration_ms != null">耗时：{{ formatDuration(step.duration_ms) }}</span>
                   </div>
                   <div v-if="step.arguments || step.output" class="step-detail">

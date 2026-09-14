@@ -18,6 +18,7 @@ class _AgentBody(BaseModel):
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    kb_id: int | None = None
 
 
 class AgentCreate(_AgentBody):

@@ -19,6 +19,7 @@ class AgentRecord(SQLModel, table=True):
     model: str = ""  # provider:model 格式，空则用全局默认
     tools: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     skills: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    kb_id: int | None = Field(default=None, foreign_key="knowledge_bases.id")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None, sa_column_kwargs={"onupdate": datetime.now})
 
