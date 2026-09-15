@@ -14,7 +14,7 @@ import re
 from html import unescape
 from typing import Any
 
-from app.registry.node_type import NodeGroup, node_type
+from app.registry.node_type import node_type
 from app.utils.http import http_client
 
 _URL_RE = re.compile(r"""https?://[^\s<>"')\]]+""")
@@ -61,7 +61,7 @@ async def _fetch_page(url: str) -> dict[str, str]:
 @node_type(
     label="抓取链接正文",
     description="从输入中提取 http(s) 链接并发抓取网页正文",
-    group=NodeGroup.WEB,
+    metadata={"group": "网络", "order": 10},
     input_schema={
         "prompt": {"type": "string", "required": False, "description": "含 URL 的文本"},
     },
@@ -98,7 +98,7 @@ async def web_fetch(ctx: dict[str, Any]) -> list[dict[str, str]]:
 @node_type(
     label="HTTP 请求",
     description="发送 HTTP 请求，返回状态码、响应头和响应体",
-    group=NodeGroup.WEB,
+    metadata={"group": "网络", "order": 20},
     input_schema={
         "url": {"type": "string", "required": True, "description": "请求 URL"},
         "method": {"type": "string", "required": False, "description": "HTTP 方法（默认 GET）"},

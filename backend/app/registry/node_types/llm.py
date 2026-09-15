@@ -7,12 +7,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.llm import llm_chat_call
-from app.registry.node_type import NodeGroup, node_type
+from app.registry.node_type import node_type
 
 
 @node_type(
     label="LLM 对话",
-    group=NodeGroup.LLM,
+    metadata={"group": "LLM", "order": 20},
     description="调用 LLM 模型生成回答，支持 Ollama / MiMo 等 OpenAI 兼容后端",
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "用户提示词"},
@@ -56,7 +56,7 @@ async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any]:
 @node_type(
     label="意图识别",
     description="通用意图分类器",
-    group=NodeGroup.LLM,
+    metadata={"group": "LLM", "order": 30},
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "待分类文本"},
         "model": {"type": "string", "required": False, "description": "模型名（provider:model 格式）"},

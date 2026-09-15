@@ -11,6 +11,7 @@ This naturally respects the DAG topology without a centralized scheduler.
 """
 
 import asyncio
+import inspect
 import logging
 import time
 from datetime import datetime
@@ -314,11 +315,20 @@ class DAGExecutor:
 
     async def _call(self, node: Node) -> Any:
         """Invoke *node.func* with timeout if configured.
+
+        Dispatch strategy:
+        - ``ctx`` parameter present → pass entire context dict (legacy / meta nodes)
+        - otherwise → map context keys to function's keyword arguments by name
         """
         target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
-        # target["_upstream"] = {d: self.ctx.get(d) for d in node.depends_on} if node.depends_on else {}
-        coro = node.func(target)
+
+        sig = inspect.signature(node.func)
+        if "ctx" in sig.parameters:
+            coro = node.func(target)
+        else:
+            kwargs = {p: target[p] for p in sig.parameters if p in target}
+            coro = node.func(**kwargs)
         if node.timeout is not None:
             return await asyncio.wait_for(coro, timeout=node.timeout)
         return await coro

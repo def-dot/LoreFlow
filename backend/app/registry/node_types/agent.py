@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.registry.node_type import NodeGroup, node_type
+from app.registry.node_type import node_type
 from app.services.llm import llm_chat_call
 from app.registry.tool import execute_tool_call
 from app.services.agent_tools import build_skill_prompt, build_tools
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 @node_type(
     label="智能代理",
     description="LLM 自动调用工具循环执行，直到无需工具或达到最大迭代次数",
-    group=NodeGroup.LLM,
+    metadata={"group": "LLM", "order": 10},
     input_schema={
         "prompt": {"type": "string", "required": True, "description": "用户提示词"},
         "system": {"type": "string", "required": False, "description": "系统提示词"},

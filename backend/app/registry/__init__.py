@@ -8,7 +8,7 @@ from .skills import SKILL_REGISTRY, SkillDef, discover_skills
 
 # 导入即触发注册
 from . import plugins  # noqa: F401
-from .node_types import base, llm, rag, web, agent, other, tool_executor  # noqa: F401
+from .node_types import base, llm, rag, web, agent, other  # noqa: F401
 from .tools import sandbox, skills as tool_skills, web as tool_web, knowledge as tool_knowledge  # noqa: F401
 
 __all__ = [

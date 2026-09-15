@@ -23,7 +23,7 @@ const builtinNodes = computed(() => {
 const builtinGroups = computed(() => {
   const map = new Map<string, NodeTypeInfo[]>()
   for (const t of builtinNodes.value) {
-    const g = t.group || '其他'
+    const g = t.metadata?.group || '其他'
     if (!map.has(g)) map.set(g, [])
     map.get(g)!.push(t)
   }

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
 
@@ -32,7 +31,7 @@ class NodeType:
     func: Callable[..., Any]
     label: str
     description: str
-    group: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict, hash=False)
     input_schema: dict[str, dict[str, Any]] | None = field(default=None, hash=False)
     output_schema: dict[str, Any] | None = field(default=None, hash=False)
 
@@ -42,21 +41,11 @@ class NodeType:
 REGISTRY: dict[str, NodeType] = {}
 
 
-class NodeGroup(StrEnum):
-    """节点分组"""
-
-    BASE = "基础"
-    WEB = "网络"
-    LLM = "LLM"
-    RAG = "RAG"
-    OTHER = "其他"
-
-
 def node_type(
     label: str,
     description: str,
     name: str | None = None,
-    group: str | None = None,
+    metadata: dict[str, Any] | None = None,
     input_schema: dict[str, dict[str, Any]] | None = None,
     output_schema: dict[str, Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -73,7 +62,7 @@ def node_type(
             func=func,
             label=label,
             description=description,
-            group=group,
+            metadata=metadata or {},
             input_schema=input_schema,
             output_schema=output_schema,
         )

@@ -4,7 +4,6 @@ from fastapi import APIRouter
 
 from app.core.response import UnifiedResponseRoute
 from app.registry import REGISTRY
-from app.registry.node_type import NodeGroup
 from app.schemas.node_types import NodeTypeListResponse, NodeTypeOut
 
 router = APIRouter(prefix="/node-types", route_class=UnifiedResponseRoute, tags=["node-types"])
@@ -12,15 +11,17 @@ router = APIRouter(prefix="/node-types", route_class=UnifiedResponseRoute, tags=
 
 @router.get("", response_model=NodeTypeListResponse)
 async def list_node_types() -> NodeTypeListResponse:
-    order = list(NodeGroup)
-    sorted_types = sorted(REGISTRY.values(), key=lambda t: order.index(t.group) if t.group in order else len(order))
+    sorted_types = sorted(
+        REGISTRY.values(),
+        key=lambda t: (t.metadata.get("group", ""), t.metadata.get("order", 999)),
+    )
     return NodeTypeListResponse(
         node_types=[
             NodeTypeOut(
                 name=t.name,
                 label=t.label,
                 description=t.description,
-                group=t.group,
+                metadata=t.metadata,
                 input_schema=t.input_schema,
                 output_schema=t.output_schema,
             )

@@ -4,13 +4,13 @@ from typing import Any
 import re
 import json
 
-from app.registry.node_type import NodeGroup, node_type
+from app.registry.node_type import node_type
 
 
 @node_type(
     label="内容发布",
     description="发布内容到小红书、抖音等社交平台",
-    group=NodeGroup.OTHER,
+    metadata={"group": "其他", "order": 10},
     input_schema={
         "title": {"type": "string", "required": False, "description": "发布标题"},
         "content": {"type": "string", "required": False, "description": "发布内容"},
@@ -27,7 +27,7 @@ _svc_calls = 0
 @node_type(
     label="调用外部API",
     description="外部 API 偶发超时",
-    group=NodeGroup.OTHER,
+    metadata={"group": "其他", "order": 20},
     input_schema={},
     output_schema={"type": "string", "description": "调用结果"},
 )
@@ -43,7 +43,7 @@ async def svc_external_api(ctx: dict[str, Any]) -> str:
 @node_type(
     label="外部服务不可用",
     description="外部 API 持续故障",
-    group=NodeGroup.OTHER,
+    metadata={"group": "其他", "order": 30},
     input_schema={},
     output_schema={"type": "string", "description": "调用结果"},
 )
