@@ -12,7 +12,7 @@ const route = useRoute()
 const router = useRouter()
 const store = useAgentsStore()
 
-const agentId = ref(Number(route.params.id))
+const agentId = computed(() => Number(route.params.id))
 const inputText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -21,12 +21,19 @@ const uploading = ref(false)
 const toolLabels = ref<Record<string, string>>({})
 
 // 加载 Agent、对话列表和工具标签
+async function loadAgent(id: number) {
+  await store.selectAgent(id)
+  await store.fetchConversations(id)
+}
+
 onMounted(async () => {
-  await store.selectAgent(agentId.value)
-  await store.fetchConversations(agentId.value)
+  await loadAgent(agentId.value)
   const tools = await listTools()
   toolLabels.value = Object.fromEntries(tools.map((t) => [t.name, t.label]))
 })
+
+// 切换 Agent 时重新加载
+watch(agentId, (id) => loadAgent(id))
 
 // 滚动到底部
 function scrollToBottom() {

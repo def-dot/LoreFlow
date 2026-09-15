@@ -110,6 +110,7 @@ function enterChat(agentId: number) {
         v-for="agent in store.agents"
         :key="agent.id"
         class="agent-card"
+        @click="enterChat(agent.id)"
       >
         <div class="card-header">
           <span class="agent-name">{{ agent.name }}</span>
@@ -134,7 +135,7 @@ function enterChat(agentId: number) {
           </div>
         </div>
 
-        <div class="card-actions">
+        <div class="card-actions" @click.stop>
           <el-button size="small" type="primary" @click="enterChat(agent.id)">
             对话
           </el-button>
@@ -190,6 +191,7 @@ function enterChat(agentId: number) {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 18px;
+  cursor: pointer;
   transition: border-color 0.2s;
 }
 .agent-card:hover {

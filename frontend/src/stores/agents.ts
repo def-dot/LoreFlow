@@ -90,6 +90,9 @@ export const useAgentsStore = defineStore('agents', {
 
     async selectAgent(id: number) {
       this.selectedAgent = await getAgent(id)
+      this.currentConversation = null
+      this.chatMessages = []
+      this.pendingNewConversation = false
     },
 
     async createAgent(data: AgentListItem) {
