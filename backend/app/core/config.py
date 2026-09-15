@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     DOCKER_FRONTEND_REPOSITORY: str = ""
     DOCKER_FRONTEND_TAG: str = ""
 
+    # Sandbox
+    SANDBOX_URL: str = "http://sandbox:8194"
+
     TAVILY_API_KEY: str = ""
 
     # 邮箱服务器

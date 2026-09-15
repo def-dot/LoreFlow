@@ -40,13 +40,13 @@ nodes:
     label: 格式化检索片段
     depends_on: [rag_retrieve]
     inputs:
-      chunks: $rag_retrieve
       script: |
-        if not isinstance(chunks, list) or not chunks:
-            result = "知识库中没有检索到相关内容。"
-        else:
+        def main(chunks):
+            if not isinstance(chunks, list) or not chunks:
+                return "知识库中没有检索到相关内容。"
             lines = [f"[{i}] {c.get('source', '')} {c.get('text', '')}" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]
-            result = "\n\n".join(lines)
+            return "\n\n".join(lines)
+      chunks: $rag_retrieve
 
   rag_answer:
     type: llm_chat
