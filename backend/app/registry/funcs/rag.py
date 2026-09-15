@@ -8,17 +8,15 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from app.registry.node_type import node_type
+from app.registry.types import func
 from app.utils import files
 
 
-@node_type(
+@func(
     label="加载文档",
     description="读取上传文档内容",
     metadata={"group": "RAG", "order": 10},
-    input_schema={
-        "document": {"type": "object", "required": True, "description": "上传文档"},
-    },
+    params={"document": "上传文档"},
     output_schema={
         "type": "object",
         "fields": {
@@ -27,14 +25,10 @@ from app.utils import files
         },
     },
 )
-async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
-    """从上传目录读取 params 声明的 document 文件
-    """
-    document = ctx.get("document")
+async def rag_load(document: dict) -> dict[str, Any]:
+    """从上传目录读取 params 声明的 document 文件"""
     if not isinstance(document, dict):
-        raise ValueError(
-            "缺少上传文档：document 必须是 {id, filename} 字段"
-        )
+        raise ValueError("缺少上传文档：document 必须是 {id, filename} 字段")
     upload_id = document.get("id")
     if not isinstance(upload_id, str) or not upload_id.strip():
         raise ValueError("上传文档缺少文件id字段：document.id")
@@ -46,30 +40,24 @@ async def rag_load(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"doc_name": stem, "text": text}
 
 
-@node_type(
+@func(
     label="切块",
     description="按空行把正文切成语义段",
     metadata={"group": "RAG", "order": 20},
-    input_schema={
-        "text": {"type": "string", "required": True, "description": "文档正文"},
-    },
+    params={"text": "文档正文"},
     output_schema={"type": "list", "item": {"type": "string"}, "description": "文本段"},
 )
-async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
-    text = ctx.get("text")
+async def rag_chunk(text: str) -> list[str]:
     if not isinstance(text, str) or not text.strip():
         raise ValueError("缺少文档正文字段text")
     return [p.strip() for p in text.split("\r\n\r\n") if p.strip()]
 
 
-@node_type(
+@func(
     label="向量化",
     description="为每个 chunk 生成向量",
     metadata={"group": "RAG", "order": 30},
-    input_schema={
-        "doc_name": {"type": "string", "required": True, "description": "文档名称"},
-        "chunks": {"type": "list", "required": True, "description": "文本段列表"},
-    },
+    params={"doc_name": "文档名称", "chunks": "文本段列表"},
     output_schema={
         "type": "list",
         "item": {
@@ -82,11 +70,9 @@ async def rag_chunk(ctx: dict[str, Any]) -> list[str]:
         },
     },
 )
-async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
-    doc_name = ctx.get("doc_name")
+async def rag_embed(doc_name: str, chunks: list) -> list[dict[str, Any]]:
     if not isinstance(doc_name, str) or not doc_name.strip():
         raise ValueError("缺少文档名称字段doc_name")
-    chunks = ctx.get("chunks")
     if not isinstance(chunks, list):
         raise ValueError("缺少切块信息字段chunks")
     return [
@@ -99,22 +85,17 @@ async def rag_embed(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-@node_type(
+@func(
     label="写入向量库",
     description="批量写入向量信息",
     metadata={"group": "RAG", "order": 40},
-    input_schema={
-        "doc_id": {"type": "string", "required": True, "description": "文档名称"},
-        "embeds": {"type": "list", "required": True, "description": "向量列表"},
-    },
+    params={"doc_name": "文档名称", "embeds": "向量列表"},
     output_schema={"type": "string", "description": "成功写库的向量数量统计"},
 )
-async def rag_upsert(ctx: dict[str, Any]) -> str:
+async def rag_upsert(doc_name: str = "", embeds: list | None = None) -> str:
     await asyncio.sleep(0.05)
-    doc_name = ctx.get("doc_name")
     if not isinstance(doc_name, str) or not doc_name.strip():
         raise ValueError("缺少文档名称字段doc_name")
-    embeds = ctx.get("embeds")
     if not isinstance(embeds, list):
         raise ValueError("缺少向量输出字段embeds")
     return f"upserted {len(embeds)} chunks from {doc_name}"
@@ -140,13 +121,11 @@ _MOCK_KB: list[dict[str, Any]] = [
 ]
 
 
-@node_type(
+@func(
     label="知识库检索",
     description="关键词查询返回片段",
     metadata={"group": "RAG", "order": 50},
-    input_schema={
-        "prompt": {"type": "string", "required": False, "description": "检索关键词"},
-    },
+    params={"prompt": "检索关键词"},
     output_schema={
         "type": "list",
         "item": {
@@ -158,8 +137,7 @@ _MOCK_KB: list[dict[str, Any]] = [
         },
     },
 )
-async def rag_retrieve(ctx: dict[str, Any]) -> list[dict[str, str]]:
+async def rag_retrieve(prompt: str = "") -> list[dict[str, str]]:
     await asyncio.sleep(0.05)
-    prompt = str(ctx.get("prompt", ""))
-    ranked = sorted(_MOCK_KB, key=lambda c: -sum(prompt.count(k) for k in c["keywords"]))
+    ranked = sorted(_MOCK_KB, key=lambda c: -sum(str(prompt).count(k) for k in c["keywords"]))
     return [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]

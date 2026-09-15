@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.registry import NodeType
+from app.registry import FuncDef
 from .types import RetryPolicy
 
 #: Signature for a node's async function: receives the shared context dict, returns anything.
@@ -83,8 +83,8 @@ class Node:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def node_type(self) -> NodeType | None:
-        return getattr(self.func, "__node_type__", None)
+    def node_type(self) -> FuncDef | None:
+        return getattr(self.func, "__func_def__", None)
 
     def __repr__(self) -> str:
         deps = ",".join(self.depends_on) if self.depends_on else "root"

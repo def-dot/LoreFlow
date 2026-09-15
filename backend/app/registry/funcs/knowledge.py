@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextvars
 import logging
 
-from app.registry.tool import tool
+from app.registry.types import func
 from app.services import knowledge
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ def reset_tool_kb_id(token: contextvars.Token) -> None:
     _tool_kb_ctx.reset(token)
 
 
-@tool(
+@func(
     name="ingest_kb_document",
     description=(
         "将上传的文档导入关联的知识库，切块并向量化，供后续检索使用。"
@@ -45,7 +45,7 @@ async def ingest_kb_document_tool(upload_id: str, filename: str) -> str:
         return f"文档导入失败：{exc}"
 
 
-@tool(
+@func(
     name="search_knowledge_base",
     description=(
         "从关联的知识库中检索与问题最相关的文档片段。"

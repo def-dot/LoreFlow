@@ -139,33 +139,29 @@ onMounted(fetchAll)
     <!-- 编写指南 drawer -->
     <el-drawer v-model="guideOpen" title="插件编写指南" size="min(560px, 90vw)">
       <div class="guide">
-        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@node_type</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可通过页面「上传插件」按钮上传。</p>
+        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@func</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可通过页面「上传插件」按钮上传。</p>
 
         <h4 class="guide-h4">示例</h4>
-        <pre class="guide-code">from app.registry import node_type
+        <pre class="guide-code">from app.registry import func
 
-@node_type(
+@func(
     label="发送通知",
     description="发送通知消息",
-    input_schema={
-        "message": {"type": "string", "required": True, "description": "消息内容"},
-        "channel": {"type": "string", "required": False, "description": "通知渠道"},
-    },
+    params={"message": "消息内容", "channel": "通知渠道"},
     output_schema={"type": "string", "description": "发送结果"},
 )
-async def send_notify(ctx: dict) -> str:
-    message = ctx.get("message", "")
-    channel = ctx.get("channel", "default")
+async def send_notify(message: str, channel: str = "default") -> str:
     # 你的业务逻辑
     return f"已发送至 {channel}"</pre>
 
         <h4 class="guide-h4">规则</h4>
         <ul class="guide-rules">
-          <li>函数必须是 <code>async def</code>，参数为 <code>ctx: dict</code></li>
-          <li><code>ctx</code> 是输入字典，通过 <code>ctx.get("字段名")</code> 取值</li>
+          <li>函数必须是 <code>async def</code></li>
+          <li>输入通过函数参数接收，参数名对应 YAML 中的 inputs 键</li>
+          <li>需要完整上下文时可用 <code>ctx: dict</code> 参数（特殊场景）</li>
         </ul>
 
-        <h4 class="guide-h4">@node_type 参数</h4>
+        <h4 class="guide-h4">@func 参数</h4>
         <table class="guide-table">
           <thead>
             <tr><th>参数</th><th>必填</th><th>说明</th></tr>
@@ -173,7 +169,7 @@ async def send_notify(ctx: dict) -> str:
           <tbody>
             <tr><td><code>label</code></td><td>是</td><td>显示名称</td></tr>
             <tr><td><code>description</code></td><td>是</td><td>节点类型功能描述</td></tr>
-            <tr><td><code>input_schema</code></td><td>否</td><td>输入参数声明，字典格式</td></tr>
+            <tr><td><code>params</code></td><td>否</td><td>参数描述，如 {"query": "搜索关键词"}（type/required 从函数签名自动推导）</td></tr>
             <tr><td><code>output_schema</code></td><td>否</td><td>输出结构声明</td></tr>
           </tbody>
         </table>

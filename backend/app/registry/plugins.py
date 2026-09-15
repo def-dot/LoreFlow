@@ -3,7 +3,7 @@
 - :func:`load_plugins` 启动时（lifespan）调用一次；坏文件跳过并记录
   error（本次加载全部撤销）
 
-插件文件只需用 ``@node`` 装饰器定义函数：导入即注册进 ``REGISTRY``。
+插件文件只需用 ``@func`` 装饰器定义函数：导入即注册进 ``REGISTRY``。
 只扫描目录顶层的 *.py（下划线前缀跳过），不支持子包。
 """
 
@@ -76,9 +76,9 @@ def _load(path: Path) -> None:
 
     if module:
         new_nodes = {
-            node_type.name
+            fd.name
             for value in vars(module).values()
-            if (node_type := getattr(value, "__node_type__", None)) is not None
+            if (fd := getattr(value, "__func_def__", None)) is not None
             and getattr(value, "__module__", None) == module.__name__
         }
         conflicts = set(new_nodes) & set(existed_nodes)

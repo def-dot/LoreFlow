@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any
 
-from app.registry.tool import TOOL_REGISTRY, ToolDef, ParamDef
+from app.registry.types import TOOL_REGISTRY, FuncDef, input_schema_to_openai
 from app.registry.skills import SKILL_REGISTRY
 
 
@@ -48,12 +48,12 @@ def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline → ToolDef 动态包装
+# Pipeline → FuncDef 动态包装
 # ---------------------------------------------------------------------------
 
 
-def _resolve_pipeline_tool(name: str) -> ToolDef | None:
-    """如果 name 匹配一个 pipeline，返回包装后的 ToolDef；否则 None。"""
+def _resolve_pipeline_tool(name: str) -> FuncDef | None:
+    """如果 name 匹配一个 pipeline，返回包装后的 FuncDef；否则 None。"""
     from app.services import pipelines as pipeline_service
 
     try:
@@ -65,22 +65,22 @@ def _resolve_pipeline_tool(name: str) -> ToolDef | None:
     description = f"[workflow] {description}"
     params_cfg: dict[str, Any] = config.get("inputs") or {}
 
-    param_defs: list[ParamDef] = []
+    input_schema: dict[str, dict[str, Any]] = {}
     for pname, spec in params_cfg.items():
         if not isinstance(spec, dict):
             continue
-        param_defs.append(ParamDef(
-            name=pname,
-            param_type=spec.get("type", "string"),
-            description=spec.get("description") or "",
-            required=spec.get("required", True),
-        ))
+        input_schema[pname] = {
+            "type": spec.get("type", "string"),
+            "required": spec.get("required", True),
+        }
+        if spec.get("description"):
+            input_schema[pname]["description"] = spec["description"]
 
     async def _pipeline_wrapper(**kwargs: Any) -> str:
         return await _execute_pipeline(name, kwargs)
 
     _pipeline_wrapper.__name__ = name
-    return ToolDef(name=name, func=_pipeline_wrapper, description=description, params=param_defs)
+    return FuncDef(name=name, func=_pipeline_wrapper, description=description, input_schema=input_schema)
 
 
 async def _execute_pipeline(pipeline_name: str, inputs: dict[str, Any]) -> str:
@@ -115,20 +115,9 @@ async def _execute_pipeline(pipeline_name: str, inputs: dict[str, Any]) -> str:
     return json.dumps({"run_id": run_id, "error": "执行超时（5分钟）"}, ensure_ascii=False)
 
 
-def _tooldef_to_openai(td: ToolDef) -> dict[str, Any]:
-    """ToolDef → OpenAI function calling 格式。"""
-    schema: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
-    for p in td.params:
-        schema["properties"][p.name] = {
-            "type": p.param_type,
-            "description": p.description,
-        }
-        if p.required:
-            schema["required"].append(p.name)
-    return {
-        "type": "function",
-        "function": {"name": td.name, "description": td.description, "parameters": schema},
-    }
+def _tooldef_to_openai(td: FuncDef) -> dict[str, Any]:
+    """FuncDef → OpenAI function calling 格式。"""
+    return input_schema_to_openai(td)
 
 
 def build_skill_prompt(skill_names: list[str]) -> str | None:

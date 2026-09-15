@@ -28,7 +28,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Any
 
-from app.registry import NodeType
+from app.registry import FuncDef
 
 from .executor import DAGExecutor
 from .node import ApproverFunc, ConditionFunc, Node, NodeFunc, wired_ctx
@@ -253,8 +253,8 @@ class DAG:
         # 每次调用的闭包，不进全局 REGISTRY）—— to_mermaid 经 node_type 派生读取
         setattr(
             loop_func,
-            "__node_type__",
-            NodeType(name="loop", func=loop_func, label="循环", description="循环执行 body 子图直至条件不满足"),
+            "__func_def__",
+            FuncDef(name="loop", func=loop_func, label="循环", description="循环执行 body 子图直至条件不满足"),
         )
 
         node = Node(

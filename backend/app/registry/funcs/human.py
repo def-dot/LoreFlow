@@ -1,19 +1,17 @@
 import logging
 from typing import Any
 
-from app.registry.node_type import node_type
+from app.registry.types import func
 
 logger = logging.getLogger(__name__)
 
 
-@node_type(
+@func(
     label="人工审核",
     description="人工审核节点，暂停等待审批",
     name="human",
     metadata={"group": "基础", "order": 10},
-    input_schema={
-        "_review": {"type": "object", "required": False, "description": "审核卡片声明 {$键: 标签文本}"},
-    },
+    params={"_review": "审核卡片声明 {$键: 标签文本}"},
     output_schema={
         "type": "object",
         "fields": {
@@ -29,30 +27,27 @@ logger = logging.getLogger(__name__)
         },
     },
 )
-async def human_review(ctx: dict[str, Any]) -> dict[str, Any]:
+async def human_review(_approver: Any, _node: str, _review: dict | None = None, **kwargs: Any) -> dict[str, Any]:
     """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。
     """
-    approver = ctx.get("_approver")
-    if approver is None:
+    if _approver is None:
         raise ValueError("人工审核节点缺少 approver —— dag.run(approver=...) 未提供")
-    name = ctx["_node"]  # approver 按节点领取决策
-    review = ctx.get("_review")
-    if isinstance(review, dict) and review:
+    if isinstance(_review, dict) and _review:
         # 卡片键带 $ 引用前缀（声明层约定）；载荷与决策字段用剥前缀后的裸键
-        fields = {k.removeprefix("$"): ctx.get(k.removeprefix("$")) for k in review}
-        payload: dict[str, Any] = {**fields, "_review": {k.removeprefix("$"): v for k, v in review.items()}}
+        fields = {k.removeprefix("$"): kwargs.get(k.removeprefix("$")) for k in _review}
+        payload: dict[str, Any] = {**fields, "_review": {k.removeprefix("$"): v for k, v in _review.items()}}
     else:
-        payload = {k: v for k, v in ctx.items() if not k.startswith("_")}
+        payload = dict(kwargs)
 
-    logger.info(f"\n  [REVIEW] node {name!r} is waiting for human approval")
+    logger.info(f"\n  [REVIEW] node {_node!r} is waiting for human approval")
 
-    decision = await approver(name, payload)
+    decision = await _approver(_node, payload)
     if decision.get("approve"):
-        logger.info("[%s] approved by human reviewer", name)
+        logger.info("[%s] approved by human reviewer", _node)
         return {"payload": payload, "decision": decision}
 
     from app.engine.node import HumanRejected
 
     reason = f"人工审核拒绝：{decision.get("reason")}"
-    logger.warning("[%s] REJECTED by human reviewer: %s", name, reason)
+    logger.warning("[%s] REJECTED by human reviewer: %s", _node, reason)
     raise HumanRejected(reason, output={"payload": payload, "decision": decision})

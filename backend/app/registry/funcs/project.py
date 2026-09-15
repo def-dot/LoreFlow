@@ -13,7 +13,7 @@ from sqlalchemy import cast, String
 from app.core.database import AsyncSessionLocal
 from app.models.agent import AgentRecord, ConversationRecord, MessageRecord
 from app.models.run import RunRecord
-from app.registry.tool import tool
+from app.registry.types import func
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _serialize_row(row: Any) -> dict[str, Any]:
     return data
 
 
-@tool(
+@func(
     name="query_database",
     description=(
         "通用数据库查询工具。可查询 agents、conversations、messages、runs 四张表。"

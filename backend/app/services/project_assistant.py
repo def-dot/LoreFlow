@@ -20,7 +20,7 @@ _PROMPT = """\
 async def ensure_project_assistant() -> None:
     from sqlmodel import select
 
-    from app.registry.tool import TOOL_REGISTRY
+    from app.registry.types import TOOL_REGISTRY
 
     async with AsyncSessionLocal() as session:
         existing = (
@@ -32,7 +32,7 @@ async def ensure_project_assistant() -> None:
             return
         tools = [
             name for name, td in TOOL_REGISTRY.items()
-            if td.group in ("数据库MCP", "文件系统MCP", "系统监控MCP")
+            if td.metadata.get("group") in ("数据库MCP", "文件系统MCP", "系统监控MCP")
         ]
         agent = AgentRecord(
             name="系统小助手",

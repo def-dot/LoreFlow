@@ -2,21 +2,18 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 
-from app.registry import node_type
+from app.registry import func
 
 
-@node_type(
+@func(
     label="发送邮件",
     description="通过 SMTP 发送邮件",
-    input_schema={
-        "to": {"type": "string", "required": True, "description": "收件人邮箱"},
-        "subject": {"type": "string", "required": False, "description": "邮件主题"},
-        "body": {"type": "string", "required": False, "description": "邮件正文"},
-    },
+    params={"to": "收件人邮箱", "subject": "邮件主题", "body": "邮件正文"},
     output_schema={"type": "string", "description": "发送结果"},
+    tool=False,
 )
-async def send_email(ctx: dict) -> str:
-    """动作节点：从 ctx 读取收件人、主题、正文，发送邮件。
+async def send_email(to: str, subject: str = "(无主题)", body: str = "") -> str:
+    """动作节点：发送邮件。
 
     YAML 接线示例：
         inputs:
@@ -24,9 +21,6 @@ async def send_email(ctx: dict) -> str:
           subject: "审核结果通知"
           body: $llm_chat
     """
-    to = str(ctx.get("to", ""))
-    subject = str(ctx.get("subject", "(无主题)"))
-    body = str(ctx.get("body", ""))
 
     host = os.getenv("SMTP_HOST", "smtp.example.com")
     port = int(os.getenv("SMTP_PORT", "465"))
@@ -49,17 +43,15 @@ async def send_email(ctx: dict) -> str:
     return f"邮件已发送至 {to}"
 
 
-@node_type(
+@func(
     label="发送短信",
     description="通过 HTTP API 发送短信",
-    input_schema={
-        "phone": {"type": "string", "required": True, "description": "手机号"},
-        "content": {"type": "string", "required": False, "description": "短信内容"},
-    },
+    params={"phone": "手机号", "content": "短信内容"},
     output_schema={"type": "string", "description": "发送结果"},
+    tool=False,
 )
-async def send_message(ctx: dict) -> str:
-    """动作节点：从 ctx 读取手机号和内容，调用短信 API。
+async def send_message(phone: str, content: str = "") -> str:
+    """动作节点：调用短信 API。
 
     YAML 接线示例：
         inputs:
@@ -67,9 +59,6 @@ async def send_message(ctx: dict) -> str:
           content: $llm_chat
     """
     import httpx
-
-    phone = str(ctx.get("phone", ""))
-    content = str(ctx.get("content", ""))
 
     api_url = os.getenv("SMS_API_URL", "")
     api_key = os.getenv("SMS_API_KEY", "")

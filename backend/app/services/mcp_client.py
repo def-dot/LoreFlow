@@ -11,26 +11,26 @@ from typing import Any
 import yaml
 from mcp import ClientSession
 
-from app.registry.tool import TOOL_REGISTRY, ParamDef, ToolDef
+from app.registry.types import TOOL_REGISTRY, FuncDef
 
 logger = logging.getLogger(__name__)
 
 _stacks: list[AsyncExitStack] = []
 
 
-def _schema_to_params(schema: dict[str, Any]) -> list[ParamDef]:
-    """将 JSON Schema properties 转换为 ParamDef 列表。"""
+def _schema_to_input_schema(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """将 JSON Schema properties 转换为 input_schema 格式。"""
     props = schema.get("properties", {})
     required = set(schema.get("required", []))
-    return [
-        ParamDef(
-            name=pname,
-            param_type=pschema.get("type", "string"),
-            description=pschema.get("description", ""),
-            required=pname in required,
-        )
-        for pname, pschema in props.items()
-    ]
+    result: dict[str, dict[str, Any]] = {}
+    for pname, pschema in props.items():
+        field_def: dict[str, Any] = {"type": pschema.get("type", "string")}
+        if pname in required:
+            field_def["required"] = True
+        if pschema.get("description"):
+            field_def["description"] = pschema["description"]
+        result[pname] = field_def
+    return result
 
 
 async def _connect_server(server_cfg: dict[str, Any]) -> None:
@@ -80,12 +80,12 @@ async def _connect_server(server_cfg: dict[str, Any]) -> None:
                     return output
                 return _call
 
-            td = ToolDef(
+            td = FuncDef(
                 name=t.name,
                 func=_make_call(session, t.name),
                 description=t.description or "",
-                group=name,
-                params=_schema_to_params(t.inputSchema),
+                metadata={"group": name},
+                input_schema=_schema_to_input_schema(t.inputSchema),
             )
             TOOL_REGISTRY[t.name] = td
             registered += 1

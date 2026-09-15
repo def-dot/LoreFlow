@@ -20,8 +20,8 @@ from sqlmodel import select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.agent import AgentRecord, MessageRecord
-from app.registry.tool import execute_tool_call
-from app.registry.tools.knowledge import set_tool_kb_id, reset_tool_kb_id
+from app.registry.types import execute_tool_call
+from app.registry.funcs.knowledge import set_tool_kb_id, reset_tool_kb_id
 from app.services.agent_tools import build_tools, build_skill_prompt
 from app.services.llm import llm_chat_stream
 

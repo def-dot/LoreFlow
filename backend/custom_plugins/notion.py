@@ -1,12 +1,12 @@
-from app.registry import node_type
+from app.registry import func
 
-@node_type(
+
+@func(
     label="查询notion笔记",
     description="搜索我的notion笔记",
-    input_schema={
-        "prompt": {"type": "string", "required": True, "description": "搜索关键字"},
-    },
+    params={"prompt": "搜索关键字"},
     output_schema={"type": "string", "description": "查询结果"},
+    tool=False,
 )
-async def search_notion(ctx: dict) -> str:
+async def search_notion(prompt: str) -> str:
     return "查询到N条数据"

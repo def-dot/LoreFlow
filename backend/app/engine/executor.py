@@ -328,6 +328,9 @@ class DAGExecutor:
             coro = node.func(target)
         else:
             kwargs = {p: target[p] for p in sig.parameters if p in target}
+            has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+            if has_var_kw:
+                kwargs.update({k: v for k, v in target.items() if k not in kwargs and not k.startswith("_")})
             coro = node.func(**kwargs)
         if node.timeout is not None:
             return await asyncio.wait_for(coro, timeout=node.timeout)

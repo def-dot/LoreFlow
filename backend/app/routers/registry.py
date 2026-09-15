@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.core.response import UnifiedResponseRoute
 from app.registry.skills import SKILL_REGISTRY
-from app.registry.tool import TOOL_REGISTRY
+from app.registry.types import TOOL_REGISTRY
 from app.schemas.registry import RegistryItemOut, ToolOut
 from app.services.llm import list_models
 
@@ -19,7 +19,7 @@ async def list_skills() -> list[RegistryItemOut]:
 @router.get("/tools", response_model=list[ToolOut])
 async def list_tools() -> list[ToolOut]:
     return [
-        ToolOut(name=t.name, label=t.label or t.name, description=t.description, group=t.group)
+        ToolOut(name=t.name, label=t.label or t.name, description=t.description, group=t.metadata.get("group", ""))
         for t in TOOL_REGISTRY.values()
     ]
 

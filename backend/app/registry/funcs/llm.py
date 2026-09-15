@@ -7,23 +7,19 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.llm import llm_chat_call
-from app.registry.node_type import node_type
+from app.registry.types import func
 
 
-@node_type(
+@func(
     label="LLM 对话",
     metadata={"group": "LLM", "order": 20},
     description="调用 LLM 模型生成回答，支持 Ollama / MiMo 等 OpenAI 兼容后端",
-    input_schema={
-        "prompt": {"type": "string", "required": True, "description": "用户提示词"},
-        "system": {"type": "string", "required": False, "description": "系统提示词"},
-        "context": {"type": "string", "required": False, "description": "上下文"},
-        "model": {"type": "string", "required": False, "description": "模型名"},
-        "tools": {
-            "type": "list",
-            "required": False,
-            "description": "工具定义列表（OpenAI function calling 格式）",
-        },
+    params={
+        "prompt": "用户提示词",
+        "system": "系统提示词",
+        "context": "上下文",
+        "model": "模型名",
+        "tools": "工具定义列表（OpenAI function calling 格式）",
     },
     output_schema={
         "type": "object",
@@ -36,32 +32,33 @@ from app.registry.node_type import node_type
         },
     },
 )
-async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any]:
-    prompt = ctx.get("prompt")
+async def llm_chat(
+    prompt: str,
+    system: str | None = None,
+    context: str | None = None,
+    model: str | None = None,
+    tools: list | None = None,
+) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
     messages: list[dict[str, str]] = []
-    system = ctx.get("system")
-    context = ctx.get("context")
     if isinstance(context, str) and context.strip():
         prompt = f"参考资料：\n{context}\n\n用户问题：{prompt}"
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    model = ctx.get("model") or None
-    tools = ctx.get("tools") if isinstance(ctx.get("tools"), list) else None
-    return await llm_chat_call(model, messages, tools=tools)
+    return await llm_chat_call(model, messages, tools=tools if isinstance(tools, list) else None)
 
 
-@node_type(
+@func(
     label="意图识别",
     description="通用意图分类器",
     metadata={"group": "LLM", "order": 30},
-    input_schema={
-        "prompt": {"type": "string", "required": True, "description": "待分类文本"},
-        "model": {"type": "string", "required": False, "description": "模型名（provider:model 格式）"},
-        "classify_system": {"type": "string", "required": False, "description": "分类系统提示词"},
-        "classify_labels": {"type": "list", "item": {"type": "string"}, "required": False, "description": "可选标签列表"},
+    params={
+        "prompt": "待分类文本",
+        "model": "模型名（provider:model 格式）",
+        "classify_system": "分类系统提示词",
+        "classify_labels": "可选标签列表",
     },
     output_schema={
         "type": "object",
@@ -70,14 +67,17 @@ async def llm_chat(ctx: dict[str, Any]) -> dict[str, Any]:
         },
     },
 )
-async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
-    prompt = ctx.get("prompt")
+async def llm_classify(
+    prompt: str,
+    model: str | None = None,
+    classify_system: str | None = None,
+    classify_labels: list[str] | None = None,
+) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串")
 
-    system = ctx.get("classify_system")
-    if not isinstance(system, str) or not system.strip():
-        system = (
+    if not isinstance(classify_system, str) or not classify_system.strip():
+        classify_system = (
             "你是意图分类器，只允许输出以下标签之一，"
             "禁止输出其他任何内容（包括标点、解释或其他语言）：\n"
             "chat —— 问候、闲聊、创作、翻译等无需查询资料的请求\n"
@@ -86,14 +86,12 @@ async def llm_classify(ctx: dict[str, Any]) -> dict[str, Any]:
             "human —— 需要转人工客服"
         )
 
-    labels = ctx.get("classify_labels")
-    if not isinstance(labels, list) or not labels:
-        labels = ["chat", "rag", "search", "human"]
+    if not isinstance(classify_labels, list) or not classify_labels:
+        classify_labels = ["chat", "rag", "search", "human"]
 
-    model = ctx.get("model") or None
     raw = await llm_chat_call(
         model,
-        [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        [{"role": "system", "content": classify_system}, {"role": "user", "content": prompt}],
     )
     text = raw["content"].strip().strip('"').lower()
     return {"intent": text, "raw": raw["content"].strip()}

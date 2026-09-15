@@ -1,10 +1,10 @@
 """技能工具。"""
 
-from app.registry.tool import tool
+from app.registry.types import func
 from app.registry.skills import SKILL_REGISTRY
 
 
-@tool(description="加载技能的完整指令", label="加载技能", params={"name": "技能名称"})
+@func(description="加载技能的完整指令", label="加载技能", params={"name": "技能名称"})
 async def load_skill(name: str) -> str:
     sd = SKILL_REGISTRY.get(name)
     if not sd:
