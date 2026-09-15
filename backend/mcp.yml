@@ -9,8 +9,8 @@
 servers:
   - name: 系统监控MCP
     transport: stdio
-    command: python
-    args: ["backend/mcp_servers/system_monitor.py", "--logs-dir", "backend/logs"]
+    command: uv
+    args: ["run", "python", "app/mcps/system_monitor.py"]
 
   - name: 文件系统MCP
     transport: stdio
