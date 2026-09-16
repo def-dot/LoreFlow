@@ -27,6 +27,7 @@ from .types import (
     func,
     input_schema_to_dict,
     input_schema_to_openai,
+    output_schema_to_dict,
     unregister,
     unregister_tool,
 )
@@ -46,5 +47,7 @@ __all__ = [
     "unregister",
     "unregister_tool",
     # 格式转换
+    "input_schema_to_dict",
     "input_schema_to_openai",
+    "output_schema_to_dict",
 ]

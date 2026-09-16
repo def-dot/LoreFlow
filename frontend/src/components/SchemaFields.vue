@@ -1,27 +1,89 @@
 <script setup lang="ts">
-import type { SchemaField } from '@/api/nodeTypes'
+import type { JsonSchema } from '@/api/nodeTypes'
 
-defineProps<{
-  fields: Record<string, SchemaField>
+const props = defineProps<{
+  schema: JsonSchema
+  /** 顶层 $defs，递归时始终保持根引用 */
+  defs?: Record<string, JsonSchema>
   depth?: number
 }>()
 
-function typeLabel(field: SchemaField): string {
-  if (field.type === 'list' && field.item) return `list[${field.item.type}]`
-  return field.type
+const rootDefs = () => props.defs ?? props.schema.$defs
+
+function resolveRef(schema: JsonSchema): JsonSchema {
+  if (!schema.$ref) return schema
+  const defs = rootDefs()
+  if (!defs) return schema
+  const name = schema.$ref.replace(/^#\/\$defs\//, '')
+  return defs[name] ?? schema
+}
+
+function unwrap(schema: JsonSchema): JsonSchema {
+  if (schema.anyOf) {
+    const nonNull = schema.anyOf.filter(s => s.type !== 'null')
+    if (nonNull.length === 1) {
+      // Preserve outer fields (description, title, default) that live on
+      // the anyOf wrapper but not inside the remaining branch.
+      return { ...schema, ...nonNull[0], anyOf: undefined }
+    }
+  }
+  return schema
+}
+
+function effective(schema: JsonSchema): JsonSchema {
+  let s = unwrap(schema)
+  if (s.$ref) s = resolveRef(s)
+  // 解引用后再 unwrap（$ref 目标可能带 anyOf）
+  s = unwrap(s)
+  return s
+}
+
+function isRequired(name: string): boolean {
+  return props.schema.required?.includes(name) ?? false
+}
+
+function typeLabel(field: JsonSchema): string {
+  const f = effective(field)
+  if (f.type === 'array' && f.items) return `list[${effective(f.items).type ?? '?'}]`
+  return f.type ?? '?'
+}
+
+function isObject(field: JsonSchema): boolean {
+  const f = effective(field)
+  return f.type === 'object' && !!f.properties
+}
+
+function isObjectArray(field: JsonSchema): boolean {
+  const f = effective(field)
+  return f.type === 'array' && !!f.items && !!effective(f.items!).properties
 }
 </script>
 
 <template>
-  <div v-for="(field, key) in fields" :key="key" class="sf-row" :style="{ marginLeft: depth ? '14px' : '0' }">
+  <div
+    v-for="(field, key) in schema.properties"
+    :key="key"
+    class="sf-row"
+    :style="{ marginLeft: depth ? '14px' : '0' }"
+  >
     <div class="sf-field">
       <span class="sf-key">{{ key }}</span>
       <span class="sf-type">{{ typeLabel(field) }}</span>
-      <span v-if="field.required" class="sf-req">*</span>
-      <span v-if="field.description" class="sf-desc">{{ field.description }}</span>
+      <span v-if="isRequired(String(key))" class="sf-req">*</span>
+      <span v-if="effective(field).description" class="sf-desc">{{ effective(field).description }}</span>
     </div>
-    <SchemaFields v-if="field.type === 'object' && field.fields" :fields="field.fields" :depth="(depth ?? 0) + 1" />
-    <SchemaFields v-else-if="field.type === 'list' && field.item?.fields" :fields="field.item.fields" :depth="(depth ?? 0) + 1" />
+    <SchemaFields
+      v-if="isObject(field)"
+      :schema="effective(field)"
+      :defs="rootDefs()"
+      :depth="(depth ?? 0) + 1"
+    />
+    <SchemaFields
+      v-else-if="isObjectArray(field)"
+      :schema="effective(effective(field).items!)"
+      :defs="rootDefs()"
+      :depth="(depth ?? 0) + 1"
+    />
   </div>
 </template>
 

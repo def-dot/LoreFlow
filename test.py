@@ -1,17 +1,27 @@
-def create_functions():
-    funcs = []
-    for i in range(3):
-        # 定义内部函数并放入列表
-        def func():
-            return i  # 闭包引用了外部循环变量 i
-        funcs.append(func)
-    return funcs
+from pydantic import BaseModel, Field
+from typing import Optional
+import json
 
-# 获取生成的 3 个函数
-f0, f1, f2 = create_functions()
+class WebSearchItem(BaseModel):
+    title: str = Field(description="结果标题")
+    url: str = Field(description="结果链接")
+    content: str = Field(description="结果摘要")
+    
+class WebSearchOutput(BaseModel):
+    result: list[WebSearchItem] = Field(description="搜索结果列表")
 
-# 预期输出: 0, 1, 2
-# 实际输出: 2, 2, 2
-print(f0())  # 2
-print(f1())  # 2
-print(f2())  # 2
+# ====================
+# 直接对【类】进行序列化
+# ====================
+
+# 1. 获取该类的 JSON Schema（返回的是 Python 字典）
+schema_dict = WebSearchOutput.model_json_schema()
+
+# print("--- JSON Schema 字典 ---")
+# print(schema_dict)
+
+# 2. 如果需要将其序列化为标准 JSON 字符串
+schema_json_str = json.dumps(schema_dict, ensure_ascii=False, indent=2)
+
+print("\n--- JSON Schema 字符串 ---")
+print(schema_json_str)

@@ -1,11 +1,16 @@
 import { api } from './request'
 
-export interface SchemaField {
-  type: string
+export interface JsonSchema {
+  type?: string
+  title?: string
   description?: string
-  required?: boolean
-  fields?: Record<string, SchemaField>
-  item?: SchemaField
+  properties?: Record<string, JsonSchema>
+  required?: string[]
+  items?: JsonSchema
+  anyOf?: JsonSchema[]
+  $ref?: string
+  $defs?: Record<string, JsonSchema>
+  default?: unknown
 }
 
 export interface NodeTypeInfo {
@@ -14,10 +19,10 @@ export interface NodeTypeInfo {
   label: string
   description: string
   metadata?: Record<string, any>
-  input_schema?: Record<string, SchemaField> | null
-  output_schema?: SchemaField | null
+  input_schema?: JsonSchema | null
+  output_schema?: JsonSchema | null
 }
 
-export function listNodeTypes(): Promise<{ node_types: NodeTypeInfo[] }> {
+export function listNodeTypes(): Promise<NodeTypeInfo[]> {
   return api.get('/node-types')
 }

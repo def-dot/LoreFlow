@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { NodeTypeInfo } from '@/api/nodeTypes'
+import type { JsonSchema, NodeTypeInfo } from '@/api/nodeTypes'
 import SchemaFields from './SchemaFields.vue'
 
 defineProps<{
@@ -7,9 +7,9 @@ defineProps<{
   variant?: 'func' | 'plugin'
 }>()
 
-function outputType(schema: NonNullable<NodeTypeInfo['output_schema']>): string {
-  if (schema.type === 'list' && schema.item) return `list[${schema.item.type}]`
-  return schema.type
+function outputType(schema: JsonSchema): string {
+  if (schema.type === 'array' && schema.items) return `list[${schema.items.type ?? '?'}]`
+  return schema.type ?? '?'
 }
 </script>
 
@@ -21,9 +21,9 @@ function outputType(schema: NonNullable<NodeTypeInfo['output_schema']>): string 
     </div>
     <p class="node-desc">{{ node.description }}</p>
 
-    <div v-if="node.input_schema && Object.keys(node.input_schema).length" class="schema-section">
+    <div v-if="node.input_schema?.properties && Object.keys(node.input_schema.properties).length" class="schema-section">
       <h3 class="schema-title">输入</h3>
-      <SchemaFields :fields="node.input_schema" />
+      <SchemaFields :schema="node.input_schema" />
     </div>
     <div v-else class="schema-section">
       <h3 class="schema-title">输入</h3>
@@ -32,12 +32,12 @@ function outputType(schema: NonNullable<NodeTypeInfo['output_schema']>): string 
 
     <div v-if="node.output_schema" class="schema-section">
       <h3 class="schema-title">输出</h3>
-      <SchemaFields v-if="node.output_schema.fields" :fields="node.output_schema.fields" />
-      <template v-else-if="node.output_schema.type === 'list' && node.output_schema.item?.fields">
+      <SchemaFields v-if="node.output_schema.properties" :schema="node.output_schema" />
+      <template v-else-if="node.output_schema.type === 'array' && node.output_schema.items?.properties">
         <div class="nc-field">
           <span class="nc-type">list[object]</span>
         </div>
-        <SchemaFields :fields="node.output_schema.item.fields" :depth="1" />
+        <SchemaFields :schema="node.output_schema.items" :defs="node.output_schema.$defs" :depth="1" />
       </template>
       <div v-else class="nc-field">
         <span class="nc-type">{{ outputType(node.output_schema) }}</span>

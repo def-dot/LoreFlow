@@ -16,7 +16,7 @@ from app.services.agent_tools import build_skill_prompt, build_tools, execute_to
 
 class AgentOutput(BaseModel):
     content: str = Field(description="LLM 最终回复文本")
-    messages: list = Field(description="完整会话记录（system/user/assistant/tool 消息）")
+    messages: list[dict[str, str]] = Field(description="完整会话记录")
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
         "prompt": "用户提示词",
         "system": "系统提示词",
         "context": "上下文",
-        "file_paths": "上传文件的路径列表",
+        "file_names": "上传文件的文件名列表",
         "model": "模型名",
         "tools": "工具名列表，['*'] 加载全部",
         "skills": "技能名列表，['*'] 加载全部",
@@ -46,7 +46,7 @@ async def agent(
     prompt: str,
     system: str | None = None,
     context: str | None = None,
-    file_paths: list | None = None,
+    file_names: list[str] | None = None,
     model: str | None = None,
     tools: list[str] | None = None,
     skills: list[str] | None = None,
@@ -57,17 +57,11 @@ async def agent(
 
     max_iter = int(max_iterations or 5)
 
-    # --- 归一化 file_paths：统一为 upload ID 列表 ---
-    raw_files = file_paths or []
-    if isinstance(raw_files, dict):
-        raw_files = [raw_files]
-    file_ids: list[str] = [f["id"] for f in raw_files]
-
     messages: list[dict[str, str]] = []
 
     parts: list[str] = []
-    if file_ids:
-        parts.append("已上传文件：\n" + "\n".join(f"- /uploads/{fid}" for fid in file_ids))
+    if file_names:
+        parts.append("已上传文件：\n" + "\n".join(f"- /uploads/{file_name}" for file_name in file_names))
     if isinstance(context, str) and context.strip():
         parts.append(f"参考资料：\n{context}")
     parts.append(f"用户问题：{prompt}")

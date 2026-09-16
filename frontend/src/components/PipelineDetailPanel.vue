@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { PipelineDetail } from '@/api/pipelines'
 import { toParamSpecs } from '@/api/pipelines'
-import type { SchemaField } from '@/api/nodeTypes'
+import type { JsonSchema } from '@/api/nodeTypes'
 import MermaidDiagram from './MermaidDiagram.vue'
 
 const props = defineProps<{ detail: PipelineDetail }>()
@@ -29,13 +29,33 @@ function defaultPreview(value: unknown): string {
 }
 
 // schema 格式化
-function schemaTypeLabel(field: SchemaField): string {
-  if (field.type === 'list' && field.item) return `list[${schemaTypeLabel(field.item)}]`
-  if (field.type === 'object' && field.fields) {
-    const keys = Object.keys(field.fields)
+function unwrap(schema: JsonSchema): JsonSchema {
+  if (schema.anyOf) {
+    const nonNull = schema.anyOf.filter(s => s.type !== 'null')
+    if (nonNull.length === 1) return nonNull[0]
+  }
+  return schema
+}
+
+function effective(schema: JsonSchema, root?: JsonSchema): JsonSchema {
+  const s = unwrap(schema)
+  if (s.$ref) return effective(resolveLocalRef(s.$ref, root), root)
+  return s
+}
+
+function resolveLocalRef(ref: string, root?: JsonSchema): JsonSchema {
+  const name = ref.replace(/^#\/\$defs\//, '')
+  return root?.$defs?.[name] ?? { $ref: ref }
+}
+
+function schemaTypeLabel(field: JsonSchema, root?: JsonSchema): string {
+  const f = effective(field, root)
+  if (f.type === 'array' && f.items) return `list[${effective(f.items, root).type ?? '?'}]`
+  if (f.type === 'object' && f.properties) {
+    const keys = Object.keys(f.properties)
     return keys.length ? `{${keys.join(', ')}}` : 'object'
   }
-  return field.type
+  return f.type ?? '?'
 }
 
 function inputsSummary(inputs: Record<string, unknown> | null): string {
@@ -45,13 +65,15 @@ function inputsSummary(inputs: Record<string, unknown> | null): string {
     .join(', ')
 }
 
-function inputSchemaTooltip(schema: Record<string, SchemaField> | null): string {
-  if (!schema || !Object.keys(schema).length) return ''
-  return Object.entries(schema)
+function inputSchemaTooltip(schema: JsonSchema | null): string {
+  if (!schema?.properties) return ''
+  const reqSet = new Set(schema.required ?? [])
+  return Object.entries(schema.properties)
     .map(([k, v]) => {
-      const req = v.required ? ' (必填)' : ''
-      const desc = v.description ? ` — ${v.description}` : ''
-      return `${k}: ${schemaTypeLabel(v)}${req}${desc}`
+      const f = effective(v, schema)
+      const req = reqSet.has(k) ? ' (必填)' : ''
+      const desc = f.description ? ` — ${f.description}` : ''
+      return `${k}: ${schemaTypeLabel(f, schema)}${req}${desc}`
     })
     .join('\n')
 }
@@ -107,7 +129,7 @@ function inputSchemaTooltip(schema: Record<string, SchemaField> | null): string 
           <el-table-column label="输入" min-width="160">
             <template #default="{ row }">
               <el-tooltip
-                v-if="row.type_input_schema && Object.keys(row.type_input_schema).length"
+                v-if="row.type_input_schema?.properties && Object.keys(row.type_input_schema.properties).length"
                 :content="inputSchemaTooltip(row.type_input_schema)"
                 placement="top"
                 :show-after="300"
@@ -120,7 +142,7 @@ function inputSchemaTooltip(schema: Record<string, SchemaField> | null): string 
           <el-table-column label="输出" min-width="120">
             <template #default="{ row }">
               <span v-if="row.type_output_schema" class="wiring-text">
-                {{ schemaTypeLabel(row.type_output_schema) }}
+                {{ schemaTypeLabel(row.type_output_schema, row.type_output_schema) }}
               </span>
               <span v-else class="wiring-text">—</span>
             </template>

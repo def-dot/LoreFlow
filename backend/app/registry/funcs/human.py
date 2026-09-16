@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @func(
+    tool=False,
     label="人工审核",
     description="人工审核节点，暂停等待审批",
     name="human",

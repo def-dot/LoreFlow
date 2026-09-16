@@ -10,11 +10,10 @@
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Union, get_args, get_origin
+from typing import Any
 
 from pydantic import BaseModel, Field, create_model
 
@@ -35,7 +34,7 @@ class FuncDef:
     description: str = ""
     metadata: dict[str, Any] = field(default_factory=dict, hash=False)
     input_schema: type[BaseModel] | None = field(default=None, hash=False)
-    output_schema: dict[str, Any] | None = field(default=None, hash=False)
+    output_schema: type[BaseModel] | None = field(default=None, hash=False)
 
 
 # ---------------------------------------------------------------------------
@@ -56,23 +55,14 @@ TOOL_REGISTRY: dict[str, FuncDef] = {}
 def _infer_model(
     func: Callable[..., Any],
     params: dict[str, str] | None = None,
-    *,
-    skip_prefix: str | None = None,
 ) -> type[BaseModel] | None:
-    """从函数签名 + params 描述推导 Pydantic 输入模型。
-
-    Args:
-        func: 目标函数
-        params: 参数描述映射 {"参数名": "描述"}
-        skip_prefix: 跳过以此前缀开头的参数名（如 "_" 跳过引擎注入参数）。
-                     Pydantic 不允许字段名以 "_" 开头，需由调用方显式声明。
-    """
+    """从函数签名 + params 描述推导 Pydantic 输入模型。"""
     params = params or {}
     fields: dict[str, Any] = {}
     for pname, param in inspect.signature(func).parameters.items():
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
-        if skip_prefix and pname.startswith(skip_prefix):
+        if pname.startswith("_"):
             continue
         ann = param.annotation if param.annotation is not inspect.Parameter.empty else str
         desc = params.get(pname, "")
@@ -108,30 +98,16 @@ def func(
 
     """
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        type_name = name or func.__name__
-        out_schema: dict[str, Any] | None = None
-        if output_model is not None:
-            if isinstance(output_model, type) and issubclass(output_model, BaseModel):
-                out_schema = {
-                    "type": "object",
-                    "fields": output_model_to_dict(output_model) or {},
-                }
-            elif get_origin(output_model) is list:
-                item_model = get_args(output_model)[0]
-                out_schema = {
-                    "type": "list",
-                    "item": {"type": "object", "fields": output_model_to_dict(item_model) or {}},
-                }
-
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        type_name = name or fn.__name__
         fd = FuncDef(
             name=type_name,
-            func=func,
+            func=fn,
             label=label,
             description=description,
             metadata=metadata or {},
-            input_schema=_infer_model(func, params, skip_prefix="_"),
-            output_schema=out_schema,
+            input_schema=_infer_model(fn, params),
+            output_schema=output_model,
         )
 
         if node:
@@ -139,8 +115,8 @@ def func(
         if tool:
             TOOL_REGISTRY[type_name] = fd
 
-        setattr(func, "__func_def__", fd)
-        return func
+        setattr(fn, "__func_def__", fd)
+        return fn
 
     return decorator
 
@@ -174,118 +150,19 @@ def input_schema_to_openai(fd: FuncDef) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 前端展示格式转换
+# 前端展示格式转换（标准 JSON Schema）
 # ---------------------------------------------------------------------------
 
-_TYPE_TO_SCHEMA: dict[type, str] = {
-    str: "string",
-    int: "integer",
-    float: "number",
-    bool: "boolean",
-    list: "list",
-    dict: "object",
-}
 
-
-
-def input_schema_to_dict(model: type[BaseModel] | None) -> dict[str, dict[str, Any]] | None:
-    """Pydantic model → 前端 SchemaField 字典格式。"""
+def input_schema_to_dict(model: type[BaseModel] | None) -> dict[str, Any] | None:
+    """Pydantic model → 标准 JSON Schema（供前端解析）。"""
     if model is None:
         return None
-
-    schema: dict[str, dict[str, Any]] = {}
-    for fname, finfo in model.model_fields.items():
-        field_def: dict[str, Any] = {
-            "type": _TYPE_TO_SCHEMA.get(finfo.annotation, "string"),
-            "required": finfo.is_required(),
-        }
-        if finfo.description:
-            field_def["description"] = finfo.description
-        schema[fname] = field_def
-    return schema or None
+    return model.model_json_schema()
 
 
-# ---------------------------------------------------------------------------
-# 输出 schema
-# ---------------------------------------------------------------------------
-
-def _annotation_to_schema(ann: Any) -> dict[str, Any]:
-    """类型注解 → SchemaField dict（递归）。"""
-    if isinstance(ann, type) and issubclass(ann, BaseModel):
-        return {"type": "object", "fields": output_model_to_dict(ann) or {}}
-
-    origin = get_origin(ann)
-    args = get_args(ann)
-
-    if origin is list:
-        item = _annotation_to_schema(args[0]) if args else {"type": "string"}
-        return {"type": "list", "item": item}
-
-    if origin is dict:
-        return {"type": "object"}
-
-    if origin is Union:
-        non_none = [a for a in args if a is not type(None)]
-        if non_none:
-            return _annotation_to_schema(non_none[0])
-
-    return {"type": _TYPE_TO_SCHEMA.get(ann, "string")}
-
-
-def output_model_to_dict(model: type[BaseModel]) -> dict[str, dict[str, Any]] | None:
-    """Pydantic model → 前端 SchemaField fields 字典。"""
-    fields: dict[str, dict[str, Any]] = {}
-    for fname, finfo in model.model_fields.items():
-        fd = _annotation_to_schema(finfo.annotation)
-        if finfo.description:
-            fd["description"] = finfo.description
-        if not finfo.is_required():
-            fd["required"] = False
-        fields[fname] = fd
-    return fields or None
-
-
-
-# ---------------------------------------------------------------------------
-# 工具执行
-# ---------------------------------------------------------------------------
-
-async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
-    """执行单个工具调用，返回结果。"""
-    func_def = tc.get("function", {})
-    name = func_def.get("name", "")
-    try:
-        args = json.loads(func_def.get("arguments", "{}"))
-    except (json.JSONDecodeError, TypeError):
-        args = {}
-
-    td = TOOL_REGISTRY.get(name)
-    status = "success"
-    if td is not None:
-        try:
-            output = await td.func(**args)
-        except Exception as exc:
-            output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
-            status = "error"
-    else:
-        # 尝试 Pipeline 工作流
-        from app.services.agent_tools import _resolve_pipeline_tool
-
-        ptd = _resolve_pipeline_tool(name)
-        if ptd is not None:
-            try:
-                output = await ptd.func(**args)
-            except Exception as exc:
-                output = f"工作流 {name} 执行失败：{type(exc).__name__}: {exc}"
-                status = "error"
-        else:
-            output = f"未知工具：{name}"
-            status = "error"
-
-    return {
-        "tool_call_id": tc.get("id", ""),
-        "tool_name": name,
-        "arguments": args,
-        "output": str(output),
-        "status": status,
-    }
+def output_schema_to_dict(model: type[BaseModel] | None) -> dict[str, Any] | None:
+    """Pydantic model → 标准 JSON Schema（供前端解析）。"""
+    if model is None:
+        return None
+    return model.model_json_schema()

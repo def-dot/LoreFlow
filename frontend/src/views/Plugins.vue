@@ -16,7 +16,7 @@ const guideOpen = ref(false)
 const nodeTypeMap = computed(() => new Map(nodeTypes.value.map((t) => [t.name, t])))
 
 const builtinNodes = computed(() => {
-  const pluginNames = new Set(plugins.value.flatMap((p) => p.node_names))
+  const pluginNames = new Set(plugins.value.flatMap((p) => p.node_names ?? []))
   return nodeTypes.value.filter((t) => !pluginNames.has(t.name))
 })
 
@@ -35,8 +35,8 @@ async function fetchAll() {
   loadError.value = false
   try {
     const [p, n] = await Promise.all([listPlugins(), listNodeTypes()])
-    plugins.value = p.plugins
-    nodeTypes.value = n.node_types
+    plugins.value = p.plugins ?? []
+    nodeTypes.value = n ?? []
   } catch {
     loadError.value = true
   } finally {

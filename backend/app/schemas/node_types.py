@@ -10,9 +10,5 @@ class NodeTypeOut(BaseModel):
     label: str = ""
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
-    input_schema: dict[str, dict[str, Any]] | None = None
+    input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
-
-
-class NodeTypeListResponse(BaseModel):
-    node_types: list[NodeTypeOut] = Field(default_factory=list)

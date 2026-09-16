@@ -14,7 +14,7 @@ from app.registry.types import func
 
 class LLMChatOutput(BaseModel):
     content: str = Field(description="LLM 回复文本")
-    tool_calls: list = Field(default_factory=list, description="模型请求的工具调用列表（未传 tools 时为空）")
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list, description="模型请求的工具调用列表")
 
 
 class LLMClassifyOutput(BaseModel):
@@ -40,7 +40,7 @@ async def llm_chat(
     system: str | None = None,
     context: str | None = None,
     model: str | None = None,
-    tools: list | None = None,
+    tools: list[str] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
@@ -59,7 +59,7 @@ async def llm_chat(
     metadata={"group": "LLM", "order": 30},
     params={
         "prompt": "待分类文本",
-        "model": "模型名（provider:model 格式）",
+        "model": "模型名",
         "classify_system": "分类系统提示词",
         "classify_labels": "可选标签列表",
     },
