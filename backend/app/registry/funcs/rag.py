@@ -2,7 +2,6 @@
 RAG 演示节点 — 文档入库与知识库检索。
 """
 
-
 import asyncio
 import contextvars
 import logging
@@ -15,6 +14,10 @@ from app.registry.types import func
 from app.services import knowledge
 from app.utils import files
 
+
+# ---------------------------------------------------------------------------
+# Output models
+# ---------------------------------------------------------------------------
 
 class RagLoadOutput(BaseModel):
     doc_name: str = Field(description="文档名称")
@@ -52,22 +55,31 @@ class StringResultOutput(BaseModel):
     result: str = Field(description="执行结果")
 
 
+# ---------------------------------------------------------------------------
+# Input models
+# ---------------------------------------------------------------------------
+
+class DocumentRef(BaseModel):
+    id: str = Field(description="文件 ID", min_length=1)
+    filename: str = Field(default="上传文档", description="文件名")
+
+
 class RagLoadParams(BaseModel):
-    document: dict = Field(description="上传文档")
+    document: DocumentRef = Field(description="上传文档")
 
 
 class RagChunkParams(BaseModel):
-    text: str = Field(description="文档正文")
+    text: str = Field(description="文档正文", min_length=1)
 
 
 class RagEmbedParams(BaseModel):
-    doc_name: str = Field(description="文档名称")
-    chunks: list = Field(description="文本段列表")
+    doc_name: str = Field(description="文档名称", min_length=1)
+    chunks: list[str] = Field(description="文本段列表", min_length=1)
 
 
 class RagUpsertParams(BaseModel):
-    doc_name: str = Field(default="", description="文档名称")
-    embeds: list | None = Field(default=None, description="向量列表")
+    doc_name: str = Field(description="文档名称", min_length=1)
+    embeds: list = Field(description="向量列表", min_length=1)
 
 
 class RagRetrieveParams(BaseModel):
@@ -75,13 +87,17 @@ class RagRetrieveParams(BaseModel):
 
 
 class IngestKbDocumentParams(BaseModel):
-    upload_id: str = Field(description="上传文件的 ID")
-    filename: str = Field(description="文件名（含扩展名）")
+    upload_id: str = Field(description="上传文件的 ID", min_length=1)
+    filename: str = Field(description="文件名（含扩展名）", min_length=1)
 
 
 class SearchKnowledgeBaseParams(BaseModel):
-    query: str = Field(description="检索关键词或自然语言问题")
+    query: str = Field(description="检索关键词或自然语言问题", min_length=1)
 
+
+# ---------------------------------------------------------------------------
+# Nodes
+# ---------------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
 
@@ -90,20 +106,13 @@ logger = logging.getLogger(__name__)
     label="加载文档",
     description="读取上传文档内容",
     metadata={"group": "RAG", "order": 10},
-
 )
 async def rag_load(params: RagLoadParams) -> RagLoadOutput:
     """从上传目录读取 params 声明的 document 文件"""
-    if not isinstance(params.document, dict):
-        raise ValueError("缺少上传文档：document 必须是 {id, filename} 字段")
-    upload_id = params.document.get("id")
-    if not isinstance(upload_id, str) or not upload_id.strip():
-        raise ValueError("上传文档缺少文件id字段：document.id")
-    text = files.read_upload(upload_id)  # 路径穿越/扩展名非法/文件缺失 → 中文 ValueError
+    text = files.read_upload(params.document.id)
     if not text.strip():
         raise ValueError("上传文档正文为空：文件内容为空白文本")
-    filename = str(params.document.get("filename") or "上传文档")
-    stem = Path(filename).stem or "document"
+    stem = Path(params.document.filename).stem or "document"
     return RagLoadOutput(doc_name=stem, text=text)
 
 
@@ -111,11 +120,8 @@ async def rag_load(params: RagLoadParams) -> RagLoadOutput:
     label="切块",
     description="按空行把正文切成语义段",
     metadata={"group": "RAG", "order": 20},
-
 )
 async def rag_chunk(params: RagChunkParams) -> RagChunkOutput:
-    if not isinstance(params.text, str) or not params.text.strip():
-        raise ValueError("缺少文档正文字段text")
     return RagChunkOutput(result=[p.strip() for p in params.text.split("\r\n\r\n") if p.strip()])
 
 
@@ -123,13 +129,8 @@ async def rag_chunk(params: RagChunkParams) -> RagChunkOutput:
     label="向量化",
     description="为每个 chunk 生成向量",
     metadata={"group": "RAG", "order": 30},
-
 )
 async def rag_embed(params: RagEmbedParams) -> RagEmbedOutput:
-    if not isinstance(params.doc_name, str) or not params.doc_name.strip():
-        raise ValueError("缺少文档名称字段doc_name")
-    if not isinstance(params.chunks, list):
-        raise ValueError("缺少切块信息字段chunks")
     return RagEmbedOutput(result=[
         RagEmbedItem(
             chunk_id=f"{params.doc_name}-c{i}",
@@ -144,14 +145,9 @@ async def rag_embed(params: RagEmbedParams) -> RagEmbedOutput:
     label="写入向量库",
     description="批量写入向量信息",
     metadata={"group": "RAG", "order": 40},
-
 )
 async def rag_upsert(params: RagUpsertParams) -> RagUpsertOutput:
     await asyncio.sleep(0.05)
-    if not isinstance(params.doc_name, str) or not params.doc_name.strip():
-        raise ValueError("缺少文档名称字段doc_name")
-    if not isinstance(params.embeds, list):
-        raise ValueError("缺少向量输出字段embeds")
     return RagUpsertOutput(result=f"upserted {len(params.embeds)} chunks from {params.doc_name}")
 
 
@@ -179,7 +175,6 @@ _MOCK_KB: list[dict[str, Any]] = [
     label="知识库检索",
     description="关键词查询返回片段",
     metadata={"group": "RAG", "order": 50},
-
 )
 async def rag_retrieve(params: RagRetrieveParams) -> RagRetrieveOutput:
     await asyncio.sleep(0.05)
@@ -205,13 +200,12 @@ def reset_tool_kb_id(token: contextvars.Token) -> None:
 
 
 @func(
-
+    label="导入知识库文档",
     description=(
         "将上传的文档导入关联的知识库，切块并向量化，供后续检索使用。"
         "当用户上传文件并希望围绕该文件内容多轮提问时调用。"
     ),
     metadata={"group": "RAG", "order": 60},
-
 )
 async def ingest_kb_document(params: IngestKbDocumentParams) -> StringResultOutput:
     kb_id = _tool_kb_ctx.get()
@@ -225,13 +219,12 @@ async def ingest_kb_document(params: IngestKbDocumentParams) -> StringResultOutp
 
 
 @func(
-
+    label="检索知识库",
     description=(
         "从关联的知识库中检索与问题最相关的文档片段。"
         "当用户提问需要参考已入库文档时使用此工具。"
     ),
     metadata={"group": "RAG", "order": 70},
-
 )
 async def search_knowledge_base(params: SearchKnowledgeBaseParams) -> StringResultOutput:
     kb_id = _tool_kb_ctx.get()
