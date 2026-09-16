@@ -10,9 +10,47 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from app.registry.types import func
 from app.services import knowledge
 from app.utils import files
+
+
+class RagLoadOutput(BaseModel):
+    doc_name: str = Field(description="文档名称")
+    text: str = Field(description="文档正文")
+
+
+class RagEmbedItem(BaseModel):
+    chunk_id: str = Field(description="块标识")
+    text: str = Field(description="块文本")
+    vector: list[float] = Field(description="浮点向量")
+
+
+class RagRetrieveItem(BaseModel):
+    source: str = Field(description="片段来源标识")
+    text: str = Field(description="片段正文")
+
+
+class RagEmbedOutput(BaseModel):
+    result: list[RagEmbedItem] = Field(description="向量化结果列表")
+
+
+class RagRetrieveOutput(BaseModel):
+    result: list[RagRetrieveItem] = Field(description="检索结果列表")
+
+
+class RagUpsertOutput(BaseModel):
+    result: str = Field(description="成功写库的向量数量统计")
+
+
+class RagChunkOutput(BaseModel):
+    result: list[str] = Field(description="文本段列表")
+
+
+class StringResultOutput(BaseModel):
+    result: str = Field(description="执行结果")
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +60,7 @@ logger = logging.getLogger(__name__)
     description="读取上传文档内容",
     metadata={"group": "RAG", "order": 10},
     params={"document": "上传文档"},
-    output_schema={
-        "type": "object",
-        "fields": {
-            "doc_name": {"type": "string", "description": "文档名称"},
-            "text": {"type": "string", "description": "文档正文"},
-        },
-    },
+    output_model=RagLoadOutput,
 )
 async def rag_load(document: dict) -> dict[str, Any]:
     """从上传目录读取 params 声明的 document 文件"""
@@ -50,12 +82,12 @@ async def rag_load(document: dict) -> dict[str, Any]:
     description="按空行把正文切成语义段",
     metadata={"group": "RAG", "order": 20},
     params={"text": "文档正文"},
-    output_schema={"type": "list", "item": {"type": "string"}, "description": "文本段"},
+    output_model=RagChunkOutput,
 )
-async def rag_chunk(text: str) -> list[str]:
+async def rag_chunk(text: str) -> dict:
     if not isinstance(text, str) or not text.strip():
         raise ValueError("缺少文档正文字段text")
-    return [p.strip() for p in text.split("\r\n\r\n") if p.strip()]
+    return {"result": [p.strip() for p in text.split("\r\n\r\n") if p.strip()]}
 
 
 @func(
@@ -63,31 +95,21 @@ async def rag_chunk(text: str) -> list[str]:
     description="为每个 chunk 生成向量",
     metadata={"group": "RAG", "order": 30},
     params={"doc_name": "文档名称", "chunks": "文本段列表"},
-    output_schema={
-        "type": "list",
-        "item": {
-            "type": "object",
-            "fields": {
-                "chunk_id": {"type": "string", "description": "块标识"},
-                "text": {"type": "string", "description": "块文本"},
-                "vector": {"type": "list", "item": {"type": "float"}, "description": "浮点向量"},
-            },
-        },
-    },
+    output_model=RagEmbedOutput,
 )
-async def rag_embed(doc_name: str, chunks: list) -> list[dict[str, Any]]:
+async def rag_embed(doc_name: str, chunks: list) -> dict:
     if not isinstance(doc_name, str) or not doc_name.strip():
         raise ValueError("缺少文档名称字段doc_name")
     if not isinstance(chunks, list):
         raise ValueError("缺少切块信息字段chunks")
-    return [
+    return {"result": [
         {
             "chunk_id": f"{doc_name}-c{i}",
             "text": chunk,
             "vector": [float(sum(ord(c) * (d + 1) for c in chunk) % 997) for d in range(8)],
         }
         for i, chunk in enumerate(chunks)
-    ]
+    ]}
 
 
 @func(
@@ -95,15 +117,15 @@ async def rag_embed(doc_name: str, chunks: list) -> list[dict[str, Any]]:
     description="批量写入向量信息",
     metadata={"group": "RAG", "order": 40},
     params={"doc_name": "文档名称", "embeds": "向量列表"},
-    output_schema={"type": "string", "description": "成功写库的向量数量统计"},
+    output_model=RagUpsertOutput,
 )
-async def rag_upsert(doc_name: str = "", embeds: list | None = None) -> str:
+async def rag_upsert(doc_name: str = "", embeds: list | None = None) -> dict:
     await asyncio.sleep(0.05)
     if not isinstance(doc_name, str) or not doc_name.strip():
         raise ValueError("缺少文档名称字段doc_name")
     if not isinstance(embeds, list):
         raise ValueError("缺少向量输出字段embeds")
-    return f"upserted {len(embeds)} chunks from {doc_name}"
+    return {"result": f"upserted {len(embeds)} chunks from {doc_name}"}
 
 
 # 模拟知识库：与 rag_retrieve 的演示数据同源（真实实现应为向量库检索，见 rag_embed/rag_upsert）
@@ -131,21 +153,12 @@ _MOCK_KB: list[dict[str, Any]] = [
     description="关键词查询返回片段",
     metadata={"group": "RAG", "order": 50},
     params={"prompt": "检索关键词"},
-    output_schema={
-        "type": "list",
-        "item": {
-            "type": "object",
-            "fields": {
-                "source": {"type": "string", "description": "片段来源标识"},
-                "text": {"type": "string", "description": "片段正文"},
-            },
-        },
-    },
+    output_model=RagRetrieveOutput,
 )
-async def rag_retrieve(prompt: str = "") -> list[dict[str, str]]:
+async def rag_retrieve(prompt: str = "") -> dict:
     await asyncio.sleep(0.05)
     ranked = sorted(_MOCK_KB, key=lambda c: -sum(str(prompt).count(k) for k in c["keywords"]))
-    return [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]
+    return {"result": [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]}
 
 
 # ---------------------------------------------------------------------------
@@ -176,16 +189,17 @@ def reset_tool_kb_id(token: contextvars.Token) -> None:
         "upload_id": "上传文件的 ID",
         "filename": "文件名（含扩展名）",
     },
+    output_model=StringResultOutput,
 )
-async def ingest_kb_document_tool(upload_id: str, filename: str) -> str:
+async def ingest_kb_document_tool(upload_id: str, filename: str) -> dict:
     kb_id = _tool_kb_ctx.get()
     if kb_id is None:
-        return "当前 Agent 未关联知识库，无法导入文档。请先在 Agent 设置中关联知识库。"
+        return {"result": "当前 Agent 未关联知识库，无法导入文档。请先在 Agent 设置中关联知识库。"}
     try:
         result = await knowledge.ingest_document(kb_id, upload_id, filename)
-        return f"文档「{filename}」已导入知识库，共 {result['chunk_count']} 个切块。"
+        return {"result": f"文档「{filename}」已导入知识库，共 {result['chunk_count']} 个切块。"}
     except Exception as exc:
-        return f"文档导入失败：{exc}"
+        return {"result": f"文档导入失败：{exc}"}
 
 
 @func(
@@ -196,17 +210,18 @@ async def ingest_kb_document_tool(upload_id: str, filename: str) -> str:
     ),
     metadata={"group": "RAG", "order": 70},
     params={"query": "检索关键词或自然语言问题"},
+    output_model=StringResultOutput,
 )
-async def search_knowledge_base_tool(query: str) -> str:
+async def search_knowledge_base_tool(query: str) -> dict:
     kb_id = _tool_kb_ctx.get()
     if kb_id is None:
-        return "当前 Agent 未关联知识库。请先在 Agent 设置中关联知识库。"
+        return {"result": "当前 Agent 未关联知识库。请先在 Agent 设置中关联知识库。"}
 
     results = await knowledge.search_chunks(kb_id, query, top_k=5)
     if not results:
-        return "知识库中没有已入库的文档，请先上传并导入文档。"
+        return {"result": "知识库中没有已入库的文档，请先上传并导入文档。"}
 
     lines = []
     for i, r in enumerate(results, 1):
         lines.append(f"[{i}] 来源: {r['filename']}（相似度: {r['similarity']}）\n{r['content']}")
-    return "\n\n".join(lines)
+    return {"result": "\n\n".join(lines)}

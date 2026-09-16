@@ -14,7 +14,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field, create_model
 
@@ -56,12 +56,23 @@ TOOL_REGISTRY: dict[str, FuncDef] = {}
 def _infer_model(
     func: Callable[..., Any],
     params: dict[str, str] | None = None,
+    *,
+    skip_prefix: str | None = None,
 ) -> type[BaseModel] | None:
-    """从函数签名 + params 描述推导 Pydantic 输入模型。"""
+    """从函数签名 + params 描述推导 Pydantic 输入模型。
+
+    Args:
+        func: 目标函数
+        params: 参数描述映射 {"参数名": "描述"}
+        skip_prefix: 跳过以此前缀开头的参数名（如 "_" 跳过引擎注入参数）。
+                     Pydantic 不允许字段名以 "_" 开头，需由调用方显式声明。
+    """
     params = params or {}
     fields: dict[str, Any] = {}
     for pname, param in inspect.signature(func).parameters.items():
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        if skip_prefix and pname.startswith(skip_prefix):
             continue
         ann = param.annotation if param.annotation is not inspect.Parameter.empty else str
         desc = params.get(pname, "")
@@ -84,7 +95,7 @@ def func(
     name: str | None = None,
     metadata: dict[str, Any] | None = None,
     params: dict[str, str] | None = None,
-    output_schema: dict[str, Any] | None = None,
+    output_model: type[BaseModel] | None = None,
     node: bool = True,
     tool: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -93,19 +104,34 @@ def func(
     - ``node=True`` → 注册到 REGISTRY（DAG 引擎可编排）
     - ``tool=True`` → 注册到 TOOL_REGISTRY（LLM agent 可调用）
     - ``params`` 只需 {"参数名": "描述"}，type/required 从签名自动推导
+    - ``output_model`` 输出 Pydantic 模型（定义字段结构）
 
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         type_name = name or func.__name__
+        out_schema: dict[str, Any] | None = None
+        if output_model is not None:
+            if isinstance(output_model, type) and issubclass(output_model, BaseModel):
+                out_schema = {
+                    "type": "object",
+                    "fields": output_model_to_dict(output_model) or {},
+                }
+            elif get_origin(output_model) is list:
+                item_model = get_args(output_model)[0]
+                out_schema = {
+                    "type": "list",
+                    "item": {"type": "object", "fields": output_model_to_dict(item_model) or {}},
+                }
+
         fd = FuncDef(
             name=type_name,
             func=func,
             label=label,
             description=description,
             metadata=metadata or {},
-            input_schema=_infer_model(func, params),
-            output_schema=output_schema,
+            input_schema=_infer_model(func, params, skip_prefix="_"),
+            output_schema=out_schema,
         )
 
         if node:
@@ -161,6 +187,7 @@ _TYPE_TO_SCHEMA: dict[type, str] = {
 }
 
 
+
 def input_schema_to_dict(model: type[BaseModel] | None) -> dict[str, dict[str, Any]] | None:
     """Pydantic model → 前端 SchemaField 字典格式。"""
     if model is None:
@@ -176,6 +203,47 @@ def input_schema_to_dict(model: type[BaseModel] | None) -> dict[str, dict[str, A
             field_def["description"] = finfo.description
         schema[fname] = field_def
     return schema or None
+
+
+# ---------------------------------------------------------------------------
+# 输出 schema
+# ---------------------------------------------------------------------------
+
+def _annotation_to_schema(ann: Any) -> dict[str, Any]:
+    """类型注解 → SchemaField dict（递归）。"""
+    if isinstance(ann, type) and issubclass(ann, BaseModel):
+        return {"type": "object", "fields": output_model_to_dict(ann) or {}}
+
+    origin = get_origin(ann)
+    args = get_args(ann)
+
+    if origin is list:
+        item = _annotation_to_schema(args[0]) if args else {"type": "string"}
+        return {"type": "list", "item": item}
+
+    if origin is dict:
+        return {"type": "object"}
+
+    if origin is Union:
+        non_none = [a for a in args if a is not type(None)]
+        if non_none:
+            return _annotation_to_schema(non_none[0])
+
+    return {"type": _TYPE_TO_SCHEMA.get(ann, "string")}
+
+
+def output_model_to_dict(model: type[BaseModel]) -> dict[str, dict[str, Any]] | None:
+    """Pydantic model → 前端 SchemaField fields 字典。"""
+    fields: dict[str, dict[str, Any]] = {}
+    for fname, finfo in model.model_fields.items():
+        fd = _annotation_to_schema(finfo.annotation)
+        if finfo.description:
+            fd["description"] = finfo.description
+        if not finfo.is_required():
+            fd["required"] = False
+        fields[fname] = fd
+    return fields or None
+
 
 
 # ---------------------------------------------------------------------------

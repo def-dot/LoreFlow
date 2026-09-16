@@ -6,8 +6,20 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from app.services.llm import llm_chat_call
 from app.registry.types import func
+
+
+class LLMChatOutput(BaseModel):
+    content: str = Field(description="LLM 回复文本")
+    tool_calls: list = Field(default_factory=list, description="模型请求的工具调用列表（未传 tools 时为空）")
+
+
+class LLMClassifyOutput(BaseModel):
+    intent: str = Field(description="分类标签")
+    raw: str = Field(description="原始回复文本")
 
 
 @func(
@@ -21,16 +33,7 @@ from app.registry.types import func
         "model": "模型名",
         "tools": "工具定义列表（OpenAI function calling 格式）",
     },
-    output_schema={
-        "type": "object",
-        "fields": {
-            "content": {"type": "string", "description": "LLM 回复文本"},
-            "tool_calls": {
-                "type": "list",
-                "description": "模型请求的工具调用列表（未传 tools 时为空）",
-            },
-        },
-    },
+    output_model=LLMChatOutput,
 )
 async def llm_chat(
     prompt: str,
@@ -60,12 +63,7 @@ async def llm_chat(
         "classify_system": "分类系统提示词",
         "classify_labels": "可选标签列表",
     },
-    output_schema={
-        "type": "object",
-        "fields": {
-            "intent": {"type": "string", "description": "分类标签"},
-        },
-    },
+    output_model=LLMClassifyOutput,
 )
 async def llm_classify(
     prompt: str,

@@ -1,7 +1,19 @@
 import logging
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from app.registry.types import func
+
+
+class HumanDecision(BaseModel):
+    approve: bool = Field(description="是否通过")
+    reason: str = Field(default="", description="拒绝原因（可选）")
+
+
+class HumanReviewOutput(BaseModel):
+    payload: dict = Field(description="审核载荷")
+    decision: HumanDecision = Field(description="审核决策")
 
 logger = logging.getLogger(__name__)
 
@@ -12,20 +24,7 @@ logger = logging.getLogger(__name__)
     name="human",
     metadata={"group": "基础", "order": 10},
     params={"_review": "审核卡片声明 {$键: 标签文本}"},
-    output_schema={
-        "type": "object",
-        "fields": {
-            "payload": {"type": "object", "description": "审核载荷"},
-            "decision": {
-                "type": "object",
-                "description": "审核决策",
-                "fields": {
-                    "approve": {"type": "boolean", "description": "是否通过"},
-                    "reason": {"type": "string", "description": "拒绝原因（可选）"},
-                },
-            },
-        },
-    },
+    output_model=HumanReviewOutput,
 )
 async def human_review(_approver: Any, _node: str, _review: dict | None = None, **kwargs: Any) -> dict[str, Any]:
     """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。

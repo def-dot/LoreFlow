@@ -16,8 +16,35 @@ from typing import Any
 
 from tavily import AsyncTavilyClient
 
+from pydantic import BaseModel, Field
+
 from app.registry.types import func
 from app.utils.http import http_client
+
+
+class WebFetchItem(BaseModel):
+    url: str = Field(description="页面链接")
+    text: str = Field(description="页面正文")
+
+
+class HttpRequestOutput(BaseModel):
+    status_code: int = Field(description="HTTP 状态码")
+    headers: dict = Field(description="响应头")
+    body: Any = Field(description="响应体（自动解析 JSON）")
+
+
+class WebSearchItem(BaseModel):
+    title: str = Field(description="结果标题")
+    url: str = Field(description="结果链接")
+    content: str = Field(description="结果摘要")
+
+
+class WebFetchOutput(BaseModel):
+    result: list[WebFetchItem] = Field(description="抓取结果列表")
+
+
+class WebSearchOutput(BaseModel):
+    result: list[WebSearchItem] = Field(description="搜索结果列表")
 
 # ---------------------------------------------------------------------------
 # 网页抓取
@@ -59,23 +86,14 @@ async def _fetch_page(url: str) -> dict[str, str]:
     description="抓取一个或多个网页正文，返回 [{url, text}]",
     metadata={"group": "网络", "order": 10},
     params={"url": "URL 字符串或 URL 列表"},
-    output_schema={
-        "type": "list",
-        "item": {
-            "type": "object",
-            "fields": {
-                "url": {"type": "string", "description": "页面链接"},
-                "text": {"type": "string", "description": "页面正文"},
-            },
-        },
-    },
+    output_model=WebFetchOutput,
 )
-async def web_fetch(url: str | list[str]) -> list[dict[str, str]]:
+async def web_fetch(url: str | list[str]) -> dict:
     urls = [url] if isinstance(url, str) else list(url)
     if not urls:
-        return []
+        return {"result": []}
 
-    return list(await asyncio.gather(*(_fetch_page(u) for u in urls)))
+    return {"result": list(await asyncio.gather(*(_fetch_page(u) for u in urls)))}
 
 
 # ---------------------------------------------------------------------------
@@ -93,14 +111,7 @@ async def web_fetch(url: str | list[str]) -> list[dict[str, str]]:
         "body": "请求体（对象自动序列化为 JSON）",
         "timeout": "超时秒数（默认 30）",
     },
-    output_schema={
-        "type": "object",
-        "fields": {
-            "status_code": {"type": "integer", "description": "HTTP 状态码"},
-            "headers": {"type": "object", "description": "响应头"},
-            "body": {"type": "any", "description": "响应体（自动解析 JSON）"},
-        },
-    },
+    output_model=HttpRequestOutput,
 )
 async def http_request(
     url: str,
@@ -141,8 +152,9 @@ async def http_request(
     description="搜索互联网获取最新信息，返回搜索结果列表",
     metadata={"group": "网络", "order": 30},
     params={"query": "搜索关键词"},
+    output_model=WebSearchOutput,
 )
-async def web_search(query: str) -> list[dict[str, str]]:
+async def web_search(query: str) -> dict:
     api_key = os.environ.get("TAVILY_API_KEY")
     if not api_key:
         raise RuntimeError("未设置 TAVILY_API_KEY 环境变量")
@@ -150,4 +162,4 @@ async def web_search(query: str) -> list[dict[str, str]]:
     client = AsyncTavilyClient(api_key=api_key)
     response = await client.search(query=query, max_results=5)
 
-    return response.get("results", [])
+    return {"result": response.get("results", [])}

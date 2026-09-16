@@ -7,9 +7,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from app.registry.types import func
 from app.services.llm import llm_chat_call
 from app.services.agent_tools import build_skill_prompt, build_tools, execute_tool_call
+
+
+class AgentOutput(BaseModel):
+    content: str = Field(description="LLM 最终回复文本")
+    messages: list = Field(description="完整会话记录（system/user/assistant/tool 消息）")
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +40,7 @@ logger = logging.getLogger(__name__)
         "skills": "技能名列表，['*'] 加载全部",
         "max_iterations": "最大循环次数（默认 5）",
     },
-    output_schema={
-        "type": "object",
-        "fields": {
-            "content": {"type": "string", "description": "LLM 最终回复文本"},
-            "messages": {
-                "type": "list",
-                "description": "完整会话记录（system/user/assistant/tool 消息）",
-            },
-        },
-    },
+    output_model=AgentOutput,
 )
 async def agent(
     prompt: str,

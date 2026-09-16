@@ -1,6 +1,8 @@
 import logging
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from app.registry.types import func
 from app.utils.http import http_client
 from app.core.config import settings
@@ -8,14 +10,18 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+class CodeOutput(BaseModel):
+    result: Any = Field(description="脚本返回值")
+
+
 @func(
     label="代码执行",
     description="执行 Python 脚本；指定 func 时按函数签名自动映射输入，返回值即输出",
     metadata={"group": "基础", "order": 20},
     params={"script": "要执行的 Python 脚本"},
-    output_schema={"type": "any", "description": "脚本的返回值"},
+    output_model=CodeOutput,
 )
-async def code(script: str, **kwargs: Any) -> Any:
+async def code(script: str, **kwargs: Any) -> dict:
     if not script or not isinstance(script, str):
         raise ValueError("code 节点缺少 script")
 
@@ -27,4 +33,4 @@ async def code(script: str, **kwargs: Any) -> Any:
     result = resp.json()
     if resp.status_code != 200:
         raise RuntimeError(result["error"])
-    return result["result"]
+    return {"result": result["result"]}
