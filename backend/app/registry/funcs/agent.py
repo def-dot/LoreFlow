@@ -9,8 +9,7 @@ from typing import Any
 
 from app.registry.types import func
 from app.services.llm import llm_chat_call
-from app.registry.types import execute_tool_call
-from app.services.agent_tools import build_skill_prompt, build_tools
+from app.services.agent_tools import build_skill_prompt, build_tools, execute_tool_call
 
 logger = logging.getLogger(__name__)
 

@@ -16,6 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, Field, create_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +34,7 @@ class FuncDef:
     label: str = ""
     description: str = ""
     metadata: dict[str, Any] = field(default_factory=dict, hash=False)
-    input_schema: dict[str, dict[str, Any]] | None = field(default=None, hash=False)
+    input_schema: type[BaseModel] | None = field(default=None, hash=False)
     output_schema: dict[str, Any] | None = field(default=None, hash=False)
 
 
@@ -51,38 +53,25 @@ TOOL_REGISTRY: dict[str, FuncDef] = {}
 # 参数推导
 # ---------------------------------------------------------------------------
 
-_TYPE_MAP: dict[type, str] = {
-    str: "string",
-    int: "integer",
-    float: "number",
-    bool: "boolean",
-    list: "list",
-    dict: "object",
-}
-
-
-def _infer_input_schema(
+def _infer_model(
     func: Callable[..., Any],
-    params: dict[str, str] | None,
-) -> dict[str, dict[str, Any]] | None:
-    """从函数签名 + params 描述推导 input_schema。"""
-    sig = inspect.signature(func)
-    if "ctx" in sig.parameters:
-        return None
-
+    params: dict[str, str] | None = None,
+) -> type[BaseModel] | None:
+    """从函数签名 + params 描述推导 Pydantic 输入模型。"""
     params = params or {}
-    schema: dict[str, dict[str, Any]] = {}
-    for pname, param in sig.parameters.items():
-        if pname == "ctx":
+    fields: dict[str, Any] = {}
+    for pname, param in inspect.signature(func).parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
         ann = param.annotation if param.annotation is not inspect.Parameter.empty else str
-        ptype = _TYPE_MAP.get(ann, "string")
-        required = param.default is inspect.Parameter.empty
-        field_def: dict[str, Any] = {"type": ptype, "required": required}
-        if pname in params:
-            field_def["description"] = params[pname]
-        schema[pname] = field_def
-    return schema or None
+        desc = params.get(pname, "")
+        if param.default is inspect.Parameter.empty:
+            fields[pname] = (ann, Field(description=desc))
+        else:
+            fields[pname] = (ann, Field(default=param.default, description=desc))
+    if not fields:
+        return None
+    return create_model(f"{func.__name__}Input", **fields)
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +84,6 @@ def func(
     name: str | None = None,
     metadata: dict[str, Any] | None = None,
     params: dict[str, str] | None = None,
-    input_schema: dict[str, dict[str, Any]] | None = None,
     output_schema: dict[str, Any] | None = None,
     node: bool = True,
     tool: bool = True,
@@ -105,20 +93,18 @@ def func(
     - ``node=True`` → 注册到 REGISTRY（DAG 引擎可编排）
     - ``tool=True`` → 注册到 TOOL_REGISTRY（LLM agent 可调用）
     - ``params`` 只需 {"参数名": "描述"}，type/required 从签名自动推导
-    - ``input_schema`` 手动覆盖推导结果（ctx 模式等无法推导的场景）
 
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         type_name = name or func.__name__
-        inferred = input_schema if input_schema is not None else _infer_input_schema(func, params)
         fd = FuncDef(
             name=type_name,
             func=func,
             label=label,
             description=description,
             metadata=metadata or {},
-            input_schema=inferred,
+            input_schema=_infer_model(func, params),
             output_schema=output_schema,
         )
 
@@ -154,18 +140,42 @@ def unregister_tool(name: str) -> FuncDef | None:
 
 def input_schema_to_openai(fd: FuncDef) -> dict[str, Any]:
     """FuncDef.input_schema → OpenAI function calling 格式。"""
-    schema: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
-    for pname, fdef in (fd.input_schema or {}).items():
-        prop: dict[str, Any] = {"type": fdef.get("type", "string")}
-        if "description" in fdef:
-            prop["description"] = fdef["description"]
-        schema["properties"][pname] = prop
-        if fdef.get("required", False):
-            schema["required"].append(pname)
+    schema = fd.input_schema.model_json_schema() if fd.input_schema else {"type": "object", "properties": {}}
     return {
         "type": "function",
         "function": {"name": fd.name, "description": fd.description, "parameters": schema},
     }
+
+
+# ---------------------------------------------------------------------------
+# 前端展示格式转换
+# ---------------------------------------------------------------------------
+
+_TYPE_TO_SCHEMA: dict[type, str] = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+    list: "list",
+    dict: "object",
+}
+
+
+def input_schema_to_dict(model: type[BaseModel] | None) -> dict[str, dict[str, Any]] | None:
+    """Pydantic model → 前端 SchemaField 字典格式。"""
+    if model is None:
+        return None
+
+    schema: dict[str, dict[str, Any]] = {}
+    for fname, finfo in model.model_fields.items():
+        field_def: dict[str, Any] = {
+            "type": _TYPE_TO_SCHEMA.get(finfo.annotation, "string"),
+            "required": finfo.is_required(),
+        }
+        if finfo.description:
+            field_def["description"] = finfo.description
+        schema[fname] = field_def
+    return schema or None
 
 
 # ---------------------------------------------------------------------------

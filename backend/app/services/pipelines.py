@@ -102,7 +102,7 @@ def detail_from_config(
             "type_label": node_type.label if node_type else None,
             "description": spec.get("description"),
             "type_description": node_type.description if node_type else None,
-            "type_input_schema": node_type.input_schema if node_type else None,
+            "type_input_schema": node_type.input_schema.model_json_schema() if node_type and node_type.input_schema else None,
             "type_output_schema": node_type.output_schema if node_type else None,
             "depends_on": list(spec.get("depends_on") or []),
             "inputs": spec.get("inputs"),

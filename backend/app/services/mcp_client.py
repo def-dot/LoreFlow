@@ -11,6 +11,8 @@ from typing import Any
 import yaml
 from mcp import ClientSession
 
+from pydantic import Field, create_model
+
 from app.registry.types import TOOL_REGISTRY, FuncDef
 
 logger = logging.getLogger(__name__)
@@ -18,19 +20,24 @@ logger = logging.getLogger(__name__)
 _stacks: list[AsyncExitStack] = []
 
 
-def _schema_to_input_schema(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """将 JSON Schema properties 转换为 input_schema 格式。"""
+_MCP_TYPE_MAP = {"string": str, "integer": int, "number": float, "boolean": bool, "array": list, "object": dict}
+
+
+def _schema_to_input_model(tool_name: str, schema: dict[str, Any]) -> type | None:
+    """将 MCP JSON Schema 转换为 Pydantic 输入模型。"""
     props = schema.get("properties", {})
+    if not props:
+        return None
     required = set(schema.get("required", []))
-    result: dict[str, dict[str, Any]] = {}
+    fields: dict[str, Any] = {}
     for pname, pschema in props.items():
-        field_def: dict[str, Any] = {"type": pschema.get("type", "string")}
+        ann = _MCP_TYPE_MAP.get(pschema.get("type", "string"), str)
+        desc = pschema.get("description", "")
         if pname in required:
-            field_def["required"] = True
-        if pschema.get("description"):
-            field_def["description"] = pschema["description"]
-        result[pname] = field_def
-    return result
+            fields[pname] = (ann, Field(description=desc))
+        else:
+            fields[pname] = (ann, Field(default=None, description=desc))
+    return create_model(f"{tool_name}Input", **fields) if fields else None
 
 
 async def _connect_server(server_cfg: dict[str, Any]) -> None:
@@ -85,7 +92,7 @@ async def _connect_server(server_cfg: dict[str, Any]) -> None:
                 func=_make_call(session, t.name),
                 description=t.description or "",
                 metadata={"group": name},
-                input_schema=_schema_to_input_schema(t.inputSchema),
+                input_schema=_schema_to_input_model(t.name, t.inputSchema),
             )
             TOOL_REGISTRY[t.name] = td
             registered += 1

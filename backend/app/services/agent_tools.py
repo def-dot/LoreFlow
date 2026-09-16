@@ -8,6 +8,8 @@ import json
 import logging
 from typing import Any
 
+from pydantic import Field, create_model
+
 from app.registry.types import TOOL_REGISTRY, FuncDef, input_schema_to_openai
 from app.registry.skills import SKILL_REGISTRY
 
@@ -65,22 +67,24 @@ def _resolve_pipeline_tool(name: str) -> FuncDef | None:
     description = f"[workflow] {description}"
     params_cfg: dict[str, Any] = config.get("inputs") or {}
 
-    input_schema: dict[str, dict[str, Any]] = {}
+    _TYPE_MAP = {"string": str, "integer": int, "number": float, "boolean": bool, "list": list, "object": dict}
+    fields: dict[str, Any] = {}
     for pname, spec in params_cfg.items():
         if not isinstance(spec, dict):
             continue
-        input_schema[pname] = {
-            "type": spec.get("type", "string"),
-            "required": spec.get("required", True),
-        }
-        if spec.get("description"):
-            input_schema[pname]["description"] = spec["description"]
+        ann = _TYPE_MAP.get(spec.get("type", "string"), str)
+        desc = spec.get("description", "")
+        if spec.get("required", True):
+            fields[pname] = (ann, Field(description=desc))
+        else:
+            fields[pname] = (ann, Field(default=None, description=desc))
+    input_model = create_model(f"{name}Input", **fields) if fields else None
 
     async def _pipeline_wrapper(**kwargs: Any) -> str:
         return await _execute_pipeline(name, kwargs)
 
     _pipeline_wrapper.__name__ = name
-    return FuncDef(name=name, func=_pipeline_wrapper, description=description, input_schema=input_schema)
+    return FuncDef(name=name, func=_pipeline_wrapper, description=description, input_schema=input_model)
 
 
 async def _execute_pipeline(pipeline_name: str, inputs: dict[str, Any]) -> str:
@@ -146,3 +150,46 @@ def build_skill_prompt(skill_names: list[str]) -> str | None:
         "使用 load_skill 工具加载完整指令。"
         f"\n\n<available_skills>\n{catalog}\n</available_skills>"
     )
+
+
+# ---------------------------------------------------------------------------
+# 工具执行
+# ---------------------------------------------------------------------------
+
+
+async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
+    """执行单个工具调用，返回结果。"""
+    func_def = tc.get("function", {})
+    name = func_def.get("name", "")
+    try:
+        args = json.loads(func_def.get("arguments", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+
+    td = TOOL_REGISTRY.get(name)
+    status = "success"
+    if td is not None:
+        try:
+            output = await td.func(**args)
+        except Exception as exc:
+            output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+            status = "error"
+    else:
+        ptd = _resolve_pipeline_tool(name)
+        if ptd is not None:
+            try:
+                output = await ptd.func(**args)
+            except Exception as exc:
+                output = f"工作流 {name} 执行失败：{type(exc).__name__}: {exc}"
+                status = "error"
+        else:
+            output = f"未知工具：{name}"
+            status = "error"
+
+    return {
+        "tool_call_id": tc.get("id", ""),
+        "tool_name": name,
+        "arguments": args,
+        "output": str(output),
+        "status": status,
+    }

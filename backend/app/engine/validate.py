@@ -114,7 +114,7 @@ def validate_graph(edges: Mapping[str, Any]) -> list[str]:
 def _validate_wiring(
     wiring: Any,
     available_refs: set[str],
-    input_schema: dict[str, dict[str, Any]] | None = None,
+    input_schema: Any | None = None,
     param_keys: set[str] | None = None,
 ) -> list[str]:
     """inputs 声明校验：必须是映射，``$`` 引用根键 ∈ 参数键 ∪ 上游闭包。
@@ -136,15 +136,15 @@ def _validate_wiring(
 
     # 对照 input_schema 校验 wiring key
     if input_schema is not None:
-        schema_keys = set(input_schema)
+        schema_keys = set(input_schema.model_fields)
         extra = set(wiring) - schema_keys
         if extra:
             errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
 
         # required key 既不在 wiring 中、也不在顶层参数中 → 缺失
         if param_keys is not None:
-            for key, spec in input_schema.items():
-                if not isinstance(spec, dict) or not spec.get("required"):
+            for key, finfo in input_schema.model_fields.items():
+                if not finfo.is_required():
                     continue
                 if key in wiring or key in param_keys:
                     continue

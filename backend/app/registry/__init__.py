@@ -24,8 +24,8 @@ from .types import (
     REGISTRY,
     TOOL_REGISTRY,
     FuncDef,
-    execute_tool_call,
     func,
+    input_schema_to_dict,
     input_schema_to_openai,
     unregister,
     unregister_tool,
@@ -45,7 +45,6 @@ __all__ = [
     # 注销
     "unregister",
     "unregister_tool",
-    # 工具执行 & 格式转换
-    "execute_tool_call",
+    # 格式转换
     "input_schema_to_openai",
 ]
