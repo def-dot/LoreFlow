@@ -22,58 +22,52 @@ class LLMClassifyOutput(BaseModel):
     raw: str = Field(description="原始回复文本")
 
 
+class LLMChatParams(BaseModel):
+    prompt: str = Field(description="用户提示词")
+    system: str | None = Field(default=None, description="系统提示词")
+    context: str | None = Field(default=None, description="上下文")
+    model: str | None = Field(default=None, description="模型名")
+    tools: list[str] | None = Field(default=None, description="工具定义列表（OpenAI function calling 格式）")
+
+
+class LLMClassifyParams(BaseModel):
+    prompt: str = Field(description="待分类文本")
+    model: str | None = Field(default=None, description="模型名")
+    classify_system: str | None = Field(default=None, description="分类系统提示词")
+    classify_labels: list[str] | None = Field(default=None, description="可选标签列表")
+
+
 @func(
     label="LLM 对话",
     metadata={"group": "LLM", "order": 20},
-    description="调用 LLM 模型生成回答，支持 Ollama / MiMo 等 OpenAI 兼容后端",
-    params={
-        "prompt": "用户提示词",
-        "system": "系统提示词",
-        "context": "上下文",
-        "model": "模型名",
-        "tools": "工具定义列表（OpenAI function calling 格式）",
-    },
-    output_model=LLMChatOutput,
+    description="调用 LLM 模型生成回答",
+
 )
-async def llm_chat(
-    prompt: str,
-    system: str | None = None,
-    context: str | None = None,
-    model: str | None = None,
-    tools: list[str] | None = None,
-) -> dict[str, Any]:
-    if not isinstance(prompt, str) or not prompt.strip():
+async def llm_chat(params: LLMChatParams) -> LLMChatOutput:
+    if not isinstance(params.prompt, str) or not params.prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串（在 YAML inputs 声明为必填，创建运行时提供）")
     messages: list[dict[str, str]] = []
-    if isinstance(context, str) and context.strip():
-        prompt = f"参考资料：\n{context}\n\n用户问题：{prompt}"
-    if isinstance(system, str) and system.strip():
-        messages.append({"role": "system", "content": system})
+    prompt = params.prompt
+    if isinstance(params.context, str) and params.context.strip():
+        prompt = f"参考资料：\n{params.context}\n\n用户问题：{params.prompt}"
+    if isinstance(params.system, str) and params.system.strip():
+        messages.append({"role": "system", "content": params.system})
     messages.append({"role": "user", "content": prompt})
-    return await llm_chat_call(model, messages, tools=tools if isinstance(tools, list) else None)
+    raw = await llm_chat_call(params.model, messages, tools=params.tools if isinstance(params.tools, list) else None)
+    return LLMChatOutput(content=raw["content"], tool_calls=raw["tool_calls"])
 
 
 @func(
     label="意图识别",
     description="通用意图分类器",
     metadata={"group": "LLM", "order": 30},
-    params={
-        "prompt": "待分类文本",
-        "model": "模型名",
-        "classify_system": "分类系统提示词",
-        "classify_labels": "可选标签列表",
-    },
-    output_model=LLMClassifyOutput,
+
 )
-async def llm_classify(
-    prompt: str,
-    model: str | None = None,
-    classify_system: str | None = None,
-    classify_labels: list[str] | None = None,
-) -> dict[str, Any]:
-    if not isinstance(prompt, str) or not prompt.strip():
+async def llm_classify(params: LLMClassifyParams) -> LLMClassifyOutput:
+    if not isinstance(params.prompt, str) or not params.prompt.strip():
         raise ValueError("缺少提示词：prompt 必须是非空字符串")
 
+    classify_system = params.classify_system
     if not isinstance(classify_system, str) or not classify_system.strip():
         classify_system = (
             "你是意图分类器，只允许输出以下标签之一，"
@@ -84,12 +78,13 @@ async def llm_classify(
             "human —— 需要转人工客服"
         )
 
+    classify_labels = params.classify_labels
     if not isinstance(classify_labels, list) or not classify_labels:
         classify_labels = ["chat", "rag", "search", "human"]
 
     raw = await llm_chat_call(
-        model,
-        [{"role": "system", "content": classify_system}, {"role": "user", "content": prompt}],
+        params.model,
+        [{"role": "system", "content": classify_system}, {"role": "user", "content": params.prompt}],
     )
     text = raw["content"].strip().strip('"').lower()
-    return {"intent": text, "raw": raw["content"].strip()}
+    return LLMClassifyOutput(intent=text, raw=raw["content"].strip())

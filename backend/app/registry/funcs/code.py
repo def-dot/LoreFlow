@@ -14,23 +14,26 @@ class CodeOutput(BaseModel):
     result: Any = Field(description="脚本返回值")
 
 
+class CodeParams(BaseModel):
+    script: str = Field(description="要执行的 Python 脚本")
+
+
 @func(
     label="代码执行",
     description="执行 Python 脚本；指定 func 时按函数签名自动映射输入，返回值即输出",
     metadata={"group": "基础", "order": 20},
-    params={"script": "要执行的 Python 脚本"},
-    output_model=CodeOutput,
+
 )
-async def code(script: str, **kwargs: Any) -> dict:
-    if not script or not isinstance(script, str):
+async def code(params: CodeParams, **kwargs: Any) -> CodeOutput:
+    if not params.script or not isinstance(params.script, str):
         raise ValueError("code 节点缺少 script")
 
     resp = await http_client().post(
         f"{settings.SANDBOX_URL}/exec",
-        json={"code": script, "ctx": kwargs},
+        json={"code": params.script, "ctx": kwargs},
         timeout=60,
     )
     result = resp.json()
     if resp.status_code != 200:
         raise RuntimeError(result["error"])
-    return {"result": result["result"]}
+    return CodeOutput(result=result["result"])

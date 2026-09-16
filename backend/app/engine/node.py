@@ -80,7 +80,6 @@ class Node:
     condition: str | bool | None = None
     retry: RetryPolicy | None = None
     timeout: float | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def node_type(self) -> FuncDef | None:

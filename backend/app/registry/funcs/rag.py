@@ -52,6 +52,38 @@ class RagChunkOutput(BaseModel):
 class StringResultOutput(BaseModel):
     result: str = Field(description="执行结果")
 
+
+class RagLoadParams(BaseModel):
+    document: dict = Field(description="上传文档")
+
+
+class RagChunkParams(BaseModel):
+    text: str = Field(description="文档正文")
+
+
+class RagEmbedParams(BaseModel):
+    doc_name: str = Field(description="文档名称")
+    chunks: list = Field(description="文本段列表")
+
+
+class RagUpsertParams(BaseModel):
+    doc_name: str = Field(default="", description="文档名称")
+    embeds: list | None = Field(default=None, description="向量列表")
+
+
+class RagRetrieveParams(BaseModel):
+    prompt: str = Field(default="", description="检索关键词")
+
+
+class IngestKbDocumentParams(BaseModel):
+    upload_id: str = Field(description="上传文件的 ID")
+    filename: str = Field(description="文件名（含扩展名）")
+
+
+class SearchKnowledgeBaseParams(BaseModel):
+    query: str = Field(description="检索关键词或自然语言问题")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,73 +91,69 @@ logger = logging.getLogger(__name__)
     label="加载文档",
     description="读取上传文档内容",
     metadata={"group": "RAG", "order": 10},
-    params={"document": "上传文档"},
-    output_model=RagLoadOutput,
+
 )
-async def rag_load(document: dict) -> dict[str, Any]:
+async def rag_load(params: RagLoadParams) -> RagLoadOutput:
     """从上传目录读取 params 声明的 document 文件"""
-    if not isinstance(document, dict):
+    if not isinstance(params.document, dict):
         raise ValueError("缺少上传文档：document 必须是 {id, filename} 字段")
-    upload_id = document.get("id")
+    upload_id = params.document.get("id")
     if not isinstance(upload_id, str) or not upload_id.strip():
         raise ValueError("上传文档缺少文件id字段：document.id")
     text = files.read_upload(upload_id)  # 路径穿越/扩展名非法/文件缺失 → 中文 ValueError
     if not text.strip():
         raise ValueError("上传文档正文为空：文件内容为空白文本")
-    filename = str(document.get("filename") or "上传文档")
+    filename = str(params.document.get("filename") or "上传文档")
     stem = Path(filename).stem or "document"
-    return {"doc_name": stem, "text": text}
+    return RagLoadOutput(doc_name=stem, text=text)
 
 
 @func(
     label="切块",
     description="按空行把正文切成语义段",
     metadata={"group": "RAG", "order": 20},
-    params={"text": "文档正文"},
-    output_model=RagChunkOutput,
+
 )
-async def rag_chunk(text: str) -> dict:
-    if not isinstance(text, str) or not text.strip():
+async def rag_chunk(params: RagChunkParams) -> RagChunkOutput:
+    if not isinstance(params.text, str) or not params.text.strip():
         raise ValueError("缺少文档正文字段text")
-    return {"result": [p.strip() for p in text.split("\r\n\r\n") if p.strip()]}
+    return RagChunkOutput(result=[p.strip() for p in params.text.split("\r\n\r\n") if p.strip()])
 
 
 @func(
     label="向量化",
     description="为每个 chunk 生成向量",
     metadata={"group": "RAG", "order": 30},
-    params={"doc_name": "文档名称", "chunks": "文本段列表"},
-    output_model=RagEmbedOutput,
+
 )
-async def rag_embed(doc_name: str, chunks: list) -> dict:
-    if not isinstance(doc_name, str) or not doc_name.strip():
+async def rag_embed(params: RagEmbedParams) -> RagEmbedOutput:
+    if not isinstance(params.doc_name, str) or not params.doc_name.strip():
         raise ValueError("缺少文档名称字段doc_name")
-    if not isinstance(chunks, list):
+    if not isinstance(params.chunks, list):
         raise ValueError("缺少切块信息字段chunks")
-    return {"result": [
-        {
-            "chunk_id": f"{doc_name}-c{i}",
-            "text": chunk,
-            "vector": [float(sum(ord(c) * (d + 1) for c in chunk) % 997) for d in range(8)],
-        }
-        for i, chunk in enumerate(chunks)
-    ]}
+    return RagEmbedOutput(result=[
+        RagEmbedItem(
+            chunk_id=f"{params.doc_name}-c{i}",
+            text=chunk,
+            vector=[float(sum(ord(c) * (d + 1) for c in chunk) % 997) for d in range(8)],
+        )
+        for i, chunk in enumerate(params.chunks)
+    ])
 
 
 @func(
     label="写入向量库",
     description="批量写入向量信息",
     metadata={"group": "RAG", "order": 40},
-    params={"doc_name": "文档名称", "embeds": "向量列表"},
-    output_model=RagUpsertOutput,
+
 )
-async def rag_upsert(doc_name: str = "", embeds: list | None = None) -> dict:
+async def rag_upsert(params: RagUpsertParams) -> RagUpsertOutput:
     await asyncio.sleep(0.05)
-    if not isinstance(doc_name, str) or not doc_name.strip():
+    if not isinstance(params.doc_name, str) or not params.doc_name.strip():
         raise ValueError("缺少文档名称字段doc_name")
-    if not isinstance(embeds, list):
+    if not isinstance(params.embeds, list):
         raise ValueError("缺少向量输出字段embeds")
-    return {"result": f"upserted {len(embeds)} chunks from {doc_name}"}
+    return RagUpsertOutput(result=f"upserted {len(params.embeds)} chunks from {params.doc_name}")
 
 
 # 模拟知识库：与 rag_retrieve 的演示数据同源（真实实现应为向量库检索，见 rag_embed/rag_upsert）
@@ -152,13 +180,12 @@ _MOCK_KB: list[dict[str, Any]] = [
     label="知识库检索",
     description="关键词查询返回片段",
     metadata={"group": "RAG", "order": 50},
-    params={"prompt": "检索关键词"},
-    output_model=RagRetrieveOutput,
+
 )
-async def rag_retrieve(prompt: str = "") -> dict:
+async def rag_retrieve(params: RagRetrieveParams) -> RagRetrieveOutput:
     await asyncio.sleep(0.05)
-    ranked = sorted(_MOCK_KB, key=lambda c: -sum(str(prompt).count(k) for k in c["keywords"]))
-    return {"result": [{"source": c["source"], "text": c["text"]} for c in ranked[:2]]}
+    ranked = sorted(_MOCK_KB, key=lambda c: -sum(str(params.prompt).count(k) for k in c["keywords"]))
+    return RagRetrieveOutput(result=[RagRetrieveItem(source=c["source"], text=c["text"]) for c in ranked[:2]])
 
 
 # ---------------------------------------------------------------------------
@@ -179,49 +206,44 @@ def reset_tool_kb_id(token: contextvars.Token) -> None:
 
 
 @func(
-    name="ingest_kb_document",
+
     description=(
         "将上传的文档导入关联的知识库，切块并向量化，供后续检索使用。"
         "当用户上传文件并希望围绕该文件内容多轮提问时调用。"
     ),
     metadata={"group": "RAG", "order": 60},
-    params={
-        "upload_id": "上传文件的 ID",
-        "filename": "文件名（含扩展名）",
-    },
-    output_model=StringResultOutput,
+
 )
-async def ingest_kb_document_tool(upload_id: str, filename: str) -> dict:
+async def ingest_kb_document(params: IngestKbDocumentParams) -> StringResultOutput:
     kb_id = _tool_kb_ctx.get()
     if kb_id is None:
-        return {"result": "当前 Agent 未关联知识库，无法导入文档。请先在 Agent 设置中关联知识库。"}
+        return StringResultOutput(result="当前 Agent 未关联知识库，无法导入文档。请先在 Agent 设置中关联知识库。")
     try:
-        result = await knowledge.ingest_document(kb_id, upload_id, filename)
-        return {"result": f"文档「{filename}」已导入知识库，共 {result['chunk_count']} 个切块。"}
+        result = await knowledge.ingest_document(kb_id, params.upload_id, params.filename)
+        return StringResultOutput(result=f"文档「{params.filename}」已导入知识库，共 {result['chunk_count']} 个切块。")
     except Exception as exc:
-        return {"result": f"文档导入失败：{exc}"}
+        return StringResultOutput(result=f"文档导入失败：{exc}")
 
 
 @func(
-    name="search_knowledge_base",
+
     description=(
         "从关联的知识库中检索与问题最相关的文档片段。"
         "当用户提问需要参考已入库文档时使用此工具。"
     ),
     metadata={"group": "RAG", "order": 70},
-    params={"query": "检索关键词或自然语言问题"},
-    output_model=StringResultOutput,
+
 )
-async def search_knowledge_base_tool(query: str) -> dict:
+async def search_knowledge_base(params: SearchKnowledgeBaseParams) -> StringResultOutput:
     kb_id = _tool_kb_ctx.get()
     if kb_id is None:
-        return {"result": "当前 Agent 未关联知识库。请先在 Agent 设置中关联知识库。"}
+        return StringResultOutput(result="当前 Agent 未关联知识库。请先在 Agent 设置中关联知识库。")
 
-    results = await knowledge.search_chunks(kb_id, query, top_k=5)
+    results = await knowledge.search_chunks(kb_id, params.query, top_k=5)
     if not results:
-        return {"result": "知识库中没有已入库的文档，请先上传并导入文档。"}
+        return StringResultOutput(result="知识库中没有已入库的文档，请先上传并导入文档。")
 
     lines = []
     for i, r in enumerate(results, 1):
         lines.append(f"[{i}] 来源: {r['filename']}（相似度: {r['similarity']}）\n{r['content']}")
-    return {"result": "\n\n".join(lines)}
+    return StringResultOutput(result="\n\n".join(lines))

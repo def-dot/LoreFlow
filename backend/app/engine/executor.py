@@ -323,15 +323,74 @@ class DAGExecutor:
         target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
 
+        # 对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）
+        def _resolve_deep(obj: Any) -> Any:
+            if isinstance(obj, str) and obj.startswith("$"):
+                val: Any = self.ctx
+                for part in obj[1:].split("."):
+                    if not isinstance(val, Mapping) or part not in val:
+                        return obj  # 无法解析，保留原值
+                    val = val[part]
+                return val
+            if isinstance(obj, dict):
+                return {k: _resolve_deep(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_resolve_deep(v) for v in obj]
+            return obj
+
+        for k, v in list(target.items()):
+            if isinstance(v, dict):
+                target[f"_raw_{k}"] = v          # 保留原始模板
+                target[k] = _resolve_deep(v)      # 注入解析后的值
+
         sig = inspect.signature(node.func)
         if "ctx" in sig.parameters:
             coro = node.func(target)
         else:
-            kwargs = {p: target[p] for p in sig.parameters if p in target}
-            has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-            if has_var_kw:
-                kwargs.update({k: v for k, v in target.items() if k not in kwargs and not k.startswith("_")})
-            coro = node.func(**kwargs)
+            # 检测 BaseModel 参数 → 从 target 自动构造实例传入
+            model_params: dict[str, type] = {}
+            for pname, param in sig.parameters.items():
+                if pname.startswith("_") or param.kind in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                ):
+                    continue
+                ann = param.annotation
+                if isinstance(ann, type) and issubclass(ann, BaseModel):
+                    model_params[pname] = ann
+
+            if model_params:
+                kwargs = {}
+                remaining = dict(target)
+                for pname, model_cls in model_params.items():
+                    fields = set(model_cls.model_fields)
+                    kwargs[pname] = model_cls(**{k: remaining.pop(k) for k in fields if k in remaining})
+                for pname, param in sig.parameters.items():
+                    if pname in kwargs:
+                        continue
+                    if param.kind == inspect.Parameter.VAR_KEYWORD:
+                        kwargs[pname] = {k: v for k, v in remaining.items() if not k.startswith("_")}
+                        remaining.clear()
+                    elif pname in target:
+                        kwargs[pname] = target[pname]
+                coro = node.func(**kwargs)
+            else:
+                kwargs = {p: target[p] for p in sig.parameters if p in target}
+                has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                if has_var_kw:
+                    kwargs.update({k: v for k, v in target.items() if k not in kwargs and not k.startswith("_")})
+                coro = node.func(**kwargs)
         if node.timeout is not None:
-            return await asyncio.wait_for(coro, timeout=node.timeout)
-        return await coro
+            output = await asyncio.wait_for(coro, timeout=node.timeout)
+        else:
+            output = await coro
+
+        # ---- output_schema 自动校验 ----
+        func_def = node.node_type
+        if func_def is not None and func_def.output_schema is not None:
+            if isinstance(output, func_def.output_schema):
+                output = output.model_dump()
+            else:
+                output = func_def.output_schema.model_validate(output).model_dump()
+
+        return output

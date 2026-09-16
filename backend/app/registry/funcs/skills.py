@@ -10,9 +10,13 @@ class LoadSkillOutput(BaseModel):
     result: str = Field(description="技能完整指令")
 
 
-@func(node=False, description="加载技能的完整指令", label="加载技能", params={"name": "技能名称"}, output_model=LoadSkillOutput)
-async def load_skill(name: str) -> dict:
-    sd = SKILL_REGISTRY.get(name)
+class LoadSkillParams(BaseModel):
+    name: str = Field(description="技能名称")
+
+
+@func(node=False, description="加载技能的完整指令", label="加载技能")
+async def load_skill(params: LoadSkillParams) -> LoadSkillOutput:
+    sd = SKILL_REGISTRY.get(params.name)
     if not sd:
-        return {"result": f"技能不存在：{name}"}
-    return {"result": sd.body}
+        return LoadSkillOutput(result=f"技能不存在：{params.name}")
+    return LoadSkillOutput(result=sd.body)

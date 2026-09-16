@@ -131,7 +131,6 @@ class DAG:
         retry: RetryPolicy | None = None,
         timeout: float | None = None,
         condition: str | bool | None = None,
-        metadata: dict[str, Any] | None = None,
     ) -> Callable[[NodeFunc], NodeFunc]:
         """Decorator: register an async function as a DAG node.
 
@@ -152,7 +151,6 @@ class DAG:
                     retry=retry,
                     timeout=timeout,
                     condition=condition,
-                    metadata=metadata or {},
                 )
             )
             return func

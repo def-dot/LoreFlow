@@ -29,7 +29,7 @@ Quick start::
     print(results["process"].output)
 """
 
-from app.registry.funcs.human import human_review
+from app.registry.funcs.human import human
 
 from .dag import DAG, terminal_approver
 from .declarative import load_dag
@@ -51,7 +51,7 @@ __all__ = [
     "NodeStatus",
     "RetryPolicy",
     "SuspendExecution",
-    "human_review",
+    "human",
     "load_dag",
     "terminal_approver",
     "wired_ctx",

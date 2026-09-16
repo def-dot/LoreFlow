@@ -19,7 +19,7 @@ from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
 from app.engine.resolve import parse_retry
 from app.engine.validate import validate_config
-from app.registry import REGISTRY, input_schema_to_dict, output_schema_to_dict
+from app.registry import REGISTRY
 
 logger = get_logger(__name__)
 
@@ -102,8 +102,8 @@ def detail_from_config(
             "type_label": node_type.label if node_type else None,
             "description": spec.get("description"),
             "type_description": node_type.description if node_type else None,
-            "type_input_schema": input_schema_to_dict(node_type.input_schema) if node_type else None,
-            "type_output_schema": output_schema_to_dict(node_type.output_schema) if node_type else None,
+            "type_input_schema": node_type.input_schema.model_json_schema() if node_type else None,
+            "type_output_schema": node_type.output_schema.model_json_schema() if node_type else None,
             "depends_on": list(spec.get("depends_on") or []),
             "inputs": spec.get("inputs"),
             "retry": _retry_summary(parse_retry(spec.get("retry"))),

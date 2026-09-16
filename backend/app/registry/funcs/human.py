@@ -15,6 +15,11 @@ class HumanReviewOutput(BaseModel):
     payload: dict = Field(description="审核载荷")
     decision: HumanDecision = Field(description="审核决策")
 
+
+class HumanReviewParams(BaseModel):
+    review: dict[str, str] | None = Field(default=None, description="审核卡片声明 {$键: 标签文本}")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,20 +27,22 @@ logger = logging.getLogger(__name__)
     tool=False,
     label="人工审核",
     description="人工审核节点，暂停等待审批",
-    name="human",
+
     metadata={"group": "基础", "order": 10},
-    params={"_review": "审核卡片声明 {$键: 标签文本}"},
-    output_model=HumanReviewOutput,
+
 )
-async def human_review(_approver: Any, _node: str, _review: dict | None = None, **kwargs: Any) -> dict[str, Any]:
+async def human(params: HumanReviewParams, _approver: Any = None, _node: str = "", **kwargs: Any) -> HumanReviewOutput:
     """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。
+
+    review 由引擎预解析 $ 引用，值即实际数据。
+    _raw_review 为引擎自动注入的原始模板（含 $ 前缀键和标签文本）。
     """
     if _approver is None:
         raise ValueError("人工审核节点缺少 approver —— dag.run(approver=...) 未提供")
-    if isinstance(_review, dict) and _review:
-        # 卡片键带 $ 引用前缀（声明层约定）；载荷与决策字段用剥前缀后的裸键
-        fields = {k.removeprefix("$"): kwargs.get(k.removeprefix("$")) for k in _review}
-        payload: dict[str, Any] = {**fields, "_review": {k.removeprefix("$"): v for k, v in _review.items()}}
+    if isinstance(params.review, dict) and params.review:
+        raw: dict[str, str] = kwargs.pop("_raw_review", {})
+        labels = {k.removeprefix("$"): v for k, v in raw.items()} if raw else {}
+        payload: dict[str, Any] = {**params.review, "_review": labels or params.review}
     else:
         payload = dict(kwargs)
 
@@ -44,7 +51,7 @@ async def human_review(_approver: Any, _node: str, _review: dict | None = None, 
     decision = await _approver(_node, payload)
     if decision.get("approve"):
         logger.info("[%s] approved by human reviewer", _node)
-        return {"payload": payload, "decision": decision}
+        return HumanReviewOutput(payload=payload, decision=HumanDecision(**decision))
 
     from app.engine.node import HumanRejected
 

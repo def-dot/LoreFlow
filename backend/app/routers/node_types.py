@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from app.core.response import UnifiedResponseRoute
-from app.registry import REGISTRY, input_schema_to_dict, output_schema_to_dict
+from app.registry import REGISTRY
 from app.schemas.node_types import NodeTypeOut
 
 router = APIRouter(prefix="/node-types", route_class=UnifiedResponseRoute, tags=["node-types"])
@@ -21,8 +21,8 @@ async def list_node_types() -> list[NodeTypeOut]:
             label=t.label,
             description=t.description,
             metadata=t.metadata,
-            input_schema=input_schema_to_dict(t.input_schema),
-            output_schema=output_schema_to_dict(t.output_schema),
+            input_schema=t.input_schema.model_json_schema() if t.input_schema else None,
+            output_schema=t.output_schema.model_json_schema() if t.output_schema else None,
         )
         for t in sorted_types
     ]

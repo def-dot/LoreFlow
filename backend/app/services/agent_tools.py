@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import Field, create_model
 
-from app.registry.types import TOOL_REGISTRY, FuncDef, input_schema_to_openai
+from app.registry.types import TOOL_REGISTRY, FuncDef
 from app.registry.skills import SKILL_REGISTRY
 
 
@@ -121,7 +121,11 @@ async def _execute_pipeline(pipeline_name: str, inputs: dict[str, Any]) -> str:
 
 def _tooldef_to_openai(td: FuncDef) -> dict[str, Any]:
     """FuncDef → OpenAI function calling 格式。"""
-    return input_schema_to_openai(td)
+    schema = td.input_schema.model_json_schema() if td.input_schema else {"type": "object", "properties": {}}
+    return {
+        "type": "function",
+        "function": {"name": td.name, "description": td.description, "parameters": schema},
+    }
 
 
 def build_skill_prompt(skill_names: list[str]) -> str | None:
