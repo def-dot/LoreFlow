@@ -14,8 +14,11 @@ import asyncio
 import inspect
 import logging
 import time
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
+
+from pydantic import BaseModel
 
 from .condition import eval_condition
 from .node import HumanRejected, Node, wired_ctx
@@ -314,83 +317,102 @@ class DAGExecutor:
     # ------------------------------------------------------------------
 
     async def _call(self, node: Node) -> Any:
-        """Invoke *node.func* with timeout if configured.
-
-        Dispatch strategy:
-        - ``ctx`` parameter present → pass entire context dict (legacy / meta nodes)
-        - otherwise → map context keys to function's keyword arguments by name
-        """
+        """Invoke *node.func* with timeout, output validation and deep $-resolution."""
         target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
+        self._resolve_deep_inputs(target)
 
-        # 对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）
-        def _resolve_deep(obj: Any) -> Any:
+        kwargs = self._build_kwargs(node.func, target)
+        coro = node.func(**kwargs)
+
+        output = await asyncio.wait_for(coro, timeout=node.timeout) if node.timeout is not None else await coro
+        return self._validate_output(node, output)
+
+    # ---- argument resolution ----
+
+    @staticmethod
+    def _build_kwargs(func: Callable, target: dict[str, Any]) -> dict[str, Any]:
+        """从 target 构造 func 的 kwargs。三种派发路径：
+        1. ctx 参数 → 传整个 target
+        2. BaseModel 参数 → 从 target 字段自动构造实例
+        3. 普通 kwargs → 按名称匹配 target 键
+        """
+        sig = inspect.signature(func)
+
+        # 1) ctx 风格
+        if "ctx" in sig.parameters:
+            return {"ctx": target}
+
+        # 识别 BaseModel 参数
+        model_params: dict[str, type[BaseModel]] = {}
+        for pname, param in sig.parameters.items():
+            if pname.startswith("_") or param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+            ann = param.annotation
+            if isinstance(ann, type) and issubclass(ann, BaseModel):
+                model_params[pname] = ann
+
+        # 2) BaseModel 派发
+        if model_params:
+            kwargs: dict[str, Any] = {}
+            remaining = dict(target)
+
+            for pname, model_cls in model_params.items():
+                fields = set(model_cls.model_fields)
+                kwargs[pname] = model_cls(**{k: remaining.pop(k) for k in fields if k in remaining})
+
+            # 处理剩余参数：_前缀透传、VAR_KEYWORD 收集、普通参数匹配
+            for pname, param in sig.parameters.items():
+                if pname in kwargs:
+                    continue
+                if param.kind == inspect.Parameter.VAR_KEYWORD:
+                    kwargs[pname] = {k: v for k, v in remaining.items() if not k.startswith("_")}
+                    remaining.clear()
+                elif pname in target:
+                    kwargs[pname] = target[pname]
+
+            return kwargs
+
+        # 3) 普通 kwargs 派发
+        kwargs = {p: target[p] for p in sig.parameters if p in target}
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs.update({k: v for k, v in target.items() if k not in kwargs and not k.startswith("_")})
+        return kwargs
+
+    # ---- deep $-resolution ----
+
+    def _resolve_deep_inputs(self, target: dict[str, Any]) -> None:
+        """对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）。"""
+        def _resolve(obj: Any) -> Any:
             if isinstance(obj, str) and obj.startswith("$"):
                 val: Any = self.ctx
                 for part in obj[1:].split("."):
                     if not isinstance(val, Mapping) or part not in val:
-                        return obj  # 无法解析，保留原值
+                        return obj
                     val = val[part]
                 return val
             if isinstance(obj, dict):
-                return {k: _resolve_deep(v) for k, v in obj.items()}
+                return {k: _resolve(v) for k, v in obj.items()}
             if isinstance(obj, list):
-                return [_resolve_deep(v) for v in obj]
+                return [_resolve(v) for v in obj]
             return obj
 
         for k, v in list(target.items()):
             if isinstance(v, dict):
-                target[f"_raw_{k}"] = v          # 保留原始模板
-                target[k] = _resolve_deep(v)      # 注入解析后的值
+                target[f"_raw_{k}"] = v
+                target[k] = _resolve(v)
 
-        sig = inspect.signature(node.func)
-        if "ctx" in sig.parameters:
-            coro = node.func(target)
-        else:
-            # 检测 BaseModel 参数 → 从 target 自动构造实例传入
-            model_params: dict[str, type] = {}
-            for pname, param in sig.parameters.items():
-                if pname.startswith("_") or param.kind in (
-                    inspect.Parameter.VAR_POSITIONAL,
-                    inspect.Parameter.VAR_KEYWORD,
-                ):
-                    continue
-                ann = param.annotation
-                if isinstance(ann, type) and issubclass(ann, BaseModel):
-                    model_params[pname] = ann
+    # ---- output validation ----
 
-            if model_params:
-                kwargs = {}
-                remaining = dict(target)
-                for pname, model_cls in model_params.items():
-                    fields = set(model_cls.model_fields)
-                    kwargs[pname] = model_cls(**{k: remaining.pop(k) for k in fields if k in remaining})
-                for pname, param in sig.parameters.items():
-                    if pname in kwargs:
-                        continue
-                    if param.kind == inspect.Parameter.VAR_KEYWORD:
-                        kwargs[pname] = {k: v for k, v in remaining.items() if not k.startswith("_")}
-                        remaining.clear()
-                    elif pname in target:
-                        kwargs[pname] = target[pname]
-                coro = node.func(**kwargs)
-            else:
-                kwargs = {p: target[p] for p in sig.parameters if p in target}
-                has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-                if has_var_kw:
-                    kwargs.update({k: v for k, v in target.items() if k not in kwargs and not k.startswith("_")})
-                coro = node.func(**kwargs)
-        if node.timeout is not None:
-            output = await asyncio.wait_for(coro, timeout=node.timeout)
-        else:
-            output = await coro
-
-        # ---- output_schema 自动校验 ----
+    @staticmethod
+    def _validate_output(node: Node, output: Any) -> dict[str, Any]:
+        """若 node 声明了 output_schema，用 Pydantic 校验并转 dict。"""
         func_def = node.node_type
         if func_def is not None and func_def.output_schema is not None:
             if isinstance(output, func_def.output_schema):
-                output = output.model_dump()
-            else:
-                output = func_def.output_schema.model_validate(output).model_dump()
-
+                return output.model_dump()
+            return func_def.output_schema.model_validate(output).model_dump()
         return output
