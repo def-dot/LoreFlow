@@ -25,12 +25,9 @@ class CodeParams(BaseModel):
 
 )
 async def code(params: CodeParams, **kwargs: Any) -> CodeOutput:
-    if not params.script or not isinstance(params.script, str):
-        raise ValueError("code 节点缺少 script")
-
     resp = await http_client().post(
         f"{settings.SANDBOX_URL}/exec",
-        json={"code": params.script, "ctx": kwargs},
+        json={"code": params.script, "params": kwargs},
         timeout=60,
     )
     result = resp.json()

@@ -11,12 +11,12 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 # /exec — code 节点调用，签名 main(**ctx)
 # ---------------------------------------------------------------------------
 
-def _exec(code: str, ctx: dict) -> dict:
+def _exec(code: str, params: dict) -> dict:
     ns: dict = {"__builtins__": __builtins__}
     exec(code, ns)
     fn = ns["main"]
-    params = list(inspect.signature(fn).parameters)
-    return {"result": fn(**{p: ctx[p] for p in params})}
+    names = list(inspect.signature(fn).parameters)
+    return {"result": fn(**{p: params[p] for p in names})}
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         try:
             if self.path == "/exec":
-                result = _exec(body["code"], body.get("ctx", {}))
+                result = _exec(body["code"], body.get("params", {}))
                 self._respond(200, result=result["result"])
             elif self.path == "/run":
                 result = _run(body["code"], body.get("timeout", 60))
