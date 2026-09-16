@@ -2,7 +2,6 @@
 LLM 节点 — llm_chat / llm_classify，调用 app.services.llm 的公共接口。
 """
 
-from __future__ import annotations
 
 from typing import Any
 

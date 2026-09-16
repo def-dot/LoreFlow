@@ -2,7 +2,6 @@
 RAG 演示节点 — 文档入库与知识库检索。
 """
 
-from __future__ import annotations
 
 import asyncio
 import contextvars

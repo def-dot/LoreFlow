@@ -2,7 +2,6 @@
 agent 节点 — LLM + 工具自动循环，直到无需工具或达到最大迭代次数。
 """
 
-from __future__ import annotations
 
 import logging
 from typing import Any

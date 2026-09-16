@@ -6,7 +6,6 @@ Web 相关函数 — 抓取、请求、搜索。
 - ``web_search``   Tavily 搜索（工具）
 """
 
-from __future__ import annotations
 
 import asyncio
 import os
