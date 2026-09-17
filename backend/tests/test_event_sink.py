@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from app.engine import DAG, RetryPolicy
-from app.engine.node import Node
+from app.engine.node import Node, make_func_def
 from app.models.run import RunRecord
 from app.services.orchestrator import run_pipeline
 
@@ -20,7 +20,7 @@ async def test_retry_history_accumulates() -> None:
         return "ok"
 
     dag = DAG("retry_test")
-    dag.add_node(Node(name="flaky", func=flaky, retry=RetryPolicy(max_retries=3)))
+    dag.add_node(Node(func_def=make_func_def(flaky), name="flaky", retry=RetryPolicy(max_retries=3)))
 
     record = RunRecord(nodes={})
     with patch("app.services.orchestrator.runs.save_nodes", new=AsyncMock()):
@@ -46,7 +46,7 @@ async def test_retry_history_on_final_failure() -> None:
         raise TimeoutError("boom")
 
     dag = DAG("fail_test")
-    dag.add_node(Node(name="bad", func=always_fail, retry=RetryPolicy(max_retries=2)))
+    dag.add_node(Node(func_def=make_func_def(always_fail), name="bad", retry=RetryPolicy(max_retries=2)))
 
     record = RunRecord(nodes={})
     with patch("app.services.orchestrator.runs.save_nodes", new=AsyncMock()):
@@ -67,7 +67,7 @@ async def test_no_log_without_retries() -> None:
         return "done"
 
     dag = DAG("ok_test")
-    dag.add_node(Node(name="ok", func=ok))
+    dag.add_node(Node(func_def=make_func_def(ok), name="ok"))
 
     record = RunRecord(nodes={})
     with patch("app.services.orchestrator.runs.save_nodes", new=AsyncMock()):

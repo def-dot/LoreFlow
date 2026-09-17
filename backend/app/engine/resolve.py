@@ -47,7 +47,7 @@ def resolve_exception(name: str) -> type:
 
 
 def parse_retry(spec: Any) -> RetryPolicy | None:
-    """Parse a retry spec: ``retry: 3`` or a RetryPolicy field mapping.
+    """Parse a retry spec: ``retry: 3``, a RetrySpec model, or a RetryPolicy field mapping.
 
     YAML ``retry: no`` (False) explicitly disables retry; ``retry: yes``
     (True) is ambiguous and rejected.
@@ -60,6 +60,10 @@ def parse_retry(spec: Any) -> RetryPolicy | None:
 
     if isinstance(spec, int):
         return RetryPolicy(max_retries=spec)
+
+    # Pydantic RetrySpec → dict
+    if hasattr(spec, "model_dump"):
+        spec = spec.model_dump(exclude_none=True)
 
     if not isinstance(spec, dict):
         raise ValueError(f"无效的 retry 配置: {spec!r}（应为整数或映射）")

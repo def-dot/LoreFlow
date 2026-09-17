@@ -18,7 +18,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy, load_dag
 from app.engine.resolve import parse_retry
-from app.engine.validate import validate_config
+from app.engine.schema import PipelineConfig
 from app.registry import REGISTRY
 
 logger = get_logger(__name__)
@@ -33,15 +33,15 @@ def list_pipelines() -> list[dict[str, Any]]:
         return entries
     for path in sorted(PIPELINES_DIR.glob("*.yaml")):
         try:
-            _, config = get_pipeline(path.stem)
+            _, cfg = _load_pipeline(path)
         except Exception as exc:
             logger.warning("Skip pipeline %s: %s", path.name, exc)
             continue
         entries.append({
-            "name": str(config.get("name") or path.stem),
-            "description": str(config.get("description") or ""),
-            "node_count": len(config.get("nodes") or {}),
-            "params": config.get("inputs") or {},
+            "name": cfg.name or path.stem,
+            "description": cfg.description or "",
+            "node_count": len(cfg.nodes),
+            "params": {k: v.model_dump() for k, v in cfg.inputs.items()},
         })
     return entries
 
@@ -62,24 +62,31 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
     return "，".join(parts)
 
 
-def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
-    """根据 pipeline name 获取 YAML 原文和解析后的 config。不存在 404。"""
-    path = PIPELINES_DIR / (name + ".yaml")
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
+def _load_pipeline(path: Path) -> tuple[str, PipelineConfig]:
+    """读取并解析 YAML → (原文, PipelineConfig)。"""
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ValueError(f"无法读取配置文件 {path!r}: {exc}") from exc
     try:
-        config = yaml.safe_load(raw)
+        data = yaml.safe_load(raw)
     except yaml.YAMLError as exc:
         raise ValueError(f"配置文件 {path!r} 的 YAML 无效: {exc}") from exc
-    if config is None:
-        config = {}
-    if not isinstance(config, dict):
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
         raise ValueError("顶层必须是映射(dict)")
-    return raw, config
+    cfg = PipelineConfig(**data)
+    return raw, cfg
+
+
+def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
+    """根据 pipeline name 获取 YAML 原文和解析后的 config dict。不存在 404。"""
+    path = PIPELINES_DIR / (name + ".yaml")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
+    raw, cfg = _load_pipeline(path)
+    return raw, cfg.model_dump()
 
 
 def detail_from_config(
@@ -87,39 +94,38 @@ def detail_from_config(
     config: dict[str, Any],
 ) -> dict[str, Any]:
     """已解析的 YAML 配置 → 详情展示数据（图、节点行、YAML 原文）。"""
-    dag = load_dag(config)
-    nodes_cfg = config.get("nodes") or {}
+    cfg = PipelineConfig(**config)
+    dag = load_dag(cfg)
     rows: list[dict[str, Any]] = []
     for name in dag.topological_order():
-        spec = nodes_cfg.get(name) or {}
-        type_val = spec.get("type")
+        spec = cfg.nodes.get(name)
+        type_val = spec.type if spec else None
         node_type = REGISTRY.get(type_val) if type_val else None
 
         row: dict[str, Any] = {
             "name": name,
-            "label": spec.get("label"),
+            "label": spec.label if spec else None,
             "type": type_val,
             "type_label": node_type.label if node_type else None,
-            "description": spec.get("description"),
+            "description": spec.description if spec else None,
             "type_description": node_type.description if node_type else None,
             "type_input_schema": node_type.input_schema.model_json_schema() if node_type and node_type.input_schema else None,
             "type_output_schema": node_type.output_schema.model_json_schema() if node_type and node_type.output_schema else None,
-            "depends_on": list(spec.get("depends_on") or []),
-            "inputs": spec.get("inputs"),
-            "retry": _retry_summary(parse_retry(spec.get("retry"))),
-            "condition": spec.get("condition"),
+            "depends_on": list(spec.depends_on) if spec else [],
+            "inputs": spec.inputs if spec else None,
+            "retry": _retry_summary(parse_retry(spec.retry)) if spec else None,
+            "condition": spec.condition if spec else None,
         }
-
         rows.append(row)
 
     return {
         "name": dag.name,
-        "description": str(config.get("description") or ""),
+        "description": cfg.description or "",
         "node_count": len(dag.node_names),
         "mermaid": dag.to_mermaid(),
         "source": raw,
         "nodes": rows,
-        "params": config.get("inputs") or {},
+        "params": {k: v.model_dump() for k, v in cfg.inputs.items()},
     }
 
 
@@ -128,49 +134,46 @@ def detail_from_config(
 # ---------------------------------------------------------------------------
 
 
-def _parse_and_validate(definition: str) -> dict[str, Any]:
-    """解析 YAML 并校验 DAG 配置；失败抛 ValueError。"""
+def _parse_and_validate(definition: str) -> PipelineConfig:
+    """解析 YAML 并校验 DAG 配置；失败抛 ValueError。
+
+    校验统一由 PipelineConfig.__init__ 完成（结构 + 语义）。
+    """
     try:
-        config = yaml.safe_load(definition)
+        data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
         raise ValueError(f"YAML 解析失败: {exc}") from exc
-    if not isinstance(config, dict):
+    if not isinstance(data, dict):
         raise ValueError("YAML 顶层必须是映射(dict)")
-    if not config.get("name"):
+    if not data.get("name"):
         raise ValueError("YAML 必须包含 name 字段")
-    errors = validate_config(config)
-    if errors:
-        raise ValueError("配置校验失败:\n  " + "\n  ".join(errors))
-    return config
+    return PipelineConfig(**data)
 
 
 def create_pipeline(definition: str) -> str:
     """创建 pipeline 文件：校验 YAML → 写入目录。返回 name。"""
-    config = _parse_and_validate(definition)
+    cfg = _parse_and_validate(definition)
     PIPELINES_DIR.mkdir(parents=True, exist_ok=True)
-    dest = PIPELINES_DIR / f"{config['name']}.yaml"
+    dest = PIPELINES_DIR / f"{cfg.name}.yaml"
     if dest.is_file():
-        raise HTTPException(status_code=409, detail=f"工作流 {config['name']!r} 已存在")
+        raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
     dest.write_text(definition, encoding="utf-8")
-    return str(config["name"])
+    return cfg.name
 
 
 def update_pipeline(name: str, definition: str) -> str:
     """更新 pipeline 文件。如果 YAML name 变了，自动重命名文件。返回最终 name。"""
-    filename = name + ".yaml"
-    path = PIPELINES_DIR / filename
+    path = PIPELINES_DIR / (name + ".yaml")
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
-    config = _parse_and_validate(definition)
-    new_name = str(config["name"])
-    new_filename = new_name + ".yaml"
-    new_path = PIPELINES_DIR / new_filename
+    cfg = _parse_and_validate(definition)
+    new_path = PIPELINES_DIR / f"{cfg.name}.yaml"
     if new_path != path:
         if new_path.is_file():
-            raise HTTPException(status_code=409, detail=f"工作流 {new_name!r} 已存在")
+            raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
         new_path.write_text(definition, encoding="utf-8")
         path.unlink()
-        return new_name
+        return cfg.name
     path.write_text(definition, encoding="utf-8")
     return name
 

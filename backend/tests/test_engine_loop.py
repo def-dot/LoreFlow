@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, Node, NodeStatus
+from app.engine import DAG, Node, NodeStatus, make_func_def
 
 
 async def test_loop_until_condition() -> None:
@@ -26,8 +26,8 @@ async def test_loop_until_condition() -> None:
     dag.loop_node(
         "batch",
         body_nodes=[
-            Node(name="process_one", func=process_one),
-            Node(name="advance", func=advance, depends_on=["process_one"]),
+            Node(func_def=make_func_def(process_one), name="process_one"),
+            Node(func_def=make_func_def(advance), name="advance", depends_on=["process_one"]),
         ],
         depends_on=["prepare"],
         condition=lambda view: view["advance"]["idx"] < len(view["prepare"]),
@@ -49,7 +49,7 @@ async def test_loop_max_iterations_cap() -> None:
 
     dag.loop_node(
         "loop",
-        body_nodes=[Node(name="tick", func=tick)],
+        body_nodes=[Node(func_def=make_func_def(tick), name="tick")],
         condition=lambda view: True,  # 永不满足 → 依赖 max_iterations 封顶
         max_iterations=3,
     )
@@ -72,8 +72,8 @@ async def test_loop_body_failure_continues() -> None:
     dag.loop_node(
         "loop",
         body_nodes=[
-            Node(name="count", func=count),
-            Node(name="boom", func=boom, depends_on=["count"]),
+            Node(func_def=make_func_def(count), name="count"),
+            Node(func_def=make_func_def(boom), name="boom", depends_on=["count"]),
         ],
         condition=lambda view: view.get("count", 0) < 2,
         max_iterations=10,
@@ -97,7 +97,7 @@ def test_loop_node_requires_callable_condition() -> None:
         return 1
 
     with pytest.raises(ValueError, match="condition 必须是可调用对象"):
-        dag.loop_node("loop", body_nodes=[Node(name="tick", func=tick)], condition="$yes")
+        dag.loop_node("loop", body_nodes=[Node(func_def=make_func_def(tick), name="tick")], condition="$yes")
 
 
 def test_loop_body_missing_dep_fails_at_registration() -> None:
@@ -110,7 +110,7 @@ def test_loop_body_missing_dep_fails_at_registration() -> None:
     with pytest.raises(ValueError, match="依赖的 'missing' 不在 DAG 中"):
         dag.loop_node(
             "loop",
-            body_nodes=[Node(name="step", func=step, depends_on=["missing"])],
+            body_nodes=[Node(func_def=make_func_def(step), name="step", depends_on=["missing"])],
             condition=lambda view: False,
         )
 
@@ -129,8 +129,8 @@ def test_loop_body_cycle_fails_at_registration() -> None:
         dag.loop_node(
             "loop",
             body_nodes=[
-                Node(name="a", func=a, depends_on=["b"]),
-                Node(name="b", func=b, depends_on=["a"]),
+                Node(func_def=make_func_def(a), name="a", depends_on=["b"]),
+                Node(func_def=make_func_def(b), name="b", depends_on=["a"]),
             ],
             condition=lambda view: False,
         )
@@ -147,7 +147,7 @@ async def test_loop_output_snapshot_no_self_reference() -> None:
 
     dag.loop_node(
         "batch",
-        body_nodes=[Node(name="tick", func=tick)],
+        body_nodes=[Node(func_def=make_func_def(tick), name="tick")],
         condition=lambda view: view.get("tick", 0) < 3,
         max_iterations=5,
     )

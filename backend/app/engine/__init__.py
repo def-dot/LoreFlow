@@ -31,9 +31,10 @@ Quick start::
 
 from app.registry.funcs.human import human
 
-from .dag import DAG, terminal_approver
+from .dag import DAG, terminal_approver, validate_inputs
 from .declarative import load_dag
-from .node import HumanRejected, Node, wired_ctx
+from .node import HumanRejected, Node, make_func_def, wired_ctx
+from .schema import PipelineConfig
 from .types import (
     DAGExecutionError,
     NodeResult,
@@ -49,10 +50,12 @@ __all__ = [
     "Node",
     "NodeResult",
     "NodeStatus",
+    "PipelineConfig",
     "RetryPolicy",
     "SuspendExecution",
     "human",
     "load_dag",
+    "make_func_def",
     "terminal_approver",
     "wired_ctx",
 ]

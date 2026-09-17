@@ -21,7 +21,7 @@ from app.engine import (
     SuspendExecution,
     load_dag,
 )
-from app.engine.validate import validate_inputs
+from app.engine.dag import validate_inputs
 from app.models.run import RunRecord, RunStatus
 from app.services import runs
 from app.services.pipelines import get_pipeline

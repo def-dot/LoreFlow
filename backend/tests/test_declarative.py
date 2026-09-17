@@ -6,15 +6,11 @@ import pytest
 
 from app.core.config import settings
 from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
-from app.engine.declarative import read_yaml
+import yaml
 from app.engine.resolve import parse_retry
-from app.engine.validate import (
-    validate_config,
-    validate_inputs,
-    validate_nodes,
-    validate_params,
-)
-from app.registry import REGISTRY, NodeType
+from app.engine.dag import validate_inputs
+from app.engine.schema import PipelineConfig, validate_config
+from app.registry import REGISTRY, FuncDef
 
 
 @pytest.fixture
@@ -23,7 +19,7 @@ def registered() -> Any:
     added: list[str] = []
 
     def _reg(name: str, func: Any) -> None:
-        REGISTRY[name] = NodeType(name=name, func=func, label=name, description=name)
+        REGISTRY[name] = FuncDef(name=name, func=func, label=name, description=name)
         added.append(name)
 
     yield _reg
@@ -248,7 +244,7 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
 
 def test_required_inputs_bad_type_rejected() -> None:
     """required 布尔值 → 类型校验。"""
-    errors = validate_params({"inputs": {"query": {"required": "yes"}}})
+    errors = validate_config({"inputs": {"query": {"required": "yes"}}})
     assert errors == ["参数 'query': required 必须是布尔值"]
 
 
@@ -331,7 +327,7 @@ def test_inputs_rich_form() -> None:
 
 
 def test_inputs_multiline_bad_type_rejected() -> None:
-    errors = validate_params({"inputs": {"b": {"multiline": "yes"}}})
+    errors = validate_config({"inputs": {"b": {"multiline": "yes"}}})
     assert errors == ["参数 'b': multiline 必须是布尔值"]
 
 
@@ -361,13 +357,13 @@ async def test_inputs_rich_form_runs(registered: Any) -> None:
 
 
 def test_inputs_unknown_field_rejected() -> None:
-    errors = validate_params({"inputs": {"q": {"type": "string"}}})
+    errors = validate_config({"inputs": {"q": {"type": "string"}}})
     assert errors == ["参数 'q': 不支持的字段 ['type']"]
 
 
 def test_inputs_collects_all_errors() -> None:
     """多个参数错误一次性全部返回，而非遇错即抛。"""
-    errors = validate_params({"inputs": {
+    errors = validate_config({"inputs": {
         "q": {"bogus": 1},
         "r": {"required": "yes"},
         "s": "not-a-mapping",
@@ -380,14 +376,14 @@ def test_inputs_collects_all_errors() -> None:
 
 def test_inputs_node_name_clash_rejected() -> None:
     """参数键与节点名冲突应被拒绝"""
-    assert validate_params(
+    assert validate_config(
         {"inputs": {"query": {"required": True}}, "nodes": {"query": {}}}
     ) == ["输入参数键与节点名冲突: query"]
 
 
 def test_inputs_no_clash_accepted() -> None:
     """参数键与节点名无冲突时通过"""
-    assert validate_params(
+    assert validate_config(
         {"inputs": {"query": {"required": True}}, "nodes": {"fetch": {}}}
     ) == []
 
@@ -415,13 +411,13 @@ def test_review_declaration_not_validated() -> None:
 def test_validate_nodes_accepts() -> None:
     """validate_nodes 接受合法的节点配置"""
     # node 类型节点
-    assert validate_nodes({"nodes": {"a": {"type": "test_fetch"}}}) == []
-    assert validate_nodes({"nodes": {"a": {"type": "test_fetch", "depends_on": []}}}) == []
+    assert validate_config({"nodes": {"a": {"type": "test_fetch"}}}) == []
+    assert validate_config({"nodes": {"a": {"type": "test_fetch", "depends_on": []}}}) == []
 
     # human 类型节点
-    assert validate_nodes({"nodes": {"a": {"type": "human", "prompt": "审核"}}}) == []
+    assert validate_config({"nodes": {"a": {"type": "human", "prompt": "审核"}}}) == []
     # human 节点 review - 键必须在 inputs 或 nodes 中
-    assert validate_nodes({
+    assert validate_config({
         "nodes": {"a": {"type": "human", "prompt": "审核", "review": {"title": {"label": "标题"}}}},
         "inputs": {"title": {}},
     }) == []
@@ -429,7 +425,7 @@ def test_validate_nodes_accepts() -> None:
 
 def test_validate_nodes_accepts_loop() -> None:
     """loop 节点的 condition 是表达式（iteration 在循环谓词视图可用）"""
-    assert validate_nodes({
+    assert validate_config({
         "nodes": {"a": {"type": "loop", "body": {"b": {"type": "test_fetch"}}, "condition": "$iteration < 3"}}
     }) == []
 
@@ -437,63 +433,63 @@ def test_validate_nodes_accepts_loop() -> None:
 def test_validate_nodes_rejects() -> None:
     """validate_nodes 返回非法配置的全部错误"""
     # nodes 是必填键：未声明（None）与空映射都不行（同一句报错）
-    assert validate_nodes({}) == ["流水线至少需要一个节点"]
-    assert validate_nodes({"nodes": {}}) == ["流水线至少需要一个节点"]
+    assert validate_config({}) == ["流水线至少需要一个节点"]
+    assert validate_config({"nodes": {}}) == ["流水线至少需要一个节点"]
 
     # nodes 不是 dict（非空非映射才走到类型分支；空列表归入"至少一个节点"）
-    assert validate_nodes({"nodes": ["a"]}) == [
+    assert validate_config({"nodes": ["a"]}) == [
         "nodes 必须是映射(dict)，实际是 list"
     ]
 
     # 节点定义不是 dict
-    assert validate_nodes({"nodes": {"a": "not_dict"}}) == [
+    assert validate_config({"nodes": {"a": "not_dict"}}) == [
         "节点 'a': 定义必须是映射(dict)，实际是 str"
     ]
 
     # kind 已废除：报不支持字段 + 缺 type（字段检查先于 membership）
-    assert validate_nodes({"nodes": {"a": {"kind": "quantum"}}}) == [
+    assert validate_config({"nodes": {"a": {"kind": "quantum"}}}) == [
         "节点 'a': 不支持的字段 ['kind']",
         "节点 'a': 需要 'type'（函数键）",
     ]
 
     # 不支持的字段
-    assert validate_nodes({"nodes": {"a": {"type": "test_fetch", "bogus": 1}}}) == [
+    assert validate_config({"nodes": {"a": {"type": "test_fetch", "bogus": 1}}}) == [
         "节点 'a'（test_fetch）: 不支持的字段 ['bogus']"
     ]
 
     # node 类型缺少 type
-    assert validate_nodes({"nodes": {"a": {}}}) == [
+    assert validate_config({"nodes": {"a": {}}}) == [
         "节点 'a': 需要 'type'（函数键）"
     ]
 
     # type 未注册
-    assert validate_nodes({"nodes": {"a": {"type": "no_such_fn"}}}) == [
+    assert validate_config({"nodes": {"a": {"type": "no_such_fn"}}}) == [
         "节点 'a': 类型函数 'no_such_fn' 未注册"
     ]
 
     # depends_on 类型错误 / 依赖缺失 / 循环依赖（已并入 validate_nodes）
-    assert validate_nodes({"nodes": {"a": {"type": "test_fetch", "depends_on": "fetch"}}}) == [
+    assert validate_config({"nodes": {"a": {"type": "test_fetch", "depends_on": "fetch"}}}) == [
         "节点 'a': depends_on 必须是字符串列表"
     ]
-    assert validate_nodes(
+    assert validate_config(
         {"nodes": {"a": {"type": "test_fetch", "depends_on": ["ghost"]}}}
     ) == ["节点 'a' 依赖的 'ghost' 不在 DAG 中"]
-    assert validate_nodes({"nodes": {
+    assert validate_config({"nodes": {
         "a": {"type": "test_fetch", "depends_on": ["b"]},
         "b": {"type": "test_fetch", "depends_on": ["a"]},
     }}) == ["检测到循环依赖: a → b"]
 
     # loop 类型缺少 body / condition、condition 引用未知键（condition 校验先于 body 检查）
-    assert validate_nodes({"nodes": {"a": {"type": "loop", "condition": "$x"}}}) == [
+    assert validate_config({"nodes": {"a": {"type": "loop", "condition": "$x"}}}) == [
         "节点 'a': condition 引用的 'x' 不是参数键或上游依赖节点",
         "循环节点 'a': 需要非空的 'body' 映射",
     ]
-    assert validate_nodes({"nodes": {"a": {"type": "loop", "body": {"b": {"type": "test_fetch"}}}}}) == [
+    assert validate_config({"nodes": {"a": {"type": "loop", "body": {"b": {"type": "test_fetch"}}}}}) == [
         "循环节点 'a': 需要 'condition' 表达式"
     ]
 
     # human 节点 review 校验失败（带节点名前缀）
-    assert validate_nodes({
+    assert validate_config({
         "nodes": {"a": {"type": "human", "review": {"a": {"label": None}}}},
         "inputs": {"a": {}},
     }) == ["审核节点 'a': review 字段 'a': label 必须是字符串"]
@@ -501,7 +497,7 @@ def test_validate_nodes_rejects() -> None:
 
 def test_validate_nodes_collects_errors_across_nodes() -> None:
     """不同节点的错误一次性全部返回。"""
-    errors = validate_nodes({
+    errors = validate_config({
         "nodes": {
             "a": {},                                   # 缺 type
             "b": {"type": "test_fetch", "bogus": 1},    # 不支持的字段
@@ -818,7 +814,7 @@ async def _run_condition_yaml(
         return {"content": content, "tool_calls": []}
 
     monkeypatch.setattr(llm_mod, "llm_chat_call", fake_chat)
-    _, config = read_yaml(settings.PIPELINES_DIR / "02_condition.yaml")
+    config = yaml.safe_load((settings.PIPELINES_DIR / "02_condition.yaml").read_text(encoding="utf-8"))
     dag = load_dag(config)
     return await dag.run(inputs={"prompt": prompt})
 

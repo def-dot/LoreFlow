@@ -5,8 +5,9 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, Node, NodeStatus, RetryPolicy
-from app.engine.validate import validate_config, validate_inputs
+from app.engine import DAG, DAGExecutionError, Node, NodeStatus, RetryPolicy, make_func_def
+from app.engine.dag import validate_inputs
+from app.engine.schema import validate_config
 
 
 async def test_serial_chain() -> None:
@@ -53,8 +54,8 @@ async def test_parallel_fanout() -> None:
     for name in ("b", "c", "d"):
         dag.add_node(
             Node(
+                func_def=make_func_def(lambda ctx, n=name: tracked(ctx, n)),
                 name=name,
-                func=lambda ctx, n=name: tracked(ctx, n),
                 depends_on=["root"],
             )
         )
@@ -84,7 +85,7 @@ async def test_concurrency_limit() -> None:
 
     dag = DAG("limited")
     for name in ("a", "b", "c"):
-        dag.add_node(Node(name=name, func=lambda ctx, n=name: tracked(ctx, n)))
+        dag.add_node(Node(func_def=make_func_def(lambda ctx, n=name: tracked(ctx, n)), name=name))
 
     await dag.run(concurrency=1)
     assert max_active == 1
@@ -167,14 +168,16 @@ async def test_retry_policy_delay_bounds() -> None:
 
 def test_add_node_requires_callable_func() -> None:
     """func 不可调用在注册期拦截（add_node 是所有注册路径的漏斗），不等执行才 TypeError。"""
+    from app.registry import FuncDef
+
     dag = DAG("not_callable")
 
     async def ok(ctx: dict[str, Any]) -> int:
         return 1
 
     with pytest.raises(ValueError, match="func 必须是可调用对象"):
-        dag.add_node(Node(name="bad", func="not_a_function"))
-    dag.add_node(Node(name="good", func=ok))  # 拦下坏节点后正常注册不受影响
+        dag.add_node(Node(func_def=FuncDef(name="bad", func="not_a_function"), name="bad"))
+    dag.add_node(Node(func_def=make_func_def(ok), name="good"))  # 拦下坏节点后正常注册不受影响
 
 
 def test_add_node_requires_callable_condition() -> None:
@@ -184,7 +187,7 @@ def test_add_node_requires_callable_condition() -> None:
         return 1
 
     with pytest.raises(ValueError, match="condition 必须是可调用对象"):
-        dag.add_node(Node(name="bad", func=ok, condition=42))
+        dag.add_node(Node(func_def=make_func_def(ok), name="bad", condition=42))
 
 
 def test_depends_on_wrong_type_fails_validate() -> None:
@@ -194,12 +197,12 @@ def test_depends_on_wrong_type_fails_validate() -> None:
         return 1
 
     bare = DAG("dep_str")
-    bare.add_node(Node(name="a", func=ok))
-    bare.add_node(Node(name="b", func=ok, depends_on="a"))  # 裸字符串
+    bare.add_node(Node(func_def=make_func_def(ok), name="a"))
+    bare.add_node(Node(func_def=make_func_def(ok), name="b", depends_on="a"))  # 裸字符串
     assert bare.validate() == ["节点 'b': depends_on 必须是字符串列表"]
 
     uniterable = DAG("dep_int")
-    uniterable.add_node(Node(name="a", func=ok, depends_on=5))
+    uniterable.add_node(Node(func_def=make_func_def(ok), name="a", depends_on=5))
     assert uniterable.validate() == ["节点 'a': depends_on 必须是字符串列表"]
 
 
@@ -210,8 +213,8 @@ def test_depends_on_wrong_type_keeps_node_visible() -> None:
         return 1
 
     dag = DAG("dep_noisy")
-    dag.add_node(Node(name="a", func=ok, depends_on=5))
-    dag.add_node(Node(name="b", func=ok, depends_on=["a"]))
+    dag.add_node(Node(func_def=make_func_def(ok), name="a", depends_on=5))
+    dag.add_node(Node(func_def=make_func_def(ok), name="b", depends_on=["a"]))
 
     assert dag.validate() == ["节点 'a': depends_on 必须是字符串列表"]
 

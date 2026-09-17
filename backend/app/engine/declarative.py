@@ -1,5 +1,7 @@
 """
-Declarative config → DAG 构建（校验全部在 app.engine.validate）。
+Declarative config → DAG 构建。
+
+校验统一在 PipelineConfig（schema.py）中完成。
 """
 
 from __future__ import annotations
@@ -8,44 +10,39 @@ from typing import Any
 
 from app.registry import REGISTRY
 
-from . import validate
 from .dag import DAG
 from .node import Node
 from .resolve import parse_retry
+from .schema import PipelineConfig
 
 
-def load_dag(
-    config: dict[str, Any],
-) -> DAG:
-    """Build a :class:`DAG` from a config dict."""
+def load_dag(config: dict[str, Any] | PipelineConfig) -> DAG:
+    """Build a :class:`DAG` from a config dict or PipelineConfig model.
 
-    errors = validate.validate_config(config)
-    if errors:
-        raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
+    dict 传入时由 PipelineConfig 完成全部校验（结构 + 语义）。
+    """
+    cfg = config if isinstance(config, PipelineConfig) else PipelineConfig(**config)
 
     dag = DAG(
-        config.get("name", "dag"),
-        inputs=config.get("inputs") or {},
-        output=config.get("output"),
+        cfg.name or "dag",
+        inputs={k: v.model_dump() for k, v in cfg.inputs.items()} if cfg.inputs else {},
+        output=cfg.output,
     )
 
-    for name, spec in config["nodes"].items():
-        deps = spec.get("depends_on") or []
-        retry = parse_retry(spec.get("retry"))
-
-        node_type = REGISTRY[spec["type"]]
+    for name, spec in cfg.nodes.items():
+        node_type = REGISTRY[spec.type]
 
         dag.add_node(
             Node(
+                func_def=node_type,
                 name=name,
-                func=node_type.func,
-                label=spec.get("label"),
-                description=spec.get("description"),
-                inputs=spec.get("inputs"),
-                depends_on=deps,
-                retry=retry,
-                timeout=spec.get("timeout"),
-                condition=spec.get("condition"),
+                label=spec.label or "",
+                description=spec.description,
+                inputs=spec.inputs,
+                depends_on=spec.depends_on,
+                retry=parse_retry(spec.retry),
+                timeout=spec.timeout,
+                condition=spec.condition,
             )
         )
     return dag

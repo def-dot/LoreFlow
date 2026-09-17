@@ -31,11 +31,33 @@ from typing import Any
 from app.registry import FuncDef
 
 from .executor import DAGExecutor
-from .node import ApproverFunc, ConditionFunc, Node, NodeFunc, wired_ctx
+from .node import ApproverFunc, ConditionFunc, Node, NodeFunc, make_func_def, wired_ctx
+from .schema import PipelineConfig
 from .types import DAGExecutionError, NodeResult, NodeStatus, RetryPolicy
-from .validate import validate_graph, validate_inputs, validate_params
 
 logger = logging.getLogger(__name__)
+
+
+def validate_inputs(
+    inputs: dict[str, Any] | None,
+    declared: dict[str, dict[str, Any]],
+) -> list[str]:
+    """运行时输入校验：输入键 ⊆ 声明键 + 必填缺失/为空。"""
+    errors: list[str] = []
+    invalid = sorted(set(inputs or {}) - set(declared))
+    if invalid:
+        errors.append(f"未声明的参数键: {', '.join(invalid)}")
+
+    missing: list[str] = []
+    for name, spec in declared.items():
+        if not isinstance(spec, dict) or not spec.get("required"):
+            continue
+        value = (inputs or {}).get(name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(name)
+    if missing:
+        errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
+    return errors
 
 
 async def terminal_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -144,8 +166,8 @@ class DAG:
         def decorator(func: NodeFunc) -> NodeFunc:
             self.add_node(
                 Node(
+                    func_def=make_func_def(func),
                     name=name,
-                    func=func,
                     label=name,
                     depends_on=depends_on or [],
                     retry=retry,
@@ -249,15 +271,11 @@ class DAG:
 
         # 类型身份绑在函数上（同注册装饰器 @node 的做法，但 loop_func 是
         # 每次调用的闭包，不进全局 REGISTRY）—— to_mermaid 经 node_type 派生读取
-        setattr(
-            loop_func,
-            "__func_def__",
-            FuncDef(name="loop", func=loop_func, label="循环", description="循环执行 body 子图直至条件不满足"),
-        )
+        loop_def = FuncDef(name="loop", func=loop_func, label="循环", description="循环执行 body 子图直至条件不满足")
 
         node = Node(
+            func_def=loop_def,
             name=name,
-            func=loop_func,
             depends_on=depends_on or [],
             retry=retry,
             timeout=timeout,
@@ -278,11 +296,14 @@ class DAG:
             errors.append("DAG 没有节点")
             return errors
 
-        # 程序化 DAG 无 config —— 按函数入参形状合成（只用到 inputs/nodes 键）
-        errors.extend(validate_params({"inputs": self.inputs, "nodes": self._nodes}))
+        # inputs 参数键与节点名冲突
+        if self.inputs:
+            clash = sorted(set(self.inputs) & set(self._nodes))
+            if clash:
+                errors.append(f"输入参数键与节点名冲突: {', '.join(clash)}")
 
         edges = {name: node.depends_on for name, node in self._nodes.items()}
-        errors.extend(validate_graph(edges))
+        errors.extend(PipelineConfig._validate_graph(edges))
         return errors
 
     # ------------------------------------------------------------------
@@ -393,7 +414,7 @@ class DAG:
             main_text = node.label or node.name
 
             small = []
-            type_label = node.node_type.label if node.node_type else None
+            type_label = node.func_def.label if node.func_def else None
             if type_label:
                 small.append(type_label)
             if node.condition:
@@ -427,7 +448,7 @@ class DAG:
         return [
             node
             for node in self._nodes.values()
-            if node.node_type is not None and node.node_type.name == "human"
+            if node.func_def is not None and node.func_def.name == "human"
         ]
 
     def __repr__(self) -> str:

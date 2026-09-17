@@ -38,6 +38,11 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
     return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
 
 
+def make_func_def(func: Callable, name: str = "", **kw: Any) -> FuncDef:
+    """为普通 callable 包一层 FuncDef（内部 / 测试节点用）。"""
+    return FuncDef(name=name or getattr(func, "__name__", ""), func=func, **kw)
+
+
 class HumanRejected(Exception):
     """Raised by a human review node when the reviewer rejects the payload.
 
@@ -53,26 +58,10 @@ class HumanRejected(Exception):
 @dataclass
 class Node:
     """A single executable node in the DAG.
-
-    Each node wraps an async function and declares its upstream dependencies.
-    The executor runs nodes as soon as all dependencies have completed.
-
-    Attributes:
-        name: Unique identifier for this node within the DAG.
-        func: Async callable that receives the shared context dict (may be
-              wrapped with input wiring).
-        label: Human-readable label for this node.
-        inputs: Optional input wiring mapping from parameter names to node outputs or values.
-        depends_on: Names of upstream nodes that must complete first.
-        condition: Optional condition declaration; falsy at runtime the node
-                   is skipped. bool constant / expression string — evaluated
-                   on the wiring view by the executor.
-        retry: Retry policy, or ``None`` for no retries.
-        timeout: Per-node timeout in seconds, or ``None`` for no limit.
     """
 
-    name: str
-    func: NodeFunc
+    func_def: FuncDef
+    name: str = ""
     label: str = ""
     description: str | None = None
     inputs: dict[str, Any] | None = None
@@ -82,8 +71,8 @@ class Node:
     timeout: float | None = None
 
     @property
-    def node_type(self) -> FuncDef | None:
-        return getattr(self.func, "__func_def__", None)
+    def func(self) -> NodeFunc:
+        return self.func_def.func
 
     def __repr__(self) -> str:
         deps = ",".join(self.depends_on) if self.depends_on else "root"

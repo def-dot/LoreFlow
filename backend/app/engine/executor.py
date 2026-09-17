@@ -410,7 +410,7 @@ class DAGExecutor:
     @staticmethod
     def _validate_output(node: Node, output: Any) -> dict[str, Any]:
         """若 node 声明了 output_schema，用 Pydantic 校验并转 dict。"""
-        func_def = node.node_type
+        func_def = node.func_def
         if func_def is not None and func_def.output_schema is not None:
             if isinstance(output, func_def.output_schema):
                 return output.model_dump()
