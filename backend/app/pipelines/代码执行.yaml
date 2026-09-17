@@ -46,7 +46,7 @@ nodes:
                 "max": max(scores) if scores else None,
                 "min": min(scores) if scores else None,
             }
-      items: $parse
+      items: $parse.result
     timeout: 10
 
   # ── 第三步：生成 Markdown 报告 ─────────────────────
@@ -69,6 +69,6 @@ nodes:
             for i, item in enumerate(items, 1):
                 lines.append(f"{i}. **{item.get('name', '?')}** — {item.get('score', 'N/A')}")
             return "\n".join(lines)
-      items: $parse
-      stats: $stats
+      items: $parse.result
+      stats: $stats.result
     timeout: 10

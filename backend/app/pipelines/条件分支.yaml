@@ -16,6 +16,7 @@ nodes:
     type: llm_classify
     label: 意图识别
     inputs:
+      prompt: $prompt
       classify_system: >-
         你是客服意图分类器，只允许输出 chat、rag 两个单词之一，
         禁止输出其他任何内容（包括标点、解释或其他语言）：
@@ -28,6 +29,7 @@ nodes:
     label: LLM回答
     depends_on: [intent_recognition]
     condition: $intent_recognition.intent == chat
+    inputs: {prompt: $prompt}
 
   rag_retrieve:
     type: rag_retrieve
@@ -46,12 +48,13 @@ nodes:
                 return "知识库中没有检索到相关内容。"
             lines = [f"[{i}] {c.get('source', '')} {c.get('text', '')}" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]
             return "\n\n".join(lines)
-      chunks: $rag_retrieve
+      chunks: $rag_retrieve.result
 
   rag_answer:
     type: llm_chat
     label: LLM检索回答
     depends_on: [format_chunks]
     inputs:
-      context: $format_chunks
+      prompt: $prompt
+      context: $format_chunks.result
       system: 你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。

@@ -6,10 +6,12 @@ inputs 接线同一拼法，``$`` 开头 = 引用上下文）::
 
     condition: $intent == chat          # 等值 / 不等（== !=）
     condition: $score >= 0.8            # 大小比较（> >= < <=）
-    condition: $intent in [chat, rag]   # 成员（in / not in，值为列表）
+    condition: $intent in chat,rag      # 成员（in / not in，逗号分隔）
     condition: $merge                   # 裸键真值（视图值非空即真）
     condition: not $flag                # 取反
     condition: $router.intent == rag    # 点路径下钻上游输出字段
+    condition: $score >= 0.8 and $intent == chat   # and（优先级高于 or）
+    condition: $a == x or $b == y                   # or
 
 - 键在节点视图上取值（共享 ctx + ``inputs`` 接线本地键；loop 额外注入
   ``iteration``），支持 ``a.b.c`` 点路径下钻 dict 字段。引用键不做加载期
@@ -57,29 +59,44 @@ def _parse_scalar(raw: str) -> Any:
     return raw
 
 
-def _parse_value(raw: str) -> Any:
-    """操作符右侧的值：``[a, b]`` 列表（in/not in 用）或标量。"""
-    raw = raw.strip()
-    if raw.startswith("[") and raw.endswith("]"):
-        inner = raw[1:-1].strip()
-        return [_parse_scalar(p.strip()) for p in inner.split(",") if p.strip()] if inner else []
-    return _parse_scalar(raw)
-
-
-def _parse(expr: str) -> tuple[bool, str, str | None, Any]:
-    """表达式 → ``(取反, 键, 操作符或 None, 期望值)``；语法错抛中文 ValueError。"""
-    m = _EXPR_RE.match(expr)
+def _parse_atom(raw: str) -> tuple[bool, str, str | None, Any]:
+    """单条原子表达式 → ``(取反, 键, 操作符或 None, 期望值)``；语法错抛中文 ValueError。"""
+    m = _EXPR_RE.match(raw)
     if not m:
         raise ValueError(
-            f"条件表达式 {expr!r} 无法解析（写法如 ``$intent == chat``、``$merge``、``not $flag``）"
+            f"条件表达式 {raw!r} 无法解析（写法如 ``$intent == chat``、``$merge``、``not $flag``）"
         )
+
     value_raw = m.group("value")
+    if value_raw is not None:
+        val = value_raw.strip()
+        if val.startswith("[") and val.endswith("]"):
+            inner = val[1:-1].strip()
+            value = [_parse_scalar(p.strip()) for p in inner.split(",") if p.strip()] if inner else []
+        else:
+            value = _parse_scalar(val)
+    else:
+        value = None
+
     return (
         m.group("neg") is not None,
         m.group("key"),
         m.group("op"),
-        _parse_value(value_raw) if value_raw is not None else None,
+        value,
     )
+
+
+def _parse(expr: str) -> list[list[tuple[bool, str, str | None, Any]]]:
+    """复合表达式 → ``[[and 组1], [and 组2], ...]``；or 最低，and 居中。
+
+    ``A and B or C`` → ``[[A, B], [C]]``（and 优先于 or）。
+    不支持括号嵌套。
+    """
+    or_groups: list[list[tuple[bool, str, str | None, Any]]] = []
+    for or_part in expr.split(" or "):
+        and_atoms = [_parse_atom(a) for a in or_part.split(" and ")]
+        or_groups.append(and_atoms)
+    return or_groups
 
 
 def _compare(actual: Any, op: str, expected: Any) -> bool:
@@ -104,26 +121,38 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
         return False
 
 
+def _eval_atom(ctx: dict[str, Any], atom: tuple[bool, str, str | None, Any]) -> bool:
+    """单条原子条件在视图上求值。"""
+    neg, key, op, expected = atom
+    actual = ctx
+    for part in key.split("."):
+        if not isinstance(actual, Mapping) or part not in actual:
+            actual = None
+            break
+        actual = actual[part]
+    result = _compare(actual, op, expected) if op else bool(actual)
+    return not result if neg else result
+
+
 def compile_condition(expr: str) -> ConditionFunc:
     """表达式字符串 → ``(视图) -> bool`` 谓词（解析一次，循环内重复求值）。"""
-    neg, key, op, expected = _parse(expr)
+    groups = _parse(expr)  # [[and 组], ...]
 
     def cond(ctx: dict[str, Any]) -> bool:
-        actual = ctx
-        for part in key.split("."):  # a.b.c 逐段下钻 dict，缺段/非 dict → None
-            if not isinstance(actual, Mapping) or part not in actual:
-                actual = None
-                break
-            actual = actual[part]
-        result = _compare(actual, op, expected) if op else bool(actual)
-        return not result if neg else result
+        return any(all(_eval_atom(ctx, atom) for atom in and_group) for and_group in groups)
 
     return cond
 
 
-def condition_key(expr: str) -> str:
-    """表达式引用的根键（点路径取首段）—— 加载期核对键存在的依据。"""
-    return _parse(expr)[1].split(".")[0]
+def condition_keys(expr: str) -> list[str]:
+    """复合表达式引用的所有根键（点路径取首段）—— 加载期核对键存在的依据。"""
+    seen: list[str] = []
+    for and_group in _parse(expr):
+        for _, key, _, _ in and_group:
+            root = key.split(".")[0]
+            if root not in seen:
+                seen.append(root)
+    return seen
 
 
 def eval_condition(cond: str | bool, view: dict[str, Any]) -> bool:

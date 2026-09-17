@@ -7,15 +7,15 @@ PipelineConfig 是 YAML 配置的唯一校验入口：
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 from app.registry import REGISTRY
+from app.registry.types import FuncDef
 
-from .condition import _parse
+from .condition import condition_keys
 
 
 # ------------------------------------------------------------------
@@ -86,9 +86,11 @@ class PipelineConfig(BaseModel):
     @classmethod
     def _parse_inputs(cls, v: Any) -> dict[str, Any]:
         """YAML inputs 值若是纯字符串，包装为 InputSpec(label=...)。"""
+        if v is None:
+            return {}
         if not isinstance(v, dict):
             return v
-        return {k: (val if isinstance(val, dict) else {"label": str(val)}) for k, val in v.items()}
+        return {k: (val if isinstance(val, dict) else {"label": val}) for k, val in v.items()}
 
     # ------------------------------------------------------------------
     # 语义校验（图结构、$ 引用、注册表、参数声明）
@@ -102,7 +104,7 @@ class PipelineConfig(BaseModel):
         if not self.nodes:
             raise ValueError("流水线至少需要一个节点")
 
-        # 1) 图结构
+        # 1) 图结构（依赖的节点在不在图中；有没有环）
         edges = {name: spec.depends_on for name, spec in self.nodes.items()}
         errors.extend(self._validate_graph(edges))
 
@@ -132,29 +134,13 @@ class PipelineConfig(BaseModel):
             errors.append(f"{loc}: 类型函数 {spec.type!r} 未注册")
             return errors  # 未注册则后续校验无意义
 
-        func_def = REGISTRY[spec.type]
-        param_keys = set(self.inputs)
-        refs = self._ancestors(name, edges) | param_keys
+        upstream = self.get_upstream_nodes(name, edges)
+        errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(spec, upstream))
 
-        # wiring
-        if spec.inputs:
-            accepts_extra = False
-            try:
-                accepts_extra = any(
-                    p.kind is inspect.Parameter.VAR_KEYWORD
-                    for p in inspect.signature(func_def.func).parameters.values()
-                )
-            except (ValueError, TypeError):
-                pass
-            errors.extend(
-                f"{loc}: {msg}"
-                for msg in self._validate_wiring(spec.inputs, refs, func_def.input_schema, param_keys, accepts_extra)
-            )
-            refs = refs | set(spec.inputs)
-
-        # condition
         if spec.condition:
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(spec.condition, refs))
+            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(spec, upstream))
+
+        refs = refs | set(spec.inputs or {})
 
         # _review 卡片
         if spec.type == "human" and isinstance(spec.inputs, dict) and spec.inputs.get("_review") is not None:
@@ -213,76 +199,92 @@ class PipelineConfig(BaseModel):
 
     @staticmethod
     def _validate_graph(edges: dict[str, list[str]]) -> list[str]:
-        """depends_on 类型 + 依赖存在性 + 环检测。"""
+        """依赖存在性 + 环检测。"""
         errors: list[str] = []
         for name, deps in edges.items():
             if not deps:
-                continue
-            if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
-                errors.append(f"节点 {name!r}: depends_on 必须是字符串列表")
                 continue
             for dep in deps:
                 if dep not in edges:
                     errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
 
         # 环检测
-        cycle = PipelineConfig._find_cycle(
-            {n: d for n, d in edges.items()
-             if isinstance(d, list) and all(isinstance(x, str) for x in d)}
-        )
+        cycle = PipelineConfig._find_cycle(edges)
         if cycle:
             errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
         return errors
 
-    # ---- wiring 校验 ----
+    # ---- 接线参数校验（$引用 + schema 对照 + required）----
 
-    @staticmethod
-    def _validate_wiring(
-        wiring: dict[str, Any],
-        available_refs: set[str],
-        input_schema: type[BaseModel] | None = None,
-        param_keys: set[str] | None = None,
-        accepts_extra: bool = False,
+    def _validate_inputs(
+        self,
+        spec: NodeSpec,
+        upstream: set[str],
     ) -> list[str]:
-        """inputs 声明校验：$ 引用根键 ∈ 参数键 ∪ 上游闭包。"""
+        """节点 inputs 校验"""
         errors: list[str] = []
-        for local, source in wiring.items():
-            if not (isinstance(source, str) and source.startswith("$")):
-                continue
-            root = source[1:].partition(".")[0]
-            if root not in available_refs:
-                errors.append(f"inputs.{local} 引用的 {root!r} 不是参数键或上游依赖节点")
+        func_def = REGISTRY[spec.type]
 
-        if input_schema is not None:
-            schema_keys = set(input_schema.model_fields)
-            extra = set(wiring) - schema_keys
-            if extra and not accepts_extra:
-                errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
-            if param_keys is not None:
-                for key, finfo in input_schema.model_fields.items():
-                    if not finfo.is_required():
-                        continue
-                    if key in wiring or key in param_keys:
-                        continue
-                    errors.append(f"inputs 缺少必填参数 {key!r}")
+        if func_def.input_schema is None:
+            if not func_def.accepts_extra and spec.inputs:
+                errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(spec.inputs))}")
+            return errors
+
+        # 1) $ 引用根键校验
+        for local, source in spec.inputs.items():
+            if isinstance(source, str) and source.startswith("$"):
+                root = source[1:].partition(".")[0]
+                if root not in upstream or root not in self.inputs:
+                    errors.append(f"inputs.{local} 引用的 {root!r} 不是参数键或上游依赖节点")
+
+        schema_keys = set(func_def.input_schema.model_fields)
+
+        # 2) 多余参数
+        extra = set(spec.inputs) - schema_keys
+        if extra and not func_def.accepts_extra:
+            errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
+
+        # 3) 字面量值类型校验（$ 引用跳过，运行时才知道类型）
+        for key, value in spec.inputs.items():
+            if isinstance(value, str) and value.startswith("$"):
+                continue
+            finfo = func_def.input_schema.model_fields.get(key)
+            if finfo is None:
+                continue
+            try:
+                TypeAdapter(finfo.annotation).validate_python(value, strict=True)
+            except ValidationError:
+                errors.append(
+                    f"inputs.{key} 类型不匹配，期望 {finfo.annotation}，"
+                    f"实际 {type(value).__name__}: {value!r}"
+                )
+
+        # 4) required 参数必须在显式接线中提供
+        for key, finfo in func_def.input_schema.model_fields.items():
+            if finfo.is_required() and key not in spec.inputs:
+                errors.append(f"inputs 缺少必填参数 {key!r}")
 
         return errors
 
     # ---- condition 校验 ----
 
-    @staticmethod
-    def _validate_condition(condition: Any, available_refs: set[str]) -> list[str]:
-        if isinstance(condition, bool):
+    def _validate_condition(self,
+        spec: NodeSpec,
+        upstream: set[str]
+    ) -> list[str]:
+        if isinstance(spec, bool):
             return []
-        if not isinstance(condition, str) or not condition.strip():
-            return [f"condition 必须是非空表达式字符串，实际是 {condition!r}"]
+        if not isinstance(spec, str) or not spec.strip():
+            return [f"condition 必须是非空表达式字符串，实际是 {spec!r}"]
         try:
-            root = _parse(condition)[1].split(".")[0]
+            roots = condition_keys(spec)
         except ValueError as exc:
             return [str(exc)]
-        if root not in available_refs:
-            return [f"condition 引用的 {root!r} 不是参数键、上游依赖节点或本地键"]
-        return []
+        errors: list[str] = []
+        for root in roots:
+            if root not in upstream:
+                errors.append(f"condition 引用的 {root!r} 不是参数键、上游依赖节点或本地键")
+        return errors
 
     # ---- _review 卡片校验 ----
 
@@ -308,7 +310,8 @@ class PipelineConfig(BaseModel):
     # ---- 图工具 ----
 
     @staticmethod
-    def _ancestors(name: str, edges: Mapping[str, Any]) -> set[str]:
+    def get_upstream_nodes(name: str, edges: Mapping[str, Any]) -> set[str]:
+        """返回 name 的所有上游节点（传递闭包）。"""
         seen: set[str] = set()
         stack = [name]
         while stack:
@@ -346,29 +349,3 @@ class PipelineConfig(BaseModel):
                 if cycle:
                     return cycle
         return None
-
-
-# ------------------------------------------------------------------
-# 兼容入口 — 旧调用方仍可用
-# ------------------------------------------------------------------
-
-def validate_config(config: dict[str, Any]) -> list[str]:
-    """校验完整 DAG 配置，返回全部错误（空列表 = 合法）。"""
-    try:
-        PipelineConfig(**config)
-        return []
-    except ValidationError as exc:
-        errors: list[str] = []
-        for err in exc.errors():
-            msg = err["msg"].removeprefix("Value error, ")
-            loc = err["loc"]
-            if len(loc) >= 2 and loc[0] == "nodes" and not msg.startswith("DAG"):
-                node_name = loc[1]
-                if err["type"] == "missing" and "type" in loc:
-                    msg = f"节点 {node_name!r}: 需要 'type'（函数键）"
-                else:
-                    msg = f"节点 {node_name!r}: {msg}"
-            errors.append(msg)
-        return errors
-    except (ValueError, TypeError) as exc:
-        return [str(exc)]

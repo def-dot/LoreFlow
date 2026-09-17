@@ -35,6 +35,7 @@ class FuncDef:
     metadata: dict[str, Any] = field(default_factory=dict, hash=False)
     input_schema: type[BaseModel] | None = field(default=None, hash=False)
     output_schema: type[BaseModel] | None = field(default=None, hash=False)
+    accepts_extra: bool = field(default=False, hash=False)
 
 
 #: 节点注册表：name → FuncDef（DAG 引擎 / 节点扫描）
@@ -72,6 +73,10 @@ def func(
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         input_schema, output_schema = _infer_func_schema(fn)
+        accepts_extra = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD
+            for p in inspect.signature(fn).parameters.values()
+        )
         fd = FuncDef(
             name=fn.__name__,
             func=fn,
@@ -80,6 +85,7 @@ def func(
             metadata=metadata or {},
             input_schema=input_schema,
             output_schema=output_schema,
+            accepts_extra=accepts_extra,
         )
 
         if node:

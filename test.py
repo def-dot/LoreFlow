@@ -1,27 +1,28 @@
-from pydantic import BaseModel, Field
-from typing import Optional
-import json
+from pydantic import BaseModel, field_validator
 
-class WebSearchItem(BaseModel):
-    title: str = Field(description="结果标题")
-    url: str = Field(description="结果链接")
-    content: str = Field(description="结果摘要")
-    
-class WebSearchOutput(BaseModel):
-    result: list[WebSearchItem] = Field(description="搜索结果列表")
 
-# ====================
-# 直接对【类】进行序列化
-# ====================
+class User(BaseModel):
+  age: int
 
-# 1. 获取该类的 JSON Schema（返回的是 Python 字典）
-schema_dict = WebSearchOutput.model_json_schema()
+  # 1. before 模式：在转成 int 之前介入，可以处理带单位的字符串
+  @field_validator("age", mode="before")
+  def clean_age(cls, v):
+    if isinstance(v, str) and v.endswith("岁"):
+      return int(v.replace("岁", ""))
+    return v
 
-# print("--- JSON Schema 字典 ---")
-# print(schema_dict)
+  # 2. after 模式：在转成 int 之后介入，用来做数值范围校验
+  @field_validator("age", mode="after")
+  def validate_age_range(cls, v):
+    # 此时 v 保证已经是 int 类型了
+    if v < 0 or v > 150:
+      raise ValueError("年龄必须在 0 到 150 之间")
+    return v
 
-# 2. 如果需要将其序列化为标准 JSON 字符串
-schema_json_str = json.dumps(schema_dict, ensure_ascii=False, indent=2)
 
-print("\n--- JSON Schema 字符串 ---")
-print(schema_json_str)
+# 测试：
+# 1. 传入 "18岁" -> before 把它变成 18 -> after 检查通过
+# print(User(age="18岁"))  # 输出: age=18
+
+# 2. 传入 -5 -> before 不动它 (-5) -> after 抛出 ValueError
+User(age=-5)

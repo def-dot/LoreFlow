@@ -9,7 +9,8 @@ from app.engine import DAG, NodeStatus, RetryPolicy, load_dag
 import yaml
 from app.engine.resolve import parse_retry
 from app.engine.dag import validate_inputs
-from app.engine.schema import PipelineConfig, validate_config
+from app.engine.schema import PipelineConfig
+from helpers import validate_config
 from app.registry import REGISTRY, FuncDef
 
 

@@ -7,7 +7,7 @@ import pytest
 
 from app.engine import DAG, DAGExecutionError, Node, NodeStatus, RetryPolicy, make_func_def
 from app.engine.dag import validate_inputs
-from app.engine.schema import validate_config
+from helpers import validate_config
 
 
 async def test_serial_chain() -> None:

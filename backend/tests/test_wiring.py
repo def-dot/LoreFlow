@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from app.engine.declarative import load_dag
-from app.engine.schema import validate_config
+from helpers import validate_config
 from app.registry.types import func, unregister
 
 
