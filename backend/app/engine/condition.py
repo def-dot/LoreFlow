@@ -93,10 +93,24 @@ def _parse(expr: str) -> list[list[tuple[bool, str, str | None, Any]]]:
     不支持括号嵌套。
     """
     or_groups: list[list[tuple[bool, str, str | None, Any]]] = []
-    for or_part in expr.split(" or "):
-        and_atoms = [_parse_atom(a) for a in or_part.split(" and ")]
+    for or_part in _split_logic(expr, "or"):
+        and_atoms = [_parse_atom(a) for a in _split_logic(or_part, "and")]
         or_groups.append(and_atoms)
     return or_groups
+
+
+def _split_logic(expr: str, op: str) -> list[str]:
+    """按逻辑运算符拆分，仅在运算符后跟 $/not $ 时生效。"""
+    parts: list[str] = []
+    while True:
+        # 找下一个 op+$ 或 op+not $
+        m = re.search(rf"\s+{op}\s+(?=\$|not\s+\$)", expr)
+        if not m:
+            parts.append(expr)
+            break
+        parts.append(expr[: m.start()])
+        expr = expr[m.end():]
+    return parts
 
 
 def _compare(actual: Any, op: str, expected: Any) -> bool:

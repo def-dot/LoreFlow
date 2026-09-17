@@ -42,6 +42,6 @@ nodes:
       prompt: $prompt
       tools: $tools
       skills: $skills
-      file_paths: $file
+      file_names: $file
       max_iterations: 10
     timeout: 300

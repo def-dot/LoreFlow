@@ -136,11 +136,10 @@ class PipelineConfig(BaseModel):
 
         upstream = self.get_upstream_nodes(name, edges)
         errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(spec, upstream))
+        refs = upstream | set(self.inputs) | set(spec.inputs or {})
 
         if spec.condition:
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(spec, upstream))
-
-        refs = refs | set(spec.inputs or {})
+            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(spec.condition, refs))
 
         # _review 卡片
         if spec.type == "human" and isinstance(spec.inputs, dict) and spec.inputs.get("_review") is not None:
@@ -221,68 +220,119 @@ class PipelineConfig(BaseModel):
         spec: NodeSpec,
         upstream: set[str],
     ) -> list[str]:
-        """节点 inputs 校验"""
+        """节点 inputs 校验：键/值必须与 input_schema 一致；$引用校验来源、字段、类型。"""
         errors: list[str] = []
+        wiring = spec.inputs or {}
         func_def = REGISTRY[spec.type]
 
+        # ── Guard: 无 schema ──────────────────────────────────
         if func_def.input_schema is None:
-            if not func_def.accepts_extra and spec.inputs:
-                errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(spec.inputs))}")
+            if not func_def.accepts_extra and wiring:
+                errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(wiring))}")
             return errors
-
-        # 1) $ 引用根键校验
-        for local, source in spec.inputs.items():
-            if isinstance(source, str) and source.startswith("$"):
-                root = source[1:].partition(".")[0]
-                if root not in upstream or root not in self.inputs:
-                    errors.append(f"inputs.{local} 引用的 {root!r} 不是参数键或上游依赖节点")
 
         schema_keys = set(func_def.input_schema.model_fields)
 
-        # 2) 多余参数
-        extra = set(spec.inputs) - schema_keys
+        # ── 多余参数 ─────────────────────────────────────────
+        extra = set(wiring) - schema_keys
         if extra and not func_def.accepts_extra:
             errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
 
-        # 3) 字面量值类型校验（$ 引用跳过，运行时才知道类型）
-        for key, value in spec.inputs.items():
-            if isinstance(value, str) and value.startswith("$"):
-                continue
+        # ── 逐参数校验 ───────────────────────────────────────
+        for key, value in wiring.items():
             finfo = func_def.input_schema.model_fields.get(key)
             if finfo is None:
-                continue
-            try:
-                TypeAdapter(finfo.annotation).validate_python(value, strict=True)
-            except ValidationError:
-                errors.append(
-                    f"inputs.{key} 类型不匹配，期望 {finfo.annotation}，"
-                    f"实际 {type(value).__name__}: {value!r}"
-                )
+                continue  # 已在多余参数中报过
 
-        # 4) required 参数必须在显式接线中提供
+            if isinstance(value, str) and value.startswith("$"):
+                # $ 引用校验
+                root, _, field = value[1:].partition(".")
+
+                # 来源存在性：必须是上游节点 或 pipeline input
+                if root not in upstream and root not in self.inputs:
+                    errors.append(f"inputs.{key} 引用的 {root!r} 不是参数键或上游依赖节点")
+                    continue
+
+                # 上游输出字段 + 类型兼容
+                if root in upstream and field:
+                    up_spec = self.nodes.get(root)
+                    up_func = REGISTRY.get(up_spec.type) if up_spec else None
+                    if up_func and up_func.output_schema:
+                        if field not in up_func.output_schema.model_fields:
+                            errors.append(
+                                f"inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}"
+                            )
+                            continue
+                        src_ann = up_func.output_schema.model_fields[field].annotation
+                        dst_ann = finfo.annotation
+                        if not self._types_compatible(src_ann, dst_ann):
+                            errors.append(
+                                f"inputs.{key} 引用 ${value[1:]} 类型不兼容: "
+                                f"上游输出 {src_ann}，目标参数期望 {dst_ann}"
+                            )
+            else:
+                # 字面量类型校验
+                try:
+                    TypeAdapter(finfo.annotation).validate_python(value, strict=True)
+                except ValidationError:
+                    errors.append(
+                        f"inputs.{key} 类型不匹配，期望 {finfo.annotation}，"
+                        f"实际 {type(value).__name__}: {value!r}"
+                    )
+
+        # ── required 参数 ────────────────────────────────────
         for key, finfo in func_def.input_schema.model_fields.items():
-            if finfo.is_required() and key not in spec.inputs:
+            if finfo.is_required() and key not in wiring:
                 errors.append(f"inputs 缺少必填参数 {key!r}")
 
         return errors
 
+    @staticmethod
+    def _types_compatible(src: Any, dst: Any) -> bool:
+        """src 类型是 dst 的子类或相同 → 兼容。Any / Union / 泛型等无法判断时保守放行。"""
+        try:
+            # typing.Any → 兼容一切
+            if src is Any or dst is Any:
+                return True
+
+            # 提取可 issubclass 的裸类型：泛型(list[str]) → list；Union(str|None) → 第一个非 None
+            def _base(t: Any) -> type | None:
+                if isinstance(t, type):
+                    return t
+                origin = getattr(t, "__origin__", None)
+                if origin is not None:
+                    return origin
+                # Union (typing.UnionType in 3.10+, typing.Union in older)
+                args = getattr(t, "__args__", None)
+                if args:
+                    non_none = [a for a in args if a is not type(None)]
+                    if non_none:
+                        return _base(non_none[0])
+                return None
+
+            src_base = _base(src)
+            dst_base = _base(dst)
+            if src_base is None or dst_base is None:
+                return True  # 无法解析 → 保守放行
+            return src_base is dst_base or issubclass(src_base, dst_base)
+        except TypeError:
+            return True  # 复杂场景 → 保守放行
+
     # ---- condition 校验 ----
 
-    def _validate_condition(self,
-        spec: NodeSpec,
-        upstream: set[str]
-    ) -> list[str]:
-        if isinstance(spec, bool):
+    @staticmethod
+    def _validate_condition(condition: Any, available_refs: set[str]) -> list[str]:
+        if isinstance(condition, bool):
             return []
-        if not isinstance(spec, str) or not spec.strip():
-            return [f"condition 必须是非空表达式字符串，实际是 {spec!r}"]
+        if not isinstance(condition, str) or not condition.strip():
+            return [f"condition 必须是非空表达式字符串，实际是 {condition!r}"]
         try:
-            roots = condition_keys(spec)
+            roots = condition_keys(condition)
         except ValueError as exc:
             return [str(exc)]
         errors: list[str] = []
         for root in roots:
-            if root not in upstream:
+            if root not in available_refs:
                 errors.append(f"condition 引用的 {root!r} 不是参数键、上游依赖节点或本地键")
         return errors
 
