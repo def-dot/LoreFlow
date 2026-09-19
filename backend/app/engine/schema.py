@@ -97,7 +97,7 @@ class PipelineConfig(BaseModel):
             raise ValueError("流水线至少需要一个节点")
 
         errors.extend(self._validate_graph())
-        errors.extend(self._validate_nodes(self.nodes))
+        errors.extend(self._validate_nodes())
 
         if errors:
             raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
@@ -112,16 +112,18 @@ class PipelineConfig(BaseModel):
 
         for name, spec in self.nodes.items():
             loc = f"节点 {name!r}"
-            upstream = PipelineConfig.get_upstream_nodes(name)
-            refs = upstream | set(spec.inputs or {})
-
+            
             # ── 类型注册 ─────────────────────────────────────
             if spec.type not in REGISTRY:
                 errors.append(f"{loc}: 类型函数 {spec.type!r} 未注册")
                 continue
 
             func_def = REGISTRY[spec.type]
-            wiring = spec.inputs or {}
+
+            upstream = self.get_upstream_nodes(name)
+            inputs = spec.inputs or {}
+
+            refs = upstream | set(inputs)
 
             # ── 接线参数校验 ─────────────────────────────────
             if func_def.input_schema is not None:
@@ -132,12 +134,12 @@ class PipelineConfig(BaseModel):
                 )
 
                 # 多余参数
-                extra = set(wiring) - schema_keys
+                extra = set(inputs) - schema_keys
                 if extra and not accepts_extra:
                     errors.append(f"{loc}: inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
 
                 # 逐参数
-                for key, value in wiring.items():
+                for key, value in inputs.items():
                     finfo = func_def.input_schema.model_fields.get(key)
                     if finfo is None:
                         continue
@@ -145,7 +147,7 @@ class PipelineConfig(BaseModel):
                     if isinstance(value, str) and value.startswith("$"):
                         root, _, field = value[1:].partition(".")
                         if root in upstream and field:
-                            up_spec = nodes.get(root)
+                            up_spec = self.nodes.get(root)
                             up_func = REGISTRY.get(up_spec.type) if up_spec else None
                             if up_func and up_func.output_schema:
                                 if field not in up_func.output_schema.model_fields:
@@ -169,12 +171,12 @@ class PipelineConfig(BaseModel):
 
                 # required
                 for key, finfo in func_def.input_schema.model_fields.items():
-                    if finfo.is_required() and key not in wiring:
+                    if finfo.is_required() and key not in inputs:
                         errors.append(f"{loc}: inputs 缺少必填参数 {key!r}")
 
             # ── _review 卡片 ─────────────────────────────────
-            if spec.type == "human" and isinstance(wiring, dict) and wiring.get("_review") is not None:
-                review = wiring["_review"]
+            if spec.type == "human" and isinstance(inputs, dict) and inputs.get("_review") is not None:
+                review = inputs["_review"]
                 if not isinstance(review, dict):
                     errors.append(f"{loc}: _review 必须是映射，实际是 {type(review).__name__}")
                 elif not review:
@@ -192,7 +194,7 @@ class PipelineConfig(BaseModel):
 
             # ── code 节点必须有 script ───────────────────────
             if spec.type == "code":
-                script = wiring.get("script")
+                script = inputs.get("script")
                 if not script or not isinstance(script, str) or not script.strip():
                     errors.append(f"{loc}: code 类型必须在 inputs 中提供非空 script")
 
