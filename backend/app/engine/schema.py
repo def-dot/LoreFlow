@@ -13,9 +13,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.registry import REGISTRY
-from app.registry.types import FuncDef
 
 from .condition import condition_keys
+from app.registry.types import FuncDef
 
 
 # ------------------------------------------------------------------
@@ -96,94 +96,74 @@ class PipelineConfig(BaseModel):
             raise ValueError("流水线至少需要一个节点")
 
         errors.extend(self._validate_graph())
-        errors.extend(self._validate_nodes())
+
+        for name, spec in self.nodes.items():
+            loc = f"节点 {name!r}"
+
+            if spec.type not in REGISTRY:
+                errors.append(f"{loc}: 类型函数 {spec.type!r} 未注册")
+                continue
+
+            upstream = self.get_upstream_nodes(name)
+            refs = upstream | set(spec.inputs or {})
+            errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(spec))
+            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(spec.condition, refs))
 
         if errors:
             raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
 
         return self
 
-    # ---- 节点校验 ----
+    # ---- 接线参数校验 ----
 
-    def _validate_nodes(self) -> list[str]:
-        """遍历所有节点：类型注册、接线参数、$引用、condition。"""
+    def _validate_inputs(self, spec: NodeSpec) -> list[str]:
+        """$引用上游存在性 + 字段存在性 + required。"""
         errors: list[str] = []
+        func_def = REGISTRY[spec.type]
+        inputs = spec.inputs or {}
+        input_schema = func_def.input_schema.model_fields if func_def.input_schema else {}
 
-        for name, spec in self.nodes.items():
-            loc = f"节点 {name!r}"
-            
-            # ── 类型注册 ─────────────────────────────────────
-            if spec.type not in REGISTRY:
-                errors.append(f"{loc}: 类型函数 {spec.type!r} 未注册")
+        # required
+        for key, finfo in input_schema.items():
+            if finfo.is_required() and key not in inputs:
+                errors.append(f"inputs 缺少必填参数 {key!r}")
+
+        # 逐参数 $引用
+        upstream = self.get_upstream_nodes(spec.name)
+        for key, value in inputs.items():
+            finfo = input_schema.get(key)
+            if finfo is None:
                 continue
+            if isinstance(value, str) and value.startswith("$"):
+                root, _, field = value[1:].partition(".")
+                if root not in upstream:
+                    errors.append(f"inputs.{key} 引用的 {root!r} 不是上游依赖节点")
+                elif field:
+                    up_spec = nodes.get(root)
+                    up_func = REGISTRY.get(up_spec.type) if up_spec else None
+                    if up_func and up_func.output_schema and field not in up_func.output_schema.model_fields:
+                        errors.append(f"inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
 
-            func_def = REGISTRY[spec.type]
-            
-            inputs = spec.inputs or {}
+        return errors
 
-            input_schema = func_def.input_schema.model_fields if func_def.input_schema is not None else {}
+    # ---- condition 校验 ----
 
-            for key, finfo in input_schema.items():
-                if finfo.is_required() and key not in inputs:
-                    errors.append(f"{loc}: inputs 缺少必填参数 {key!r}")
-
-            upstream = self.get_upstream_nodes(name)
-            refs = upstream | set(inputs)
-            # 逐参数
-            for key, value in inputs.items():
-                finfo = input_schema.get(key)
-                if finfo is None:
-                    continue
-
-                if isinstance(value, str) and value.startswith("$"):
-                    root, _, field = value[1:].partition(".")
-                    if root not in upstream:
-                        errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 不是上游依赖节点")
-                    elif field:
-                        up_spec = self.nodes.get(root)
-                        up_func = REGISTRY.get(up_spec.type) if up_spec else None
-                        if up_func and up_func.output_schema and field not in up_func.output_schema.model_fields:
-                            errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
-
-            # ── _review 卡片 ─────────────────────────────────
-            if spec.type == "human" and isinstance(inputs, dict) and inputs.get("_review") is not None:
-                review = inputs["_review"]
-                if not isinstance(review, dict):
-                    errors.append(f"{loc}: _review 必须是映射，实际是 {type(review).__name__}")
-                elif not review:
-                    errors.append(f"{loc}: _review 声明不能为空映射")
-                else:
-                    for k in review:
-                        if not (isinstance(k, str) and k.startswith("$") and len(k) > 1):
-                            errors.append(f"{loc}: _review 键 {k!r} 必须带 $ 引用前缀")
-                            continue
-                        r = k[1:].split(".")[0]
-                        if r in ("approve", "reason"):
-                            errors.append(f"{loc}: _review 字段 {r!r} 不得占用协议键")
-
-            # ── code 节点必须有 script ───────────────────────
-            if spec.type == "code":
-                script = inputs.get("script")
-                if not script or not isinstance(script, str) or not script.strip():
-                    errors.append(f"{loc}: code 类型必须在 inputs 中提供非空 script")
-
-            # ── condition ────────────────────────────────────
-            if spec.condition:
-                cond = spec.condition
-                if isinstance(cond, bool):
-                    pass
-                elif not isinstance(cond, str) or not cond.strip():
-                    errors.append(f"{loc}: condition 必须是非空表达式字符串，实际是 {cond!r}")
-                else:
-                    try:
-                        roots = condition_keys(cond)
-                    except ValueError as exc:
-                        errors.append(f"{loc}: {exc}")
-                    else:
-                        for root in roots:
-                            if root not in refs:
-                                errors.append(f"{loc}: condition 引用的 {root!r} 不是参数键、上游依赖节点或本地键")
-
+    @staticmethod
+    def _validate_condition(condition: Any, refs: set[str]) -> list[str]:
+        if not condition:
+            return []
+        if isinstance(condition, bool):
+            return []
+        if not isinstance(condition, str) or not condition.strip():
+            return [f"condition 必须是非空表达式字符串，实际是 {condition!r}"]
+        try:
+            roots = condition_keys(condition)
+        except ValueError as exc:
+            return [str(exc)]
+        errors: list[str] = []
+        for root in roots:
+            if root not in refs:
+                errors.append(f"condition 引用的 {root!r} 不是上游依赖节点")
         return errors
 
     # ---- 图结构校验 ----
