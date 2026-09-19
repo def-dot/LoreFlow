@@ -140,10 +140,10 @@ class PipelineConfig(BaseModel):
                         errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 不是上游依赖节点")
                     else:
                         up_spec = self.nodes.get(root)
-                        up_func = REGISTRY.get(up_spec.type) if up_spec else None
-                        if up_func and up_func.output_schema:
-                            if field not in up_func.output_schema.model_fields:
-                                errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
+                        up_func = REGISTRY.get(up_spec.type)
+                        up_output_schema = up_func.output_schema.model_fields if up_func.output_schema else {}
+                        if field not in up_output_schema:
+                            errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
                 else:
                     try:
                         TypeAdapter(finfo.annotation).validate_python(value, strict=True)
