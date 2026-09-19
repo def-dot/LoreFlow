@@ -26,6 +26,15 @@ logger = get_logger(__name__)
 PIPELINES_DIR = settings.PIPELINES_DIR
 
 
+def _start_params(cfg: PipelineConfig) -> dict[str, Any]:
+    """从 __start__ 节点提取输入参数声明。"""
+    start = cfg.nodes.get("__start__")
+    if not start or not start.inputs:
+        return {}
+    return {k: v.model_dump() if hasattr(v, "model_dump") else v
+            for k, v in start.inputs.items()}
+
+
 def list_pipelines() -> list[dict[str, Any]]:
     """枚举目录下全部 .yaml；单个文件解析失败跳过并告警。"""
     entries: list[dict[str, Any]] = []
@@ -41,7 +50,7 @@ def list_pipelines() -> list[dict[str, Any]]:
             "name": cfg.name or path.stem,
             "description": cfg.description or "",
             "node_count": len(cfg.nodes),
-            "params": {k: v.model_dump() for k, v in cfg.inputs.items()},
+            "params": _start_params(cfg),
         })
     return entries
 
@@ -100,21 +109,32 @@ def detail_from_config(
     for name in dag.topological_order():
         spec = cfg.nodes.get(name)
         type_val = spec.type if spec else None
-        node_type = REGISTRY.get(type_val) if type_val else None
+
+        # pipeline 节点 / 虚拟节点的 FuncDef 在 dag 对象中，不在全局 REGISTRY
+        node = dag.nodes.get(name)
+        if node and node.func_def:
+            node_type = node.func_def
+        else:
+            node_type = REGISTRY.get(type_val) if type_val else None
+
+        # depends_on 优先从 node 取（虚拟节点无 spec，但 node 有 depends_on）
+        deps = list(node.depends_on) if node else (list(spec.depends_on) if spec else [])
 
         row: dict[str, Any] = {
             "name": name,
-            "label": spec.label if spec else None,
+            "label": spec.label if spec else (node.label if node else None),
             "type": type_val,
             "type_label": node_type.label if node_type else None,
             "description": spec.description if spec else None,
             "type_description": node_type.description if node_type else None,
             "type_input_schema": node_type.input_schema.model_json_schema() if node_type and node_type.input_schema else None,
             "type_output_schema": node_type.output_schema.model_json_schema() if node_type and node_type.output_schema else None,
-            "depends_on": list(spec.depends_on) if spec else [],
+            "depends_on": deps,
             "inputs": spec.inputs if spec else None,
             "retry": _retry_summary(parse_retry(spec.retry)) if spec else None,
             "condition": spec.condition if spec else None,
+            "pipeline": spec.pipeline if spec else None,
+            "output_mapping": spec.output_mapping if spec else None,
         }
         rows.append(row)
 
@@ -125,7 +145,7 @@ def detail_from_config(
         "mermaid": dag.to_mermaid(),
         "source": raw,
         "nodes": rows,
-        "params": {k: v.model_dump() for k, v in cfg.inputs.items()},
+        "params": _start_params(cfg),
     }
 
 

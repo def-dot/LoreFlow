@@ -3,17 +3,16 @@ description: >
   演示 code 节点：接收原始 JSON 数据，用 Python 脚本解析、计算统计指标，
   最终汇总为 Markdown 报告。全程不依赖 LLM。
 
-inputs:
-  data:
-    required: true
-    label: 数据
-    description: JSON 数组，如 [{"name":"A","score":85},{"name":"B","score":92}]
-    multiline: true
-
-output:
-  report: $report.result
-
 nodes:
+  __start__:
+    type: start
+    inputs:
+      data:
+        required: true
+        label: 数据
+        description: JSON 数组，如 [{"name":"A","score":85},{"name":"B","score":92}]
+        multiline: true
+
   # ── 第一步：解析 JSON ──────────────────────────────
   parse:
     type: code
@@ -72,3 +71,8 @@ nodes:
       items: $parse.result
       stats: $stats.result
     timeout: 10
+
+  __end__:
+    type: end
+    inputs:
+      report: $report.result

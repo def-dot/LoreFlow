@@ -1,14 +1,16 @@
 name: 串行
 description: RAG文档入库串行执行：上传文档 → 切块 → 向量化 → 写入向量库。
 
-inputs:
-  document:
-    required: true
-    file: true
-    label: 上传文档
-    description: 上传 txt/md 等文本文件入库
-
 nodes:
+  __start__:
+    type: start
+    inputs:
+      document:
+        required: true
+        file: true
+        label: 上传文档
+        description: 上传 txt/md 等文本文件入库
+
   load:
     type: rag_load
     label: 文档解析

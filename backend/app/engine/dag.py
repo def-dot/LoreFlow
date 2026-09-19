@@ -42,7 +42,7 @@ def validate_inputs(
     inputs: dict[str, Any] | None,
     declared: dict[str, dict[str, Any]],
 ) -> list[str]:
-    """运行时输入校验：输入键 ⊆ 声明键 + 必填缺失/为空。"""
+    """运行时输入校验：输入键 ⊆ 声明键 + 必填缺失/为空 + validate 表达式。"""
     errors: list[str] = []
     invalid = sorted(set(inputs or {}) - set(declared))
     if invalid:
@@ -57,6 +57,22 @@ def validate_inputs(
             missing.append(name)
     if missing:
         errors.append(f"必填参数缺失或为空: {', '.join(missing)}")
+
+    # validate 表达式校验
+    from .condition import eval_condition
+    for name, spec in declared.items():
+        if not isinstance(spec, dict) or not spec.get("validate"):
+            continue
+        value = (inputs or {}).get(name)
+        if value is None:
+            continue
+        view = {"value": value, name: value}
+        try:
+            if not eval_condition(spec["validate"], view):
+                errors.append(f"参数 {name!r} 校验失败: {spec['validate']}")
+        except Exception as exc:
+            errors.append(f"参数 {name!r} 的 validate 表达式求值出错: {exc}")
+
     return errors
 
 
@@ -90,9 +106,7 @@ class DAG:
         inputs: 运行时输入参数声明 ``{name: {default, required, ...}}``
                 （YAML 顶层 ``inputs`` 原文）。默认值/必填键不单独拆开传，
                 由 :attr:`default_inputs` / :attr:`required_inputs` 按需派生。
-        output: 最终输出声明 ``{key: $ref}``
-                （YAML 顶层 ``output`` 原文）。语法与 node inputs 接线一致，
-                从执行上下文（inputs + 节点输出）按 ``$key`` 提取。
+                若未传入但存在 ``__start__`` 节点，则从该节点 inputs 兜底。
     """
 
     def __init__(
@@ -102,9 +116,17 @@ class DAG:
         output: dict[str, str] | None = None,
     ):
         self.name = name
-        self.inputs = inputs if inputs else {}
-        self.output = output
+        self._inputs = inputs if inputs else {}
+        self._output = output
         self._nodes: dict[str, Node] = {}
+
+    @property
+    def inputs(self) -> dict[str, dict[str, Any]]:
+        """输入参数声明 — 优先构造参数，兜底 ``__start__`` 节点 inputs。"""
+        if self._inputs:
+            return self._inputs
+        start = self._nodes.get("__start__")
+        return start.inputs if start else {}
 
     @property
     def default_inputs(self) -> dict[str, Any]:
@@ -370,6 +392,25 @@ class DAG:
             ValueError: 结构校验失败，或（声明了 inputs 时）输入不合法。
             DAGExecutionError: If any nodes failed.
         """
+        # output 参数 → __end__ 节点（程序化构建时注入，声明式已在 schema 合并）
+        if self._output and "__end__" not in self._nodes:
+            from app.registry import REGISTRY
+            deps = []
+            for ref in self._output.values():
+                if isinstance(ref, str) and ref.startswith("$"):
+                    root = ref[1:].split(".")[0]
+                    if root in self._nodes:
+                        deps.append(root)
+            self.add_node(
+                Node(
+                    func_def=REGISTRY["end"],
+                    name="__end__",
+                    label="📤 输出",
+                    inputs=self._output,
+                    depends_on=deps,
+                )
+            )
+
         errors = self.validate()
         if errors:
             raise ValueError("DAG 结构无效:\n  " + "\n  ".join(errors))
@@ -384,20 +425,19 @@ class DAG:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Topological order: %s", " -> ".join(self.topological_order()))
 
-        # _approver 注入共享上下文：human 节点的审核结果来自当前运行
-        ctx: dict[str, Any] = dict(inputs or {})
+        # ctx 初始化：默认值 + 用户输入 + approver
+        ctx: dict[str, Any] = {**self.default_inputs, **(inputs or {})}
         if approver is not None:
             ctx["_approver"] = approver
 
         executor = DAGExecutor(nodes=self._nodes, ctx=ctx, concurrency=concurrency, on_event=on_event)
         results = await executor.execute(resume=resume)
 
+        # 输出从 __end__ 节点提取
         output = None
-        if self.output is not None:
-            output = {
-                k: v for k, v in wired_ctx(ctx, self.output).items()
-                if k in self.output and v is not None
-            }
+        output_result = results.get("__end__")
+        if output_result is not None and output_result.output:
+            output = output_result.output
 
         return results, output
 
@@ -407,6 +447,8 @@ class DAG:
 
     def to_mermaid(self) -> str:
         """Render the DAG as a Mermaid flowchart (for docs / debugging).
+
+        inputs/output 是 DAG 中的虚拟节点，与普通节点统一渲染。
         """
         lines = ["graph TD"]
         for node in self._nodes.values():

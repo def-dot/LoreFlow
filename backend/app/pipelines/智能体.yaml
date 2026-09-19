@@ -2,29 +2,28 @@ name: 智能体
 description: >
   通用智能助手。能闲聊、答疑，也能自主调用工具和技能完成复杂任务。
 
-inputs:
-  prompt:
-    required: true
-    multiline: true
-    label: 提示词
-    description: 用户输入的问题
-  tools:
-    label: 工具
-    default: ["*"]
-    description: 默认加载全部，可选择指定工具
-  skills:
-    label: 技能
-    default: ["*"]
-    description: 默认加载全部，可选择指定技能
-  file:
-    file: true
-    label: 上传文件
-    description: 可选，上传文件供智能体分析
-
-output:
-  reply: $agent.content
-
 nodes:
+  __start__:
+    type: start
+    inputs:
+      prompt:
+        required: true
+        multiline: true
+        label: 提示词
+        description: 用户输入的问题
+      tools:
+        label: 工具
+        default: ["*"]
+        description: 默认加载全部，可选择指定工具
+      skills:
+        label: 技能
+        default: ["*"]
+        description: 默认加载全部，可选择指定技能
+      file:
+        file: true
+        label: 上传文件
+        description: 可选，上传文件供智能体分析
+
   agent:
     type: agent
     label: 智能助手
@@ -45,3 +44,8 @@ nodes:
       file_names: $file
       max_iterations: 10
     timeout: 300
+
+  __end__:
+    type: end
+    inputs:
+      reply: $agent.content

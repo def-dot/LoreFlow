@@ -1,18 +1,20 @@
 name: 人工多级审核
 description: 内容发布多级审批：编辑初审、主编终审，两审都通过才发布。
 
-inputs:
-  title:
-    required: true
-    label: 标题
-    description: 待审文章标题
-  content:
-    required: true
-    label: 正文
-    description: 待审文章正文
-    multiline: true
-
 nodes:
+  __start__:
+    type: start
+    inputs:
+      title:
+        required: true
+        label: 标题
+        description: 待审文章标题
+      content:
+        required: true
+        label: 正文
+        description: 待审文章正文
+        multiline: true
+
   first_review:
     type: human
     label: 编辑初审

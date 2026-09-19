@@ -18,6 +18,8 @@ class NodeDetail(BaseModel):
     inputs: Any = None
     retry: str | None = None
     condition: Any = None
+    pipeline: str | None = None
+    output_mapping: dict[str, str] | None = None
 
 
 class PipelineListItem(BaseModel):

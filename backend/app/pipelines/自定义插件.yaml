@@ -1,18 +1,20 @@
 name: 自定义插件
 description: 内容发布后发送邮件通知。
 
-inputs:
-  title:
-    required: true
-    label: 标题
-    description: 待审核文章标题
-  content:
-    required: true
-    label: 正文
-    description: 待审核文章正文
-    multiline: true
-
 nodes:
+  __start__:
+    type: start
+    inputs:
+      title:
+        required: true
+        label: 标题
+        description: 待审核文章标题
+      content:
+        required: true
+        label: 正文
+        description: 待审核文章正文
+        multiline: true
+
   review:
     type: human
     label: 内容审核

@@ -4,18 +4,15 @@ description: >
   查天气 → LLM 根据天气建议活动 → 搜索相关攻略。
   三种工具各司其职，中间由 LLM 做决策衔接。
 
-inputs:
-  city:
-    required: true
-    label: 城市
-    description: 例如「北京」
-
-output:
-  weather: $weather.content
-  suggestion: $suggest.content
-  guide: $search.content
-
 nodes:
+  __start__:
+    type: start
+    inputs:
+      city:
+        required: true
+        label: 城市
+        description: 例如「北京」
+
   # ── 第一步：工具调用 — 查天气 ──────────────────────
   weather:
     type: agent
@@ -62,3 +59,10 @@ nodes:
       tools: [web_search]
       max_iterations: 3
     timeout: 60
+
+  __end__:
+    type: end
+    inputs:
+      weather: $weather.content
+      suggestion: $suggest.content
+      guide: $search.content

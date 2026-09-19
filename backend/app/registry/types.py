@@ -37,6 +37,7 @@ class FuncDef:
     input_schema: type[BaseModel] | None = field(default=None, hash=False)
     output_schema: type[BaseModel] | None = field(default=None, hash=False)
     accepts_extra: bool = field(default=False, hash=False)
+    final: bool = field(default=False, hash=False)
 
 
 #: 节点注册表：name → FuncDef（DAG 引擎 / 节点扫描）
