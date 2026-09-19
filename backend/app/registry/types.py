@@ -1,5 +1,5 @@
 """
-注册表核心 — FuncDef 数据类、@func 装饰器与双注册表。
+注册表核心 — FuncDef、@func 装饰器与双注册表。
 
 - ``FuncDef`` 统一函数定义（节点类型和工具共用）
 - ``REGISTRY`` — 节点注册表（DAG 引擎）
@@ -12,8 +12,8 @@ from __future__ import annotations
 import inspect
 import logging
 import typing
-from collections.abc import Callable
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # 统一函数定义
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
+@dataclass
 class FuncDef:
     """一个可被 YAML 引用或 LLM 调用的函数定义。"""
 
@@ -33,9 +33,9 @@ class FuncDef:
     func: Callable[..., Any]
     label: str = ""
     description: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict, hash=False)
-    input_schema: type[BaseModel] | None = field(default=None, hash=False)
-    output_schema: type[BaseModel] | None = field(default=None, hash=False)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    input_schema: type[BaseModel] | None = None
+    output_schema: type[BaseModel] | None = None
 
 
 #: 节点注册表：name → FuncDef（DAG 引擎 / 节点扫描）

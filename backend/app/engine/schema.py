@@ -7,6 +7,7 @@ PipelineConfig 是 YAML 配置的唯一校验入口：
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -177,10 +178,14 @@ class PipelineConfig(BaseModel):
             return errors
 
         schema_keys = set(func_def.input_schema.model_fields)
+        accepts_extra = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD
+            for p in inspect.signature(func_def.func).parameters.values()
+        )
 
         # ── 多余参数 ─────────────────────────────────────────
         extra = set(wiring) - schema_keys
-        if extra:
+        if extra and not accepts_extra:
             errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
 
         # ── 逐参数校验 ───────────────────────────────────────
