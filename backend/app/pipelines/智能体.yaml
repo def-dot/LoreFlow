@@ -27,6 +27,7 @@ nodes:
   agent:
     type: agent
     label: 智能助手
+    depends_on: [__start__]
     description: 根据问题自主判断是否需要工具，闲聊时直接回复，复杂任务时调用工具逐步完成
     inputs:
       system: >
@@ -46,6 +47,7 @@ nodes:
     timeout: 300
 
   __end__:
+    depends_on: [agent]
     type: end
     inputs:
       reply: $agent.content

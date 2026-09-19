@@ -121,26 +121,14 @@ class PipelineConfig(BaseModel):
         inputs = spec.inputs or {}
         input_schema = func_def.input_schema.model_fields if func_def.input_schema else {}
 
-        # required
         for key, finfo in input_schema.items():
             if finfo.is_required() and key not in inputs:
                 errors.append(f"inputs 缺少必填参数 {key!r}")
 
-        # 逐参数 $引用
         upstream = self.get_upstream_nodes(name)
         for key, value in inputs.items():
-            finfo = input_schema.get(key)
-            if finfo is None:
-                continue
             if isinstance(value, str) and value.startswith("$"):
-                root, _, field = value[1:].partition(".")
-                if root not in upstream:
-                    errors.append(f"inputs.{key} 引用的 {root!r} 不是上游依赖节点")
-                elif field:
-                    up_spec = self.nodes.get(root)
-                    up_func = REGISTRY.get(up_spec.type) if up_spec else None
-                    if up_func and up_func.output_schema and field not in up_func.output_schema.model_fields:
-                        errors.append(f"inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
+                errors.extend(f"inputs.{key}: {msg}" for msg in self._check_ref(value, upstream))
 
         return errors
 
@@ -155,15 +143,30 @@ class PipelineConfig(BaseModel):
         if not isinstance(condition, str) or not condition.strip():
             return [f"condition 必须是非空表达式字符串，实际是 {condition!r}"]
         try:
-            roots = condition_keys(condition)
+            refs = condition_keys(condition)
         except ValueError as exc:
             return [str(exc)]
-        errors: list[str] = []
         upstream = self.get_upstream_nodes(name)
-        for root in roots:
-            if root not in upstream:
-                errors.append(f"condition 引用的 {root!r} 不是上游依赖节点")
+        errors: list[str] = []
+        for ref in refs:
+            errors.extend(self._check_ref(f"${ref}", upstream))
         return errors
+
+    # ---- $引用校验 ----
+
+    def _check_ref(self, ref: str, upstream: set[str]) -> list[str]:
+        """校验单个 $引用：上游节点存在性 + 字段存在性。"""
+        root, _, field = ref[1:].partition(".")
+        if root not in upstream:
+            return [f"引用的 {root!r} 不是上游依赖节点"]
+        if not field:
+            return []
+        up_spec = self.nodes.get(root)
+        up_func = REGISTRY.get(up_spec.type) if up_spec else None
+        top_field = field.split('.')[0]
+        if up_func and up_func.output_schema and top_field not in up_func.output_schema.model_fields:
+            return [f"引用的 {root!r} 输出中没有字段 {top_field!r}"]
+        return []
 
     # ---- 图结构校验 ----
 
@@ -186,11 +189,9 @@ class PipelineConfig(BaseModel):
     # ---- 图工具 ----
 
     def get_upstream_nodes(self, name: str) -> set[str]:
-        """返回 name 的所有上游节点（传递闭包）。__start__ 始终视为隐式上游。"""
+        """返回 name 的所有上游节点（传递闭包）。"""
         seen: set[str] = set()
         stack = [name]
-        if "__start__" in self.nodes and name != "__start__":
-            seen.add("__start__")
         while stack:
             for dep in (getattr(self.nodes.get(stack.pop()), "depends_on", None) or []):
                 if dep not in seen:

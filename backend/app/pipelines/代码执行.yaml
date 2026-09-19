@@ -26,6 +26,7 @@ nodes:
                 raise ValueError("输入必须是 JSON 数组")
             return items
       raw: $__start__.data
+    depends_on: [__start__]
     timeout: 10
 
   # ── 第二步：计算统计指标 ────────────────────────────
@@ -73,6 +74,7 @@ nodes:
     timeout: 10
 
   __end__:
+    depends_on: [report]
     type: end
     inputs:
       report: $report.result

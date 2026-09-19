@@ -22,6 +22,7 @@ nodes:
       prompt: $__start__.city
       tools: [web_search]
       max_iterations: 3
+    depends_on: [__start__]
     timeout: 60
 
   # ── 第二步：LLM — 根据天气推荐活动 ─────────────────
@@ -61,6 +62,7 @@ nodes:
     timeout: 60
 
   __end__:
+    depends_on: [search, suggest, weather]
     type: end
     inputs:
       weather: $weather.content

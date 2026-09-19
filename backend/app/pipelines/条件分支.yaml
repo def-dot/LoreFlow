@@ -22,6 +22,7 @@ nodes:
         chat —— 问候、闲聊、创作、翻译等无需查询资料的请求；
         rag —— 需要查询知识库/设定资料才能回答的问题；
       classify_labels: [chat, rag]
+    depends_on: [__start__]
 
   llm_chat:
     type: llm_chat
@@ -59,6 +60,7 @@ nodes:
       system: 你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。
 
   __end__:
+    depends_on: [llm_chat, rag_answer]
     type: end
     inputs:
       llm_chat: $llm_chat

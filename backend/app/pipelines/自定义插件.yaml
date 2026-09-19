@@ -34,6 +34,7 @@ nodes:
   notify:
     type: send_email
     label: 邮件通知
+    depends_on: [publish, review]
     depends_on: [publish]
     inputs:
       subject: $review.decision.title

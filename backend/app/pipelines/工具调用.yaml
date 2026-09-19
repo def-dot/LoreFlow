@@ -15,6 +15,7 @@ nodes:
   agent:
     type: agent
     label: 生活管家小助手
+    depends_on: [__start__]
     description: LLM 自动调用工具回答问题
     inputs:
       prompt: $__start__.prompt
@@ -27,6 +28,7 @@ nodes:
     timeout: 120
 
   __end__:
+    depends_on: [agent]
     type: end
     inputs:
       answer: $agent.content

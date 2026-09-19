@@ -15,6 +15,7 @@ nodes:
     type: rag_load
     label: 文档解析
     inputs: {document: $__start__.document}
+    depends_on: [__start__]
 
   chunk:
     type: rag_chunk
@@ -25,11 +26,11 @@ nodes:
   embed:
     type: rag_embed
     label: 向量化
-    depends_on: [chunk]
+    depends_on: [chunk, load]
     inputs: {doc_name: $load.doc_name, chunks: $chunk.result}
 
   upsert:
     type: rag_upsert
     label: 写入向量库
-    depends_on: [embed]
+    depends_on: [embed, load]
     inputs: {doc_name: $load.doc_name, embeds: $embed.result}

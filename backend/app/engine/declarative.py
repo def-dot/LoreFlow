@@ -19,23 +19,6 @@ from .schema import NodeSpec, PipelineConfig
 logger = logging.getLogger(__name__)
 
 
-def _inject_input_deps(node_name: str, spec: NodeSpec, input_names: set[str]) -> list[str]:
-    """扫描节点 inputs + condition 中的 $引用，若引用了 pipeline inputs 则注入 __start__ 依赖。"""
-
-    def scan(obj: Any) -> bool:
-        if isinstance(obj, str) and obj.startswith("$"):
-            root = obj[1:].split(".")[0]
-            return root in input_names
-        elif isinstance(obj, dict):
-            return any(scan(v) for v in obj.values())
-        elif isinstance(obj, list):
-            return any(scan(v) for v in obj)
-        return False
-
-    if scan(spec.inputs) or (isinstance(spec.condition, str) and scan(spec.condition)):
-        return ["__start__"]
-    return []
-
 
 def load_dag(
     config: dict[str, Any] | PipelineConfig,
@@ -59,14 +42,8 @@ def load_dag(
     dag = DAG(cfg.name or "dag", inputs=_start_inputs())
 
     # input_names 用于自动注入 __start__ 依赖
-    start_node = cfg.nodes.get("__start__")
-    input_names = set(start_node.inputs) if start_node and start_node.inputs else set()
-
     for name, spec in cfg.nodes.items():
         node_type = REGISTRY[spec.type]
-
-        # 自动注入 __start__ 依赖
-        extra_deps = _inject_input_deps(name, spec, input_names)
 
         dag.add_node(
             Node(
@@ -75,7 +52,7 @@ def load_dag(
                 label=spec.label or "",
                 description=spec.description,
                 inputs=spec.inputs,
-                depends_on=spec.depends_on + extra_deps,
+                depends_on=spec.depends_on,
                 retry=parse_retry(spec.retry),
                 timeout=spec.timeout,
                 condition=spec.condition,
