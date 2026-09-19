@@ -9,78 +9,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pydantic import create_model
-
-from app.registry import REGISTRY, FuncDef
-from app.core.config import settings
+from app.registry import REGISTRY
 
 from .dag import DAG
-from .node import Node, wired_ctx
+from .node import Node
 from .resolve import parse_retry
-from .schema import PipelineConfig
+from .schema import NodeSpec, PipelineConfig
 
 logger = logging.getLogger(__name__)
-
-PIPELINES_DIR = settings.PIPELINES_DIR
-
-
-def make_pipeline_func(
-    pipeline_name: str,
-    cfg: PipelineConfig,
-    output_mapping: dict[str, str] | None,
-    loading: set[str],
-) -> tuple[Any, FuncDef]:
-    """为子 pipeline 创建执行函数 + FuncDef。
-
-    Args:
-        pipeline_name: 子 pipeline 名称（对应 YAML 文件名）。
-        cfg: 子 pipeline 的 PipelineConfig。
-        output_mapping: 子 pipeline output → 节点输出的映射。
-        loading: 循环检测栈（当前正在加载的 pipeline 名）。
-
-    Returns:
-        ``(func, func_def)`` 二元组。
-    """
-
-    loading_snapshot = set(loading)
-
-    async def pipeline_func(**kwargs: Any) -> dict[str, Any]:
-        sub_dag = load_dag(cfg, _loading=set(loading_snapshot))
-        approver = kwargs.pop("_approver", None)
-
-        results, output = await sub_dag.run(inputs=kwargs, approver=approver)
-
-        if output_mapping and output:
-            view = {
-                **output,
-                **{k: v.output for k, v in results.items() if v.output is not None},
-            }
-            return wired_ctx(view, output_mapping)
-        return output or {}
-
-    # 动态构建 output_schema（让父 DAG 校验 $node.field 引用）
-    output_schema = None
-    if output_mapping:
-        clean_fields: dict[str, Any] = {}
-        for k, v in output_mapping.items():
-            field_name = v.lstrip("$") if isinstance(v, str) and v.startswith("$") else k
-            clean_fields[field_name] = (Any, None)
-        if clean_fields:
-            output_schema = create_model(f"{pipeline_name}Output", **clean_fields)
-
-    func_def = FuncDef(
-        name=pipeline_name,
-        func=pipeline_func,
-        label=cfg.name or pipeline_name,
-        description=cfg.description or "",
-        metadata={"pipeline_config": cfg, "output_mapping": output_mapping},
-        output_schema=output_schema,
-        accepts_extra=True,
-    )
-    return pipeline_func, func_def
-
-
-
 
 
 def _inject_input_deps(node_name: str, spec: NodeSpec, input_names: set[str]) -> list[str]:
@@ -104,19 +40,13 @@ def _inject_input_deps(node_name: str, spec: NodeSpec, input_names: set[str]) ->
 def load_dag(
     config: dict[str, Any] | PipelineConfig,
     approver: Any = None,
-    *,
-    _loading: set[str] | None = None,
 ) -> DAG:
     """Build a :class:`DAG` from a config dict or PipelineConfig model.
 
     dict 传入时由 PipelineConfig 完成全部校验（结构 + 语义）。
 
-    inputs 汇聚为单一 ``__start__`` 虚拟节点，output 注入 ``__end__`` 虚拟节点。
-
-    Args:
-        _loading: 循环检测栈（内部递归用）。
+    __start__ / __end__ 节点在 cfg.nodes 中，与用户节点统一遍历。
     """
-    _loading = _loading if _loading is not None else set()
     cfg = config if isinstance(config, PipelineConfig) else PipelineConfig(**config)
 
     def _start_inputs() -> dict[str, Any]:
@@ -133,23 +63,9 @@ def load_dag(
     input_names = set(start_node.inputs) if start_node and start_node.inputs else set()
 
     for name, spec in cfg.nodes.items():
-        if spec.type == "pipeline":
-            if not spec.pipeline:
-                raise ValueError(f"节点 {name!r}: pipeline 类型必须指定 'pipeline' 字段")
-            if spec.pipeline in _loading:
-                chain = " → ".join(_loading) + f" → {spec.pipeline}"
-                raise ValueError(f"循环引用: {chain}")
-            _loading.add(spec.pipeline)
-            try:
-                sub_cfg = _load_pipeline_config(spec.pipeline)
-                _, func_def = make_pipeline_func(spec.pipeline, sub_cfg, spec.output_mapping, _loading)
-            finally:
-                _loading.discard(spec.pipeline)
-            node_type = func_def
-        else:
-            node_type = REGISTRY[spec.type]
+        node_type = REGISTRY[spec.type]
 
-        # 自动注入 __input__ 依赖
+        # 自动注入 __start__ 依赖
         extra_deps = _inject_input_deps(name, spec, input_names)
 
         dag.add_node(
@@ -167,23 +83,3 @@ def load_dag(
         )
 
     return dag
-
-
-def _load_pipeline_config(name: str) -> PipelineConfig:
-    """从 PIPELINES_DIR 加载子 pipeline 配置。"""
-    import yaml
-
-    path = PIPELINES_DIR / f"{name}.yaml"
-    if not path.is_file():
-        raise ValueError(f"子 pipeline {name!r} 不存在（{path}）")
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ValueError(f"无法读取子 pipeline {name!r}: {exc}") from exc
-    try:
-        data = yaml.safe_load(raw)
-    except Exception as exc:
-        raise ValueError(f"子 pipeline {name!r} 的 YAML 无效: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"子 pipeline {name!r} 的 YAML 顶层必须是映射")
-    return PipelineConfig(**data)

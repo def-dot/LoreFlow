@@ -133,8 +133,6 @@ def detail_from_config(
             "inputs": spec.inputs if spec else None,
             "retry": _retry_summary(parse_retry(spec.retry)) if spec else None,
             "condition": spec.condition if spec else None,
-            "pipeline": spec.pipeline if spec else None,
-            "output_mapping": spec.output_mapping if spec else None,
         }
         rows.append(row)
 

@@ -322,10 +322,6 @@ class DAGExecutor:
         target["_node"] = node.name
         self._resolve_deep_inputs(target)
 
-        # final 节点（如 output）只接收 inputs 声明的键，不透传整个 ctx
-        if node.func_def.final and node.inputs:
-            target = {k: target[k] for k in node.inputs if k in target}
-
         kwargs = self._build_kwargs(node.func, target)
         coro = node.func(**kwargs)
 
@@ -386,7 +382,7 @@ class DAGExecutor:
         kwargs = {p: target[p] for p in sig.parameters if p in target}
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             kwargs.update({k: v for k, v in target.items() if k not in kwargs and not k.startswith("_")})
-            # 子 pipeline 节点需要 _approver 来驱动 human 节点
+            # VAR_KEYWORD 节点需要 _approver 来驱动 human 节点
             if "_approver" in target and "_approver" not in kwargs:
                 kwargs["_approver"] = target["_approver"]
         return kwargs

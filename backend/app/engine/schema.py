@@ -56,8 +56,6 @@ class NodeSpec(BaseModel):
     condition: str | bool | None = None
     retry: int | RetrySpec | None = None
     timeout: float | None = None
-    pipeline: str | None = None
-    output_mapping: dict[str, str] | None = None
 
     @field_validator("depends_on", mode="before")
     @classmethod
@@ -105,13 +103,6 @@ class PipelineConfig(BaseModel):
         for name, spec in self.nodes.items():
             errors.extend(self._validate_node(name, spec, edges))
 
-        # 3) __start__ 输入参数键不得与节点名冲突
-        start_node = self.nodes.get("__start__")
-        if start_node and start_node.inputs:
-            clash = sorted(set(start_node.inputs) & (set(self.nodes) - {"__start__", "__end__"}))
-            if clash:
-                errors.append(f"输入参数键与节点名冲突: {', '.join(clash)}")
-
         if errors:
             raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
 
@@ -124,70 +115,30 @@ class PipelineConfig(BaseModel):
         loc = f"节点 {name!r}"
 
         upstream = self.get_upstream_nodes(name, edges)
-        start_node = self.nodes.get("__start__")
-        input_names = set(start_node.inputs or {}) if start_node else set()
-        refs = upstream | input_names | set(spec.inputs or {})
+        refs = upstream | set(spec.inputs or {})
 
-        # 特殊类型节点（不走 REGISTRY）
-        if spec.type == "pipeline":
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_pipeline_node(name, spec))
-        elif spec.type == "start":
-            # __start__ 的 inputs 是 InputSpec 格式（required/default/validate），
-            # 非接线格式，跳过标准 _validate_inputs
-            _input_spec_fields = set(InputSpec.model_fields)
-            for pname, pspec in (spec.inputs or {}).items():
-                if not isinstance(pspec, dict):
-                    errors.append(f"{loc}: 参数 {pname!r} 定义必须是映射，实际是 {type(pspec).__name__}")
-                    continue
-                # 未知字段
-                unknown = sorted(set(pspec) - _input_spec_fields)
-                if unknown:
-                    errors.append(f"{loc}: 参数 {pname!r} 不支持的字段 {unknown}")
-                # 布尔字段
-                for bool_field in ("required", "multiline", "file"):
-                    bv = pspec.get(bool_field)
-                    if bv is not None and not isinstance(bv, bool):
-                        errors.append(f"{loc}: 参数 {pname!r} 的 {bool_field} 必须是布尔值")
-                # validate 表达式语法
-                vexpr = pspec.get("validate")
-                if vexpr and isinstance(vexpr, str):
-                    try:
-                        condition_keys(vexpr)
-                    except ValueError as exc:
-                        errors.append(f"{loc}: 参数 {pname!r} 的 validate: {exc}")
-        elif spec.type not in REGISTRY:
+        if spec.type not in REGISTRY:
             errors.append(f"{loc}: 类型函数 {spec.type!r} 未注册")
-            return errors  # 未注册则后续校验无意义
-        else:
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(spec, upstream))
+            return errors
 
-            # _review 卡片
-            if spec.type == "human" and isinstance(spec.inputs, dict) and spec.inputs.get("_review") is not None:
-                errors.extend(
-                    f"{loc}: {msg}" for msg in self._validate_review(spec.inputs["_review"], refs)
-                )
+        # 接线参数校验（$引用 + schema 对照 + required）
+        errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(spec, upstream))
 
-            # code 节点必须有 script
-            if spec.type == "code":
-                script = (spec.inputs or {}).get("script")
-                if not script or not isinstance(script, str) or not script.strip():
-                    errors.append(f"{loc}: code 类型必须在 inputs 中提供非空 script")
+        # _review 卡片
+        if spec.type == "human" and isinstance(spec.inputs, dict) and spec.inputs.get("_review") is not None:
+            errors.extend(
+                f"{loc}: {msg}" for msg in self._validate_review(spec.inputs["_review"], refs)
+            )
+
+        # code 节点必须有 script
+        if spec.type == "code":
+            script = (spec.inputs or {}).get("script")
+            if not script or not isinstance(script, str) or not script.strip():
+                errors.append(f"{loc}: code 类型必须在 inputs 中提供非空 script")
 
         if spec.condition:
             errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(spec.condition, refs))
 
-        return errors
-
-    @staticmethod
-    def _validate_pipeline_node(name: str, spec: NodeSpec) -> list[str]:
-        """pipeline 类型节点的校验。"""
-        errors: list[str] = []
-        if not spec.pipeline:
-            errors.append("pipeline 类型必须指定 'pipeline' 字段")
-        if spec.output_mapping:
-            for k, v in spec.output_mapping.items():
-                if not isinstance(v, str) or not v.startswith("$"):
-                    errors.append(f"output_mapping.{k} 必须是 $ 引用，实际是 {v!r}")
         return errors
 
     # ---- 图结构校验 ----
@@ -216,24 +167,20 @@ class PipelineConfig(BaseModel):
         spec: NodeSpec,
         upstream: set[str],
     ) -> list[str]:
-        """节点 inputs 校验：键/值必须与 input_schema 一致；$引用校验来源、字段、类型。"""
+        """节点 inputs 校验：键/值必须与 input_schema 一致；$引用校验上游字段、类型。"""
         errors: list[str] = []
         wiring = spec.inputs or {}
         func_def = REGISTRY[spec.type]
-        start_node = self.nodes.get("__start__")
-        input_names = set(start_node.inputs or {}) if start_node else set()
 
         # ── Guard: 无 schema ──────────────────────────────────
         if func_def.input_schema is None:
-            if not func_def.accepts_extra and wiring:
-                errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(wiring))}")
             return errors
 
         schema_keys = set(func_def.input_schema.model_fields)
 
         # ── 多余参数 ─────────────────────────────────────────
         extra = set(wiring) - schema_keys
-        if extra and not func_def.accepts_extra:
+        if extra:
             errors.append(f"inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
 
         # ── 逐参数校验 ───────────────────────────────────────
@@ -246,12 +193,7 @@ class PipelineConfig(BaseModel):
                 # $ 引用校验
                 root, _, field = value[1:].partition(".")
 
-                # 来源存在性：必须是上游节点 或 pipeline input
-                if root not in upstream and root not in input_names:
-                    errors.append(f"inputs.{key} 引用的 {root!r} 不是参数键或上游依赖节点")
-                    continue
-
-                # 上游输出字段 + 类型兼容
+                # 上游节点引用：校验输出字段 + 类型兼容
                 if root in upstream and field:
                     up_spec = self.nodes.get(root)
                     up_func = REGISTRY.get(up_spec.type) if up_spec else None
