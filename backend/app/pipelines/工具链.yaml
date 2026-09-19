@@ -19,7 +19,7 @@ nodes:
     label: 查天气
     inputs:
       system: 搜索城市当前天气，简洁报告温度、天气状况和风力。
-      prompt: $city
+      prompt: $__start__.city
       tools: [web_search]
       max_iterations: 3
     timeout: 60
@@ -44,7 +44,7 @@ nodes:
       script: |
         def main(city, activity):
             return f"{city}有什么好的{activity}地点推荐？"
-      city: $city
+      city: $__start__.city
       activity: $suggest.content
     timeout: 5
 

@@ -25,7 +25,7 @@ nodes:
             if not isinstance(items, list):
                 raise ValueError("输入必须是 JSON 数组")
             return items
-      raw: $data
+      raw: $__start__.data
     timeout: 10
 
   # ── 第二步：计算统计指标 ────────────────────────────

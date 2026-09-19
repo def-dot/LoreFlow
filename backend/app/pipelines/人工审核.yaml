@@ -21,7 +21,7 @@ nodes:
     description: "请审核文章内容是否可以发布"
     inputs:
       # 声明即卡片：title/content 是参数键，值已在 ctx，直引即可
-      _review: {$title: 标题, $content: 正文}
+      _review: {$__start__.title: 标题, $__start__.content: 正文}
 
   publish:
     type: cfg_publish

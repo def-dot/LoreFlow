@@ -14,7 +14,7 @@ nodes:
   load:
     type: rag_load
     label: 文档解析
-    inputs: {document: $document}
+    inputs: {document: $__start__.document}
 
   chunk:
     type: rag_chunk

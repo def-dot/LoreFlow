@@ -7,7 +7,6 @@ PipelineConfig 是 YAML 配置的唯一校验入口：
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -119,60 +118,40 @@ class PipelineConfig(BaseModel):
                 continue
 
             func_def = REGISTRY[spec.type]
-
-            upstream = self.get_upstream_nodes(name)
+            
             inputs = spec.inputs or {}
 
-            refs = upstream | set(inputs)
+            input_schema = func_def.input_schema.model_fields if func_def.input_schema is not None else {}
 
-            # ── 接线参数校验 ─────────────────────────────────
-            if func_def.input_schema is not None:
-                schema_keys = set(func_def.input_schema.model_fields)
-                accepts_extra = any(
-                    p.kind is inspect.Parameter.VAR_KEYWORD
-                    for p in inspect.signature(func_def.func).parameters.values()
-                )
+            for key, finfo in input_schema.items():
+                if finfo.is_required() and key not in inputs:
+                    errors.append(f"{loc}: inputs 缺少必填参数 {key!r}")
 
-                # 多余参数
-                extra = set(inputs) - schema_keys
-                if extra and not accepts_extra:
-                    errors.append(f"{loc}: inputs 包含节点未声明的参数: {', '.join(sorted(extra))}")
+            upstream = self.get_upstream_nodes(name)
+            # 逐参数
+            for key, value in inputs.items():
+                finfo = input_schema.get(key)
+                if finfo is None:
+                    continue
 
-                # 逐参数
-                for key, value in inputs.items():
-                    finfo = func_def.input_schema.model_fields.get(key)
-                    if finfo is None:
-                        continue
-
-                    if isinstance(value, str) and value.startswith("$"):
-                        root, _, field = value[1:].partition(".")
-                        if root in upstream and field:
-                            up_spec = self.nodes.get(root)
-                            up_func = REGISTRY.get(up_spec.type) if up_spec else None
-                            if up_func and up_func.output_schema:
-                                if field not in up_func.output_schema.model_fields:
-                                    errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
-                                    continue
-                                src_ann = up_func.output_schema.model_fields[field].annotation
-                                dst_ann = finfo.annotation
-                                if not _types_compatible(src_ann, dst_ann):
-                                    errors.append(
-                                        f"{loc}: inputs.{key} 引用 ${value[1:]} 类型不兼容: "
-                                        f"上游输出 {src_ann}，目标参数期望 {dst_ann}"
-                                    )
+                if isinstance(value, str) and value.startswith("$"):
+                    root, _, field = value[1:].partition(".")
+                    if root not in upstream:
+                        errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 不是上游依赖节点")
                     else:
-                        try:
-                            TypeAdapter(finfo.annotation).validate_python(value, strict=True)
-                        except ValidationError:
-                            errors.append(
-                                f"{loc}: inputs.{key} 类型不匹配，期望 {finfo.annotation}，"
-                                f"实际 {type(value).__name__}: {value!r}"
-                            )
-
-                # required
-                for key, finfo in func_def.input_schema.model_fields.items():
-                    if finfo.is_required() and key not in inputs:
-                        errors.append(f"{loc}: inputs 缺少必填参数 {key!r}")
+                        up_spec = self.nodes.get(root)
+                        up_func = REGISTRY.get(up_spec.type) if up_spec else None
+                        if up_func and up_func.output_schema:
+                            if field not in up_func.output_schema.model_fields:
+                                errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
+                else:
+                    try:
+                        TypeAdapter(finfo.annotation).validate_python(value, strict=True)
+                    except ValidationError:
+                        errors.append(
+                            f"{loc}: inputs.{key} 类型不匹配，期望 {finfo.annotation}，"
+                            f"实际 {type(value).__name__}: {value!r}"
+                        )
 
             # ── _review 卡片 ─────────────────────────────────
             if spec.type == "human" and isinstance(inputs, dict) and inputs.get("_review") is not None:
@@ -189,8 +168,6 @@ class PipelineConfig(BaseModel):
                         r = k[1:].split(".")[0]
                         if r in ("approve", "reason"):
                             errors.append(f"{loc}: _review 字段 {r!r} 不得占用协议键")
-                        if r not in refs:
-                            errors.append(f"{loc}: _review 字段 {r!r} 不是参数键、上游依赖节点或本地键")
 
             # ── code 节点必须有 script ───────────────────────
             if spec.type == "code":
@@ -238,9 +215,11 @@ class PipelineConfig(BaseModel):
     # ---- 图工具 ----
 
     def get_upstream_nodes(self, name: str) -> set[str]:
-        """返回 name 的所有上游节点（传递闭包）。"""
+        """返回 name 的所有上游节点（传递闭包）。__start__ 始终视为隐式上游。"""
         seen: set[str] = set()
         stack = [name]
+        if "__start__" in self.nodes and name != "__start__":
+            seen.add("__start__")
         while stack:
             for dep in (getattr(self.nodes.get(stack.pop()), "depends_on", None) or []):
                 if dep not in seen:
@@ -277,34 +256,3 @@ class PipelineConfig(BaseModel):
                     return cycle
         return None
 
-
-# ---------------------------------------------------------------------------
-# 工具函数
-# ---------------------------------------------------------------------------
-
-def _types_compatible(src: Any, dst: Any) -> bool:
-    """src 类型是 dst 的子类或相同 → 兼容。Any / Union / 泛型等无法判断时保守放行。"""
-    try:
-        if src is Any or dst is Any:
-            return True
-
-        def _base(t: Any) -> type | None:
-            if isinstance(t, type):
-                return t
-            origin = getattr(t, "__origin__", None)
-            if origin is not None:
-                return origin
-            args = getattr(t, "__args__", None)
-            if args:
-                non_none = [a for a in args if a is not type(None)]
-                if non_none:
-                    return _base(non_none[0])
-            return None
-
-        src_base = _base(src)
-        dst_base = _base(dst)
-        if src_base is None or dst_base is None:
-            return True
-        return src_base is dst_base or issubclass(src_base, dst_base)
-    except TypeError:
-        return True
