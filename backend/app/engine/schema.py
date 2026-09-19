@@ -104,10 +104,8 @@ class PipelineConfig(BaseModel):
                 errors.append(f"{loc}: 类型函数 {spec.type!r} 未注册")
                 continue
 
-            upstream = self.get_upstream_nodes(name)
-            refs = upstream | set(spec.inputs or {})
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(spec))
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(spec.condition, refs))
+            errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(name, spec))
+            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(name, spec))
 
         if errors:
             raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
@@ -116,7 +114,7 @@ class PipelineConfig(BaseModel):
 
     # ---- 接线参数校验 ----
 
-    def _validate_inputs(self, spec: NodeSpec) -> list[str]:
+    def _validate_inputs(self, name: str, spec: NodeSpec) -> list[str]:
         """$引用上游存在性 + 字段存在性 + required。"""
         errors: list[str] = []
         func_def = REGISTRY[spec.type]
@@ -129,7 +127,7 @@ class PipelineConfig(BaseModel):
                 errors.append(f"inputs 缺少必填参数 {key!r}")
 
         # 逐参数 $引用
-        upstream = self.get_upstream_nodes(spec.name)
+        upstream = self.get_upstream_nodes(name)
         for key, value in inputs.items():
             finfo = input_schema.get(key)
             if finfo is None:
@@ -139,7 +137,7 @@ class PipelineConfig(BaseModel):
                 if root not in upstream:
                     errors.append(f"inputs.{key} 引用的 {root!r} 不是上游依赖节点")
                 elif field:
-                    up_spec = nodes.get(root)
+                    up_spec = self.nodes.get(root)
                     up_func = REGISTRY.get(up_spec.type) if up_spec else None
                     if up_func and up_func.output_schema and field not in up_func.output_schema.model_fields:
                         errors.append(f"inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
@@ -148,8 +146,8 @@ class PipelineConfig(BaseModel):
 
     # ---- condition 校验 ----
 
-    @staticmethod
-    def _validate_condition(condition: Any, refs: set[str]) -> list[str]:
+    def _validate_condition(self, name: str, spec: NodeSpec) -> list[str]:
+        condition = spec.condition
         if not condition:
             return []
         if isinstance(condition, bool):
@@ -161,8 +159,9 @@ class PipelineConfig(BaseModel):
         except ValueError as exc:
             return [str(exc)]
         errors: list[str] = []
+        upstream = self.get_upstream_nodes(name)
         for root in roots:
-            if root not in refs:
+            if root not in upstream:
                 errors.append(f"condition 引用的 {root!r} 不是上游依赖节点")
         return errors
 
