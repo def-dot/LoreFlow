@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.registry import REGISTRY
 from app.registry.types import FuncDef
@@ -128,6 +128,7 @@ class PipelineConfig(BaseModel):
                     errors.append(f"{loc}: inputs 缺少必填参数 {key!r}")
 
             upstream = self.get_upstream_nodes(name)
+            refs = upstream | set(inputs)
             # 逐参数
             for key, value in inputs.items():
                 finfo = input_schema.get(key)
@@ -138,20 +139,11 @@ class PipelineConfig(BaseModel):
                     root, _, field = value[1:].partition(".")
                     if root not in upstream:
                         errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 不是上游依赖节点")
-                    else:
+                    elif field:
                         up_spec = self.nodes.get(root)
-                        up_func = REGISTRY.get(up_spec.type)
-                        up_output_schema = up_func.output_schema.model_fields if up_func.output_schema else {}
-                        if field not in up_output_schema:
+                        up_func = REGISTRY.get(up_spec.type) if up_spec else None
+                        if up_func and up_func.output_schema and field not in up_func.output_schema.model_fields:
                             errors.append(f"{loc}: inputs.{key} 引用的 {root!r} 输出中没有字段 {field!r}")
-                else:
-                    try:
-                        TypeAdapter(finfo.annotation).validate_python(value, strict=True)
-                    except ValidationError:
-                        errors.append(
-                            f"{loc}: inputs.{key} 类型不匹配，期望 {finfo.annotation}，"
-                            f"实际 {type(value).__name__}: {value!r}"
-                        )
 
             # ── _review 卡片 ─────────────────────────────────
             if spec.type == "human" and isinstance(inputs, dict) and inputs.get("_review") is not None:
