@@ -118,6 +118,21 @@ def _validate_node(
 # $引用校验公共方法
 # ---------------------------------------------------------------------------
 
+def _get_upstream_nodes(node: "Node", nodes: list["Node"]) -> set[str]:
+    """返回 node 的所有上游节点（传递闭包）。"""
+    nodes_by_name = {n.name: n for n in nodes}
+    seen: set[str] = set()
+    stack = list(node.depends_on or [])
+    while stack:
+        dep = stack.pop()
+        if dep not in seen:
+            seen.add(dep)
+            stack.extend(
+                getattr(nodes_by_name.get(dep), "depends_on", None) or []
+            )
+    return seen
+
+
 def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]:
     """校验单个 $引用：上游节点存在性 + 字段存在性。
 
@@ -147,8 +162,13 @@ def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]
 def _validate_node_inputs(
     node: "Node",
     nodes: dict[str, Any] | None = None,
+    edges: dict[str, list[str]] | None = None,
+    param_keys: set[str] | None = None,
 ) -> list[str]:
     """节点 inputs 校验（start 参数声明 + 其他类型 input_schema + $引用）。
+
+    ``edges`` / ``param_keys`` 由调用方预计算传入时，$引用校验直接复用，
+    避免每个节点重复查找上游闭包和 start 节点。
     """
     from app.registry import REGISTRY
 
@@ -182,26 +202,23 @@ def _validate_node_inputs(
         if unexpected := set(inputs) - set(fields):
             errors.append(f"节点 {node.name!r}: inputs 包含未知参数 {unexpected!r}")
 
-    # ---- $引用校验（需要 upstream / nodes 上下文） ----
-    if upstream is not None and nodes is not None:
-        available = upstream | (param_keys or set())
-        if "__start__" in nodes:
-            available.add("__start__")
-        for key, val in inputs.items():
-            if key.startswith("_"):
-                continue
-            if isinstance(val, str) and val.startswith("$"):
-                root = val[1:].partition(".")[0]
-                if root not in available:
-                    errors.append(
-                        f"节点 {name!r}: inputs 引用 ${root}，"
-                        f"不是参数键或上游依赖节点"
-                    )
-                elif root in upstream:
-                    errors.extend(
-                        f"节点 {name!r}: inputs {msg}"
-                        for msg in _check_ref(val, upstream, nodes)
-                    )
+    # ---- $引用校验 ----
+    upstream = _get_upstream_nodes(node, list(nodes.values()))
+    for key, val in inputs.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(val, str) and val.startswith("$"):
+            root = val[1:].partition(".")[0]
+            if root not in upstream:
+                errors.append(
+                    f"节点 {node.name!r}: inputs 引用 ${root}，"
+                    f"不是参数键或上游依赖节点"
+                )
+            else:
+                errors.extend(
+                    f"节点 {node.name!r}: inputs {msg}"
+                    for msg in _check_ref(val, upstream, nodes)
+                )
 
     return errors
 
@@ -251,11 +268,10 @@ def validate_pipeline(
 
     # inputs 校验（schema + $引用来源）
     for node_name, node in nodes.items():
-        upstream = set(edges.get(node_name, []))
         errors.extend(_validate_node_inputs(
             node,
-            upstream=upstream,
             nodes=nodes,
+            edges=edges,
             param_keys=param_keys,
         ))
 
