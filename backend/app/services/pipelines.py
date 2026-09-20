@@ -152,25 +152,13 @@ def detail_from_config(
 # ---------------------------------------------------------------------------
 
 
-def _parse_and_validate(definition: str) -> PipelineConfig:
-    """解析 YAML 并校验 DAG 配置；失败抛 ValueError。
-
-    校验统一由 PipelineConfig.__init__ 完成（结构 + 语义）。
-    """
+def create_pipeline(definition: str) -> str:
+    """创建 pipeline 文件：校验 YAML → 写入目录。返回 name。"""
     try:
         data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
         raise ValueError(f"YAML 解析失败: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("YAML 顶层必须是映射(dict)")
-    if not data.get("name"):
-        raise ValueError("YAML 必须包含 name 字段")
-    return PipelineConfig(**data)
-
-
-def create_pipeline(definition: str) -> str:
-    """创建 pipeline 文件：校验 YAML → 写入目录。返回 name。"""
-    cfg = _parse_and_validate(definition)
+    cfg = PipelineConfig.model_validate(data)
     PIPELINES_DIR.mkdir(parents=True, exist_ok=True)
     dest = PIPELINES_DIR / f"{cfg.name}.yaml"
     if dest.is_file():
@@ -184,7 +172,11 @@ def update_pipeline(name: str, definition: str) -> str:
     path = PIPELINES_DIR / (name + ".yaml")
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
-    cfg = _parse_and_validate(definition)
+    try:
+        data = yaml.safe_load(definition)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"YAML 解析失败: {exc}") from exc
+    cfg = PipelineConfig.model_validate(data)
     new_path = PIPELINES_DIR / f"{cfg.name}.yaml"
     if new_path != path:
         if new_path.is_file():

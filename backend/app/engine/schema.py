@@ -79,7 +79,7 @@ class PipelineConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = ""
+    name: str
     description: str | None = None
     nodes: dict[str, NodeSpec] = Field(default_factory=dict)
 
