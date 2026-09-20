@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { PipelineDetail } from '@/api/pipelines'
-import { toParamSpecs } from '@/api/pipelines'
 import type { JsonSchema } from '@/api/nodeTypes'
 import MermaidDiagram from './MermaidDiagram.vue'
 
@@ -17,15 +16,6 @@ const nodeLabelMap = computed(() =>
 )
 function dependLabels(names: string[]): string {
   return names.map((n) => nodeLabelMap.value[n] ?? n).join(', ')
-}
-
-// 输入参数声明：YAML 原始结构转为数组
-const paramSpecs = computed(() => toParamSpecs(props.detail.params))
-const hasParams = computed(() => paramSpecs.value.length > 0)
-// 默认值短预览：过长截断（完整值在 YAML 源码里）
-function defaultPreview(value: unknown): string {
-  const text = JSON.stringify(value) ?? ''
-  return text.length > 40 ? `${text.slice(0, 40)}…` : text
 }
 
 // schema 格式化
@@ -85,23 +75,6 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
     <!-- description 是整条流水线的导语：正文字号置顶，先读说明再看图，
          图中的重试/条件标记才有解释；参数另起 panel 卡片，与导语明确分区 -->
     <p v-if="detail.description" class="desc">{{ detail.description }}</p>
-    <!-- 运行时参数：与下方「流水线/节点」同级的 panel，规格表行式排版 ——
-         首行 label（*/可选）+ ctx 键名芯片 + 默认值靠右，次行说明文字。
-         与新建运行的参数表单同一套必填/可选语言 -->
-    <section v-if="hasParams" class="panel params-panel">
-      <h2>运行时参数</h2>
-      <div v-for="p in paramSpecs" :key="p.name" class="param">
-        <div class="param-head">
-          <span class="param-label">
-            {{ p.label ?? p.name }}<span v-if="p.required" class="param-star">*</span>
-            <span v-else class="param-optional">可选</span>
-          </span>
-          <span v-if="p.default != null" class="param-default">默认 {{ defaultPreview(p.default) }}</span>
-          <span v-else-if="!p.required" class="param-default">不填则不传</span>
-        </div>
-        <p v-if="p.description" class="param-desc">{{ p.description }}</p>
-      </div>
-    </section>
     <div class="panels">
       <section class="panel">
         <h2>流水线</h2>
@@ -217,64 +190,6 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
   border-radius: 50%;
   cursor: help;
   vertical-align: middle;
-}
-/* 运行时参数：与图/节点同级的 panel；行式规格表，发丝线分行 */
-.params-panel {
-  margin-bottom: 18px;
-}
-.param + .param {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-/* 首行：label + 键名 + 默认值（靠右），基线对齐成一栏规格 */
-.param-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-.param-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.param-star {
-  color: #ff8f8a;
-}
-.param-optional {
-  font-weight: 400;
-  font-size: 11px;
-  color: var(--ink-3);
-}
-/* ctx 键名：等宽小芯片，键就是要敲进 JSON/表单的内容 */
-.param-key {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--ink-3);
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-}
-/* 默认值靠右当「值」列：过长省略号截断（全量在下方 YAML 源码） */
-.param-default {
-  margin-left: auto;
-  flex: none;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--ink-3);
-}
-/* 次行：说明文字，弱一档灰 */
-.param-desc {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--ink-3);
 }
 .source-panel {
   margin-top: 18px;

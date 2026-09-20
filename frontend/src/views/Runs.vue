@@ -61,11 +61,19 @@ const selectedPipeline = computed(() =>
   pipelinesStore.pipelines.find((p) => p.name === configName.value),
 )
 watch(configName, (name) => { if (name) pipelinesStore.select(name) }, { immediate: true })
-const paramSpecs = computed(() => toParamSpecs(pipelinesStore.detailCache[configName.value]?.params ?? {}))
+const paramSpecs = computed(() => {
+  const cache = pipelinesStore.detailCache[configName.value]
+  if (!cache) return []
+  const startNode = cache.nodes.find((n) => n.name === '__start__')
+  return toParamSpecs((startNode?.inputs as Record<string, unknown>) ?? {})
+})
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
-const detailParams = computed(() =>
-  toParamSpecs(pipelinesStore.detailCache[store.detail?.pipeline ?? '']?.params ?? {}),
-)
+const detailParams = computed(() => {
+  const cache = pipelinesStore.detailCache[store.detail?.pipeline ?? '']
+  if (!cache) return []
+  const startNode = cache.nodes.find((n) => n.name === '__start__')
+  return toParamSpecs((startNode?.inputs as Record<string, unknown>) ?? {})
+})
 // 必填键/默认值从参数行派生（声明行是单一事实源，后端不再单独输出）
 const requiredInputs = computed(() => paramSpecs.value.filter((p) => p.required).map((p) => p.name))
 const defaultInputs = computed(() =>

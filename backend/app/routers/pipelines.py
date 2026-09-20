@@ -8,7 +8,6 @@ from app.schemas.pipelines import (
     PipelineDefinitionRequest,
     PipelineDetail,
     PipelineListItem,
-    PipelineListResponse,
 )
 from app.services import pipelines as pipeline_service
 
