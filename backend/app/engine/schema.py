@@ -37,10 +37,10 @@ class InputSpec(BaseModel):
 class RetrySpec(BaseModel):
     """重试策略声明（解析为 RetryPolicy 由 resolve.parse_retry 负责）。"""
 
-    max_retries: int = 0
-    backoff_base: float | None = None
-    backoff_factor: float | None = None
-    backoff_max: float | None = None
+    max_retries: int = Field(default=0, ge=0)
+    backoff_base: float | None = Field(default=None, gt=0)
+    backoff_factor: float | None = Field(default=None, gt=0)
+    backoff_max: float | None = Field(default=None, gt=0)
     jitter: bool | None = None
     retry_on: list[str] | None = None
 
@@ -104,6 +104,7 @@ class PipelineConfig(BaseModel):
 
             errors.extend(self._validate_inputs(name, spec))
             errors.extend(self._validate_condition(name, spec))
+            errors.extend(self._validate_retry(name, spec))
 
         if errors:
             raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
@@ -151,6 +152,14 @@ class PipelineConfig(BaseModel):
         for ref in refs:
             errors.extend(f"{loc}: {msg}" for msg in self._check_ref(f"${ref}", upstream))
         return errors
+
+    # ---- retry 校验 ----
+
+    def _validate_retry(self, name: str, spec: NodeSpec) -> list[str]:
+        retry = spec.retry
+        if isinstance(retry, int) and retry < 0:
+            return [f"节点 {name!r}: retry 不能为负数，实际是 {retry}"]
+        return []
 
     # ---- $引用校验 ----
 
