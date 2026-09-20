@@ -15,11 +15,9 @@ from app.services import pipelines as pipeline_service
 router = APIRouter(prefix="/pipelines", route_class=UnifiedResponseRoute, tags=["pipelines"])
 
 
-@router.get("", response_model=PipelineListResponse)
-async def list_pipelines() -> PipelineListResponse:
-    return PipelineListResponse(
-        pipelines=[PipelineListItem(**entry) for entry in pipeline_service.list_pipelines()]
-    )
+@router.get("")
+async def list_pipelines() -> list[PipelineListItem]:
+    return pipeline_service.list_pipelines()
 
 
 @router.get("/{name}", response_model=PipelineDetail)

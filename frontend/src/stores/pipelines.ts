@@ -11,7 +11,7 @@ export const usePipelinesStore = defineStore('pipelines', () => {
 
   async function fetchPipelines() {
     const data = await listPipelines()
-    pipelines.value = data.pipelines
+    pipelines.value = data
     loaded.value = true
   }
 

@@ -30,8 +30,6 @@ export interface ParamSpec {
 export interface PipelineListItem {
   name: string
   description: string
-  node_count: number
-  params: Record<string, Omit<ParamSpec, 'name'>>  // YAML inputs 原始结构
 }
 
 export interface PipelineDetail extends PipelineListItem {
@@ -45,7 +43,7 @@ export function toParamSpecs(params: Record<string, Omit<ParamSpec, 'name'>>): P
   return Object.entries(params).map(([name, spec]) => ({ name, ...spec }))
 }
 
-export function listPipelines(): Promise<{ pipelines: PipelineListItem[] }> {
+export function listPipelines(): Promise<PipelineListItem[]> {
   return api.get('/pipelines')
 }
 

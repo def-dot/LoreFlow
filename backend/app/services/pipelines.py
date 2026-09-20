@@ -26,32 +26,18 @@ logger = get_logger(__name__)
 PIPELINES_DIR = settings.PIPELINES_DIR
 
 
-def _start_params(cfg: PipelineConfig) -> dict[str, Any]:
-    """从 __start__ 节点提取输入参数声明。"""
-    start = cfg.nodes.get("__start__")
-    if not start or not start.inputs:
-        return {}
-    return {k: v.model_dump() if hasattr(v, "model_dump") else v
-            for k, v in start.inputs.items()}
-
-
-def list_pipelines() -> list[dict[str, Any]]:
+def list_pipelines() -> list[PipelineConfig]:
     """枚举目录下全部 .yaml；单个文件解析失败跳过并告警。"""
-    entries: list[dict[str, Any]] = []
-    if not PIPELINES_DIR.is_dir():
-        return entries
+    entries: list[PipelineConfig] = []
     for path in sorted(PIPELINES_DIR.glob("*.yaml")):
         try:
-            _, cfg = _load_pipeline(path)
+            raw = path.read_text(encoding="utf-8")
+            data = yaml.safe_load(raw)
+            cfg = PipelineConfig.model_validate(data)
         except Exception as exc:
             logger.warning("Skip pipeline %s: %s", path.name, exc)
             continue
-        entries.append({
-            "name": cfg.name or path.stem,
-            "description": cfg.description or "",
-            "node_count": len(cfg.nodes),
-            "params": _start_params(cfg),
-        })
+        entries.append(cfg)
     return entries
 
 
@@ -71,22 +57,6 @@ def _retry_summary(rp: RetryPolicy | None) -> str | None:
     return "，".join(parts)
 
 
-def _load_pipeline(path: Path) -> tuple[str, PipelineConfig]:
-    """读取并解析 YAML → (原文, PipelineConfig)。"""
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ValueError(f"无法读取配置文件 {path!r}: {exc}") from exc
-    try:
-        data = yaml.safe_load(raw)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"配置文件 {path!r} 的 YAML 无效: {exc}") from exc
-    if data is None:
-        data = {}
-    if not isinstance(data, dict):
-        raise ValueError("顶层必须是映射(dict)")
-    cfg = PipelineConfig(**data)
-    return raw, cfg
 
 
 def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
@@ -94,7 +64,9 @@ def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
     path = PIPELINES_DIR / (name + ".yaml")
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
-    raw, cfg = _load_pipeline(path)
+    raw = path.read_text(encoding="utf-8")
+    data = yaml.safe_load(raw)
+    cfg = PipelineConfig.model_validate(data)
     return raw, cfg.model_dump()
 
 
@@ -143,7 +115,6 @@ def detail_from_config(
         "mermaid": dag.to_mermaid(),
         "source": raw,
         "nodes": rows,
-        "params": _start_params(cfg),
     }
 
 

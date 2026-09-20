@@ -11,26 +11,14 @@ async def test_pipelines_list(client: AsyncClient) -> None:
     body = resp.json()
     assert body["code"] == 200 and body["msg"] == "ok"
 
-    pipelines = body["data"]["pipelines"]
+    pipelines = body["data"]
     assert len(pipelines) >= 6
-    assert set(pipelines[0]) == {"filename", "name", "description", "node_count", "params"}
+    assert set(pipelines[0]) == {"name", "description"}
 
     main = {p["filename"]: p for p in pipelines}["05_human_review.yaml"]
     assert main["name"] == "人工审核"
     assert main["description"]
-    assert main["node_count"] == 2
-    assert [p["name"] for p in main["params"]] == ["title", "content"]
-    assert all(p["name"] and p["node_count"] >= 1 for p in pipelines)
-
-    # 参数行是表单渲染与必填判断的单一事实源（不再单独输出 inputs/required_inputs）
-    by_file = {p["filename"]: p for p in pipelines}
-    # 11：带默认值的可选参数 → 整行形状
-    assert by_file["11_loop_iteration.yaml"]["params"] == [
-        {
-            "name": "tick", "label": "初始计数", "description": "每轮迭代 +1 的计数器初始值（默认 0）",
-            "default": 0, "has_default": True, "required": False, "multiline": False, "file": False,
-        },
-    ]
+    assert all(p["name"] for p in pipelines)
 
     # 08：两个必填参数，label/multiline 齐全
     params_08 = {p["name"]: p for p in by_file["08_dual_review.yaml"]["params"]}
@@ -86,4 +74,4 @@ async def test_list_skips_broken_yaml(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(pipeline_service.settings, "PIPELINES_DIR", tmp_path)
 
     entries = pipeline_service.list_pipelines()
-    assert [e["filename"] for e in entries] == ["good.yaml"]
+    assert [e.name for e in entries] == ["good"]

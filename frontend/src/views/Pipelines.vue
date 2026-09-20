@@ -187,9 +187,6 @@ onMounted(async () => {
           @click="selectPipeline(p.name)"
         >
           <span class="sidebar-name">{{ p.name }}</span>
-          <span class="sidebar-meta">
-            <span class="muted">{{ p.node_count }} 节点</span>
-          </span>
         </div>
         <div v-if="!filteredPipelines.length && !loading" class="sidebar-empty muted">
           暂无工作流

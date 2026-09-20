@@ -23,8 +23,6 @@ class NodeDetail(BaseModel):
 class PipelineListItem(BaseModel):
     name: str
     description: str = ""
-    node_count: int = 0
-    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class PipelineListResponse(BaseModel):
@@ -38,7 +36,6 @@ class PipelineDetail(BaseModel):
     mermaid: str = ""
     source: str = ""
     nodes: list[NodeDetail] = Field(default_factory=list)
-    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class PipelineDefinitionRequest(BaseModel):

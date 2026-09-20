@@ -56,15 +56,15 @@ const parsedInputs = computed<{ value?: Record<string, unknown>; error: string |
   }
 })
 
-// 所选流水线的参数声明（列表接口已带 params，无需再取详情）
+// 所选流水线的参数声明（从详情缓存取）
 const selectedPipeline = computed(() =>
   pipelinesStore.pipelines.find((p) => p.name === configName.value),
 )
-const paramSpecs = computed(() => toParamSpecs(selectedPipeline.value?.params ?? {}))
+watch(configName, (name) => { if (name) pipelinesStore.select(name) }, { immediate: true })
+const paramSpecs = computed(() => toParamSpecs(pipelinesStore.detailCache[configName.value]?.params ?? {}))
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
-// （与创建下拉的选中无关 —— 看旧 run 时下拉可能停在别的流水线上）
 const detailParams = computed(() =>
-  toParamSpecs(pipelinesStore.pipelines.find((p) => p.name === store.detail?.pipeline)?.params ?? {}),
+  toParamSpecs(pipelinesStore.detailCache[store.detail?.pipeline ?? '']?.params ?? {}),
 )
 // 必填键/默认值从参数行派生（声明行是单一事实源，后端不再单独输出）
 const requiredInputs = computed(() => paramSpecs.value.filter((p) => p.required).map((p) => p.name))
@@ -484,12 +484,7 @@ onUnmounted(() => {
       <template #title>
         <div class="drawer-title">
           <span class="name">{{ previewDetail?.name ?? previewItem?.name ?? '流水线详情' }}</span>
-          <span class="muted file">
-            {{ previewName }}
-            <template v-if="previewDetail?.node_count ?? previewItem?.node_count">
-              · {{ previewDetail?.node_count ?? previewItem?.node_count }} 节点
-            </template>
-          </span>
+          <span class="muted file">{{ previewName }}</span>
         </div>
       </template>
       <div v-loading="previewLoading" class="drawer-body">
