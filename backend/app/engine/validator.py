@@ -28,32 +28,18 @@ def _get_node_attr(node: Any, attr: str, default: Any = None) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# 节点名去重（从 pipeline.py 迁入）
-# ---------------------------------------------------------------------------
-
-def _validate_unique_names(nodes: list[Any] | dict[str, Any]) -> list[str]:
-    """节点名重复检测。接受 list[Node] 或 dict[str, Node]。"""
-    names = list(nodes.keys()) if isinstance(nodes, dict) else [n.name for n in nodes]
-    dupes = sorted({n for n in names if names.count(n) > 1})
-    if dupes:
-        return [f"节点名重复: {', '.join(dupes)}"]
-    return []
-
-
-# ---------------------------------------------------------------------------
 # Node 列表校验入口（Pipeline 构造期调用）
 # ---------------------------------------------------------------------------
 
 def validate_nodes(nodes: list["Node"]) -> list[str]:
     """``list[Node]`` 校验入口（Pipeline 构造期调用）。
 
-    先在 list 上做去重检测（dict 会吞掉重复键），再逐节点校验，
-    最后转 dict 走 ``validate_pipeline``（图结构、跨节点引用等）。
+    先逐节点校验，再图结构校验（节点名去重、依赖存在性、环检测）。
     """
-    errors = _validate_unique_names(nodes)
-    errors.extend(_validate_graph(nodes))
+    errors: list[str] = []
     for node in nodes:
         errors.extend(_validate_node(node, nodes=nodes))
+    errors.extend(_validate_graph(nodes))
     return errors
 
 
@@ -99,7 +85,7 @@ def _validate_node_condition(name: str, condition: Any) -> list[str]:
 
 def _validate_node(
     node: "Node",
-    nodes: dict[str, "Node"] | None = None,
+    nodes: list["Node"],
 ) -> list[str]:
     """单节点字段级校验。传入 nodes/edges 时额外校验 inputs 中的 $ 引用。"""
     from app.registry import REGISTRY
@@ -110,14 +96,9 @@ def _validate_node(
     # type 必须在 REGISTRY 中注册
     if node.type not in REGISTRY:
         errors.append(f"节点 {name!r}: 未知的 type {node.type!r}")
+        return errors
 
-    # depends_on: list[str], 类型已由 Pydantic 保证；校验元素非空
-    for dep in node.depends_on:
-        if not dep or not dep.strip():
-            errors.append(f"节点 {name!r}: depends_on 中有空字符串")
-
-    upstream = set(edges.get(name, [])) if edges else None
-    errors.extend(_validate_node_inputs(node, upstream=upstream, nodes=nodes))
+    errors.extend(_validate_node_inputs(node, nodes=nodes))
     errors.extend(_validate_node_condition(name, node.condition))
 
     # retry 校验
@@ -165,21 +146,13 @@ def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]
 
 def _validate_node_inputs(
     node: "Node",
-    *,
-    upstream: set[str] | None = None,
     nodes: dict[str, Any] | None = None,
-    param_keys: set[str] | None = None,
 ) -> list[str]:
     """节点 inputs 校验（start 参数声明 + 其他类型 input_schema + $引用）。
-
-    ``upstream`` 为当前节点上游依赖名集合，``nodes`` 为全图节点映射，
-    ``param_keys`` 为 __start__ 声明的参数键集合。
-    传入后会对 inputs 中的 ``$`` 引用做来源与字段存在性校验。
     """
     from app.registry import REGISTRY
 
     errors: list[str] = []
-    name = node.name
     inputs = node.inputs or {}
 
     # ---- start 节点：用 InputParamDef 校验每个参数声明 ----
@@ -194,7 +167,7 @@ def _validate_node_inputs(
                     e["msg"] for e in exc.errors()
                 )
                 errors.append(
-                    f"节点 {name!r}: start 参数 {key!r} 定义无效 — {detail}"
+                    f"节点 {node.name!r}: start 参数 {key!r} 定义无效 — {detail}"
                 )
 
     # ---- 非 start 节点：input_schema 校验（即使 inputs 为空也要检查必填项） ----
@@ -204,10 +177,10 @@ def _validate_node_inputs(
 
         for key in fields:
             if fields[key].is_required() and key not in inputs:
-                errors.append(f"节点 {name!r}: inputs 缺少必填参数 {key!r}")
+                errors.append(f"节点 {node.name!r}: inputs 缺少必填参数 {key!r}")
 
         if unexpected := set(inputs) - set(fields):
-            errors.append(f"节点 {name!r}: inputs 包含未知参数 {unexpected!r}")
+            errors.append(f"节点 {node.name!r}: inputs 包含未知参数 {unexpected!r}")
 
     # ---- $引用校验（需要 upstream / nodes 上下文） ----
     if upstream is not None and nodes is not None:
@@ -251,9 +224,6 @@ def validate_pipeline(
     if not nodes:
         errors.append("DAG 没有节点")
         return errors
-
-    # 节点名重复
-    errors.extend(_validate_unique_names(nodes))
 
     # start inputs（后续 condition / $ 引用校验需要）
     start = next(
@@ -318,14 +288,20 @@ def validate_pipeline(
 
 def _validate_graph(nodes: list['Node']) -> list[str]:
     """依赖存在性 + 环检测。接受 ``list[Node]``。"""
-    node_names: set[str] = {n.name for n in nodes}
-    edges: dict[str, list[str]] = {}
+    names = [n.name for n in nodes]
+    edges: dict[str, list[str]] = {n.name: n.depends_on for n in nodes}
     errors: list[str] = []
 
+    # ---- 节点名重复检测 ----
+    from collections import Counter
+    dupes = sorted(name for name, cnt in Counter(names).items() if cnt > 1)
+    if dupes:
+        errors.append(f"节点名重复: {', '.join(dupes)}")
+
+    # ---- 依赖存在性 ----
     for node in nodes:
-        edges[node.name] = node.depends_on
         for dep in node.depends_on:
-            if dep not in node_names:
+            if dep not in names:
                 errors.append(f"节点 {node.name!r} 依赖的 {dep!r} 不在 DAG 中")
 
     # ---- DFS 环检测 ----
