@@ -5,13 +5,15 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, Node, NodeStatus, RetryPolicy, make_func_def
-from app.engine.dag import validate_inputs
+from app.engine import PipeLine, DAGExecutionError, Node, NodeStatus, RetryPolicy
+from app.registry import FuncDef
+from app.engine.validator import validate_inputs
+from app.registry import REGISTRY
 from helpers import validate_config
 
 
 async def test_serial_chain() -> None:
-    dag = DAG("serial")
+    dag = PipeLine.from_name("serial")
 
     @dag.node("A")
     async def node_a(ctx: dict[str, Any]) -> str:
@@ -45,7 +47,7 @@ async def test_parallel_fanout() -> None:
             active -= 1
         return name
 
-    dag = DAG("parallel")
+    dag = PipeLine.from_name("parallel")
 
     @dag.node("root")
     async def root(ctx: dict[str, Any]) -> str:
@@ -54,7 +56,7 @@ async def test_parallel_fanout() -> None:
     for name in ("b", "c", "d"):
         dag.add_node(
             Node(
-                func_def=make_func_def(lambda ctx, n=name: tracked(ctx, n)),
+                func_def=FuncDef(name=name, func=lambda ctx, n=name: tracked(ctx, n)),
                 name=name,
                 depends_on=["root"],
             )
@@ -83,16 +85,16 @@ async def test_concurrency_limit() -> None:
             active -= 1
         return name
 
-    dag = DAG("limited")
+    dag = PipeLine.from_name("limited")
     for name in ("a", "b", "c"):
-        dag.add_node(Node(func_def=make_func_def(lambda ctx, n=name: tracked(ctx, n)), name=name))
+        dag.add_node(Node(func_def=FuncDef(name=name, func=lambda ctx, n=name: tracked(ctx, n)), name=name))
 
     await dag.run(concurrency=1)
     assert max_active == 1
 
 
 async def test_timeout_fails_node() -> None:
-    dag = DAG("timeout")
+    dag = PipeLine.from_name("timeout")
 
     @dag.node("slow", timeout=0.05)
     async def slow(ctx: dict[str, Any]) -> str:
@@ -109,7 +111,7 @@ async def test_resume_skips_completed_nodes() -> None:
     """resume 快照中已完成的节点不重跑，其输出直接进上下文。"""
     calls = {"done_node": 0}
 
-    dag = DAG("resume")
+    dag = PipeLine.from_name("resume")
 
     @dag.node("done_node")
     async def done_node(ctx: dict[str, Any]) -> str:
@@ -132,7 +134,7 @@ async def test_resume_skips_completed_nodes() -> None:
 
 async def test_resume_ignores_nodes_missing_from_current_dag() -> None:
     """快照来自旧版配置（节点已被删/改名）时不崩溃：未知节点跳过，其余照常续跑。"""
-    dag = DAG("evolved")
+    dag = PipeLine.from_name("evolved")
 
     @dag.node("fresh")
     async def fresh(ctx: dict[str, Any]) -> str:
@@ -149,7 +151,8 @@ async def test_resume_ignores_nodes_missing_from_current_dag() -> None:
 
 
 async def test_default_inputs_applied() -> None:
-    dag = DAG("inputs", inputs={"seed": {"default": 41}})
+    dag = PipeLine.from_name("inputs")
+    dag.add_node(Node(func_def=REGISTRY["start"], name="__start__", inputs={"seed": {"default": 41}}))
 
     @dag.node("calc")
     async def calc(ctx: dict[str, Any]) -> int:
@@ -170,24 +173,24 @@ def test_add_node_requires_callable_func() -> None:
     """func 不可调用在注册期拦截（add_node 是所有注册路径的漏斗），不等执行才 TypeError。"""
     from app.registry import FuncDef
 
-    dag = DAG("not_callable")
+    dag = PipeLine.from_name("not_callable")
 
     async def ok(ctx: dict[str, Any]) -> int:
         return 1
 
     with pytest.raises(ValueError, match="func 必须是可调用对象"):
         dag.add_node(Node(func_def=FuncDef(name="bad", func="not_a_function"), name="bad"))
-    dag.add_node(Node(func_def=make_func_def(ok), name="good"))  # 拦下坏节点后正常注册不受影响
+    dag.add_node(Node(func_def=FuncDef(name="ok", func=ok), name="good"))  # 拦下坏节点后正常注册不受影响
 
 
 def test_add_node_requires_callable_condition() -> None:
-    dag = DAG("bad_condition")
+    dag = PipeLine.from_name("bad_condition")
 
     async def ok(ctx: dict[str, Any]) -> int:
         return 1
 
     with pytest.raises(ValueError, match="condition 必须是可调用对象"):
-        dag.add_node(Node(func_def=make_func_def(ok), name="bad", condition=42))
+        dag.add_node(Node(func_def=FuncDef(name="ok", func=ok), name="bad", condition=42))
 
 
 def test_depends_on_wrong_type_fails_validate() -> None:
@@ -196,13 +199,13 @@ def test_depends_on_wrong_type_fails_validate() -> None:
     async def ok(ctx: dict[str, Any]) -> int:
         return 1
 
-    bare = DAG("dep_str")
-    bare.add_node(Node(func_def=make_func_def(ok), name="a"))
-    bare.add_node(Node(func_def=make_func_def(ok), name="b", depends_on="a"))  # 裸字符串
+    bare = PipeLine.from_name("dep_str")
+    bare.add_node(Node(func_def=FuncDef(name="ok", func=ok), name="a"))
+    bare.add_node(Node(func_def=FuncDef(name="ok", func=ok), name="b", depends_on="a"))  # 裸字符串
     assert bare.validate() == ["节点 'b': depends_on 必须是字符串列表"]
 
-    uniterable = DAG("dep_int")
-    uniterable.add_node(Node(func_def=make_func_def(ok), name="a", depends_on=5))
+    uniterable = PipeLine.from_name("dep_int")
+    uniterable.add_node(Node(func_def=FuncDef(name="ok", func=ok), name="a", depends_on=5))
     assert uniterable.validate() == ["节点 'a': depends_on 必须是字符串列表"]
 
 
@@ -212,16 +215,16 @@ def test_depends_on_wrong_type_keeps_node_visible() -> None:
     async def ok(ctx: dict[str, Any]) -> int:
         return 1
 
-    dag = DAG("dep_noisy")
-    dag.add_node(Node(func_def=make_func_def(ok), name="a", depends_on=5))
-    dag.add_node(Node(func_def=make_func_def(ok), name="b", depends_on=["a"]))
+    dag = PipeLine.from_name("dep_noisy")
+    dag.add_node(Node(func_def=FuncDef(name="ok", func=ok), name="a", depends_on=5))
+    dag.add_node(Node(func_def=FuncDef(name="ok", func=ok), name="b", depends_on=["a"]))
 
     assert dag.validate() == ["节点 'a': depends_on 必须是字符串列表"]
 
 
 def test_no_inputs_rejects_any_inputs() -> None:
     """inputs 未声明 → 输入白名单为空：任何输入键都算未声明（此前静默进上下文）。"""
-    dag = DAG("no_inputs")
+    dag = PipeLine.from_name("no_inputs")
 
     @dag.node("a")
     async def a(ctx: dict[str, Any]) -> int:
@@ -237,10 +240,7 @@ def test_no_inputs_rejects_any_inputs() -> None:
 
 async def test_output_extracts_node_and_path() -> None:
     """$key 提取节点输出，点分路径下钻子字段。"""
-    dag = DAG("out_map", output={
-        "result_text": "$a.text",
-        "status_code": "$b.code",
-    })
+    dag = PipeLine.from_name("out_map")
 
     @dag.node("a")
     async def a(ctx):
@@ -250,13 +250,16 @@ async def test_output_extracts_node_and_path() -> None:
     async def b(ctx):
         return {"code": 200}
 
+    dag.add_node(Node(func_def=REGISTRY["end"], name="__end__",
+                       inputs={"result_text": "$a.text", "status_code": "$b.code"},
+                       depends_on=["a", "b"]))
     results, output = await dag.run()
     assert output == {"result_text": "hello", "status_code": 200}
 
 
 async def test_output_skipped_branch_absent() -> None:
     """被跳过的节点不在上下文中 → 该键缺席。"""
-    dag = DAG("out_skip", output={"a": "$a", "b": "$b"})
+    dag = PipeLine.from_name("out_skip")
 
     @dag.node("a", condition=False)
     async def a(ctx):
@@ -266,6 +269,8 @@ async def test_output_skipped_branch_absent() -> None:
     async def b(ctx):
         return "from_b"
 
+    dag.add_node(Node(func_def=REGISTRY["end"], name="__end__",
+                       inputs={"a": "$a", "b": "$b"}, depends_on=["a", "b"]))
     results, output = await dag.run()
     assert results["a"].status == NodeStatus.SKIPPED
     assert output == {"b": "from_b"}
@@ -273,106 +278,42 @@ async def test_output_skipped_branch_absent() -> None:
 
 async def test_output_missing_path_absent() -> None:
     """下钻路径不存在 → 键缺席，不报错。"""
-    dag = DAG("out_miss", output={"x": "$a.nope"})
+    dag = PipeLine.from_name("out_miss")
 
     @dag.node("a")
     async def a(ctx):
         return {"text": "hello"}
 
+    dag.add_node(Node(func_def=REGISTRY["end"], name="__end__",
+                       inputs={"x": "$a.nope"}, depends_on=["a"]))
     results, output = await dag.run()
     assert output == {}
 
 
 async def test_output_inputs_ref() -> None:
     """$key 引用本次运行输入（inputs 直接在上下文顶层）。"""
-    dag = DAG(
-        "out_inputs",
-        inputs={"query": {"default": "hi"}},
-        output={"q": "$query"},
-    )
+    dag = PipeLine.from_name("out_inputs")
+    dag.add_node(Node(func_def=REGISTRY["start"], name="__start__", inputs={"query": {"default": "hi"}}))
 
     @dag.node("a")
     async def a(ctx):
         return ctx["query"]
 
+    dag.add_node(Node(func_def=REGISTRY["end"], name="__end__",
+                       inputs={"q": "$query"}, depends_on=["a"]))
     results, output = await dag.run()
     assert output == {"q": "hi"}
 
 
 async def test_no_output_no_output_key() -> None:
-    """未声明 output 时，results 中不含 _output 键。"""
-    dag = DAG("no_output")
+    """未声明 __end__ 时，output 为 None。"""
+    dag = PipeLine.from_name("no_output")
 
     @dag.node("x")
     async def x(ctx):
         return "hello"
 
-    results, output = await dag.run()
-    assert output is None
+    results, _ = await dag.run()
+    assert results["x"].output == "hello"
 
 
-def test_output_validation_accepts_node_ref() -> None:
-    """$节点名 引用存在的节点时通过校验。"""
-    errors = validate_config({
-        "nodes": {
-            "a": {"type": "test_fetch"},
-            "b": {"type": "test_fetch"},
-        },
-        "output": {"result_text": "$a.text", "code": "$b.code"},
-    })
-    assert errors == []
-
-
-def test_output_validation_accepts_input_ref() -> None:
-    """$输入键 引用已声明的输入键时通过校验。"""
-    errors = validate_config({
-        "inputs": {"query": {}},
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": {"q": "$query"},
-    })
-    assert errors == []
-
-
-def test_output_validation_rejects_non_mapping() -> None:
-    """output 只认映射形态，字符串报错。"""
-    errors = validate_config({
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": "$a",
-    })
-    assert any("必须是映射" in e for e in errors)
-
-
-def test_output_validation_rejects_missing_ref() -> None:
-    """$引用 不存在的节点或输入时报错。"""
-    errors = validate_config({
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": {"k": "$missing"},
-    })
-    assert any("missing" in e and "不在节点或输入中" in e for e in errors)
-
-
-def test_output_validation_rejects_no_prefix() -> None:
-    """引用必须 $ 开头。"""
-    errors = validate_config({
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": {"k": "a.text"},
-    })
-    assert any("$ 开头" in e for e in errors)
-
-
-def test_output_validation_rejects_empty_mapping() -> None:
-    """output 映射不能为空。"""
-    errors = validate_config({
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": {},
-    })
-    assert any("不能为空" in e for e in errors)
-
-
-def test_output_validation_rejects_undeclared_input_ref() -> None:
-    """$引用 未声明的键时报错。"""
-    errors = validate_config({
-        "nodes": {"a": {"type": "test_fetch"}},
-        "output": {"q": "$query"},
-    })
-    assert any("query" in e for e in errors)

@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, Node, NodeStatus, make_func_def
+from app.engine import PipeLine, DAGExecutionError, Node, NodeStatus
+from app.registry import FuncDef
 
 
 async def noop(ctx: dict[str, Any]) -> str:
@@ -12,7 +13,7 @@ async def noop(ctx: dict[str, Any]) -> str:
 
 
 async def test_failure_records_error_and_skips_downstream() -> None:
-    dag = DAG("error")
+    dag = PipeLine.from_name("error")
 
     @dag.node("critical")
     async def critical(ctx: dict[str, Any]) -> str:
@@ -36,48 +37,48 @@ async def test_failure_records_error_and_skips_downstream() -> None:
 
 
 def test_missing_dependency_rejected() -> None:
-    dag = DAG("missing_dep")
-    dag.add_node(Node(func_def=make_func_def(noop), name="a", depends_on=["ghost"]))
+    dag = PipeLine.from_name("missing_dep")
+    dag.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="a", depends_on=["ghost"]))
     assert any("ghost" in e for e in dag.validate())
 
 
 def test_cycle_rejected() -> None:
-    dag = DAG("cycle")
-    dag.add_node(Node(func_def=make_func_def(noop), name="a", depends_on=["b"]))
-    dag.add_node(Node(func_def=make_func_def(noop), name="b", depends_on=["a"]))
+    dag = PipeLine.from_name("cycle")
+    dag.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="a", depends_on=["b"]))
+    dag.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="b", depends_on=["a"]))
     assert any("循环依赖" in e for e in dag.validate())
 
 
 async def test_run_rejects_broken_structure() -> None:
     """run() 开跑前结构校验：缺依赖/环 fail-fast——不再等执行器裸
     KeyError，更不让环形依赖在全任务 upfront 模型下永久死锁。"""
-    missing = DAG("missing_dep")
-    missing.add_node(Node(func_def=make_func_def(noop), name="a", depends_on=["ghost"]))
+    missing = PipeLine.from_name("missing_dep")
+    missing.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="a", depends_on=["ghost"]))
     with pytest.raises(ValueError, match="不在 DAG 中"):
         await missing.run()
 
-    cycle = DAG("cycle")
-    cycle.add_node(Node(func_def=make_func_def(noop), name="a", depends_on=["b"]))
-    cycle.add_node(Node(func_def=make_func_def(noop), name="b", depends_on=["a"]))
+    cycle = PipeLine.from_name("cycle")
+    cycle.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="a", depends_on=["b"]))
+    cycle.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="b", depends_on=["a"]))
     with pytest.raises(ValueError, match="循环依赖"):
         await cycle.run()
 
 
 def test_empty_dag_rejected() -> None:
-    dag = DAG("empty")
+    dag = PipeLine.from_name("empty")
     assert dag.validate() == ["DAG 没有节点"]
 
 
 async def test_duplicate_node_name_rejected() -> None:
-    dag = DAG("dup")
-    dag.add_node(Node(func_def=make_func_def(noop), name="a"))
+    dag = PipeLine.from_name("dup")
+    dag.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="a"))
     with pytest.raises(ValueError, match="节点名重复"):
-        dag.add_node(Node(func_def=make_func_def(noop), name="a"))
+        dag.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="a"))
 
 
 async def test_validate_returns_error_list() -> None:
-    dag = DAG("invalid")
-    dag.add_node(Node(func_def=make_func_def(noop), name="a", depends_on=["ghost"]))
+    dag = PipeLine.from_name("invalid")
+    dag.add_node(Node(func_def=FuncDef(name="noop", func=noop), name="a", depends_on=["ghost"]))
     errors = dag.validate()
     assert len(errors) == 1
     assert "ghost" in errors[0]

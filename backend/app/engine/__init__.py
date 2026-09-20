@@ -1,61 +1,44 @@
 """
 DAG Flow engine — async DAG-based workflow orchestration.
 
-Supports:
-- **Serial** execution: dependency chains (A → B → C)
-- **Parallel** execution: independent nodes run concurrently
-- **Branching**: conditional node execution via ``condition`` predicates
-- **Looping**: iterate a sub-DAG until a condition is met
-- **Retry**: configurable exponential backoff with jitter
-- **Timeout**: per-node execution deadline
-- **Human review**: human-in-the-loop approval nodes
-- **Declarative config**: build DAGs from YAML/JSON
-
 Quick start::
 
-    from app.engine import DAG, RetryPolicy
+    from app.engine import Pipeline, RetryPolicy
 
-    dag = DAG("pipeline")
+    pipeline = Pipeline(**{
+        "name": "pipeline",
+        "nodes": [
+            {"name": "fetch", "type": "my_fetch", "retry": 3},
+            {"name": "process", "type": "my_process", "depends_on": ["fetch"]},
+        ],
+    })
 
-    @dag.node("fetch", retry=RetryPolicy(max_retries=3))
-    async def fetch(ctx):
-        return await api.get("/data")
-
-    @dag.node("process", depends_on=["fetch"])
-    async def process(ctx):
-        return transform(ctx["fetch"])
-
-    results = await dag.run()
-    print(results["process"].output)
+    results, _ = await pipeline.run()
 """
 
 from app.registry.funcs.human import human
 
-from .dag import DAG, terminal_approver, validate_inputs
-from .declarative import load_dag
-from .node import HumanRejected, Node, make_func_def, wired_ctx
-from .schema import PipelineConfig
+from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
+from .node import HumanRejected, wired_ctx
+from .validator import validate_inputs
 from .types import (
     DAGExecutionError,
     NodeResult,
     NodeStatus,
-    RetryPolicy,
     SuspendExecution,
 )
 
 __all__ = [
-    "DAG",
     "DAGExecutionError",
     "HumanRejected",
     "Node",
     "NodeResult",
     "NodeStatus",
-    "PipelineConfig",
+    "Pipeline",
     "RetryPolicy",
     "SuspendExecution",
     "human",
-    "load_dag",
-    "make_func_def",
     "terminal_approver",
+    "validate_inputs",
     "wired_ctx",
 ]

@@ -1,0 +1,405 @@
+"""共享校验层 — Pipeline（声明式）的全部结构校验。
+
+``Pipeline`` 调用 ``validate_pipeline()``。
+``validate_inputs`` 同时被 orchestrator 调用。
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from .condition import condition_keys
+
+if TYPE_CHECKING:
+    from .pipeline import Node
+
+
+# ---------------------------------------------------------------------------
+# 属性读取兼容（Node 对象 / dict）
+# ---------------------------------------------------------------------------
+
+def _get_node_attr(node: Any, attr: str, default: Any = None) -> Any:
+    """从 Node 对象或 dict 安全读取属性。"""
+    if hasattr(node, attr):
+        return getattr(node, attr)
+    if isinstance(node, dict):
+        return node.get(attr, default)
+    return default
+
+
+# ---------------------------------------------------------------------------
+# 节点名去重（从 pipeline.py 迁入）
+# ---------------------------------------------------------------------------
+
+def _validate_unique_names(nodes: list[Any] | dict[str, Any]) -> list[str]:
+    """节点名重复检测。接受 list[Node] 或 dict[str, Node]。"""
+    names = list(nodes.keys()) if isinstance(nodes, dict) else [n.name for n in nodes]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        return [f"节点名重复: {', '.join(dupes)}"]
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Node 列表校验入口（Pipeline 构造期调用）
+# ---------------------------------------------------------------------------
+
+def validate_nodes(nodes: list["Node"]) -> list[str]:
+    """``list[Node]`` 校验入口（Pipeline 构造期调用）。
+
+    先在 list 上做去重检测（dict 会吞掉重复键），再逐节点校验，
+    最后转 dict 走 ``validate_pipeline``（图结构、跨节点引用等）。
+    """
+    errors = _validate_unique_names(nodes)
+    edges = {n.name: list(n.depends_on) for n in nodes}
+    errors.extend(_validate_graph(edges))
+    for node in nodes:
+        errors.extend(_validate_node(node))
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# 单节点校验
+# ---------------------------------------------------------------------------
+
+def _validate_node_condition(name: str, condition: Any) -> list[str]:
+    """校验节点 ``condition`` 属性的类型与表达式语法。
+
+    引用来源校验（上游依赖 / 参数键）由 ``validate_pipeline`` 负责。
+    """
+    errors: list[str] = []
+
+    if condition is None:
+        return errors
+
+    # 类型校验：合法类型为 bool 或 str
+    if isinstance(condition, bool):
+        return errors
+
+    if not isinstance(condition, str):
+        errors.append(
+            f"节点 {name!r}: condition 类型必须是 str 或 bool，"
+            f"实际是 {type(condition).__name__}"
+        )
+        return errors
+
+    # 空字符串
+    stripped = condition.strip()
+    if not stripped:
+        errors.append(f"节点 {name!r}: condition 不能为空字符串")
+        return errors
+
+    # 表达式语法校验
+    try:
+        condition_keys(condition)
+    except ValueError as exc:
+        errors.append(f"节点 {name!r}: {exc}")
+
+    return errors
+
+
+def _validate_node(node: "Node") -> list[str]:
+    """单节点字段级校验（不依赖其他节点）。"""
+    from app.registry import REGISTRY
+
+    errors: list[str] = []
+    name = node.name
+
+    # type 必须在 REGISTRY 中注册
+    if node.type not in REGISTRY:
+        errors.append(f"节点 {name!r}: 未知的 type {node.type!r}")
+
+    # depends_on: list[str], 类型已由 Pydantic 保证；校验元素非空
+    for dep in node.depends_on:
+        if not dep or not dep.strip():
+            errors.append(f"节点 {name!r}: depends_on 中有空字符串")
+
+    errors.extend(_validate_node_inputs(node))
+    errors.extend(_validate_node_condition(name, node.condition))
+
+    # retry 校验
+    retry = node.retry
+    if isinstance(retry, int) and retry < 0:
+        errors.append(f"节点 {name!r}: retry 不能为负数，实际是 {retry}")
+
+    # timeout 校验
+    timeout = node.timeout
+    if timeout is not None and timeout <= 0:
+        errors.append(f"节点 {name!r}: timeout 必须为正数，实际是 {timeout}")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# $引用校验公共方法
+# ---------------------------------------------------------------------------
+
+def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]:
+    """校验单个 $引用：上游节点存在性 + 字段存在性。
+
+    ``ref`` 形如 ``"$node.field"`` 或 ``"$node"``。
+    ``upstream`` 是当前节点的上游依赖节点名集合。
+    ``nodes`` 是全图节点映射，用于读取上游节点类型。
+    """
+    from app.registry import REGISTRY
+
+    root, _, field = ref[1:].partition(".")
+    if root not in upstream:
+        return [f"引用的 {root!r} 不是上游依赖节点"]
+    if not field:
+        return []
+    up_node = nodes.get(root)
+    up_type = _get_node_attr(up_node, "type")
+    if not up_type:
+        return []
+    func_def = REGISTRY.get(up_type)
+    if func_def and func_def.output_schema:
+        top_field = field.split(".")[0]
+        if top_field not in func_def.output_schema.model_fields:
+            return [f"引用的 {root!r} 输出中没有字段 {top_field!r}"]
+    return []
+
+
+def _validate_node_inputs(node: "Node") -> list[str]:
+    """节点 inputs 校验（start 参数声明 + 其他类型 input_schema）。"""
+    from app.registry import REGISTRY
+
+    errors: list[str] = []
+    name = node.name
+    inputs = node.inputs or {}
+
+    # ---- start 节点：用 InputParamDef 校验每个参数声明 ----
+    if node.type == "start":
+        from pydantic import ValidationError
+        from .pipeline import InputParamDef
+        for key, val in inputs.items():
+            try:
+                InputParamDef.model_validate(val)
+            except ValidationError as exc:
+                detail = "; ".join(
+                    e["msg"] for e in exc.errors()
+                )
+                errors.append(
+                    f"节点 {name!r}: start 参数 {key!r} 定义无效 — {detail}"
+                )
+
+    # ---- 非 start 节点：input_schema 校验（即使 inputs 为空也要检查必填项） ----
+    else:
+        func_def = REGISTRY.get(node.type)
+        fields = func_def.input_schema.model_fields if func_def.input_schema else {}
+
+        for key in fields:
+            if fields[key].is_required() and key not in inputs:
+                errors.append(f"节点 {name!r}: inputs 缺少必填参数 {key!r}")
+                
+        if unexpected := set(inputs) - set(fields):
+            errors.append(f"节点 {name!r}: inputs 包含未知参数 {unexpected!r}")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# 主校验入口
+# ---------------------------------------------------------------------------
+
+def validate_pipeline(
+    name: str,
+    nodes: dict[str, Any],
+) -> list[str]:
+    """统一校验入口 — 返回错误列表（空 = 合法）。
+
+    ``nodes`` 的值是 NodeSpec / Node / dict 皆可，只要支持：
+    ``["depends_on"]``, ``.get("condition")``, ``.get("retry")``。
+    """
+    errors: list[str] = []
+
+    if not nodes:
+        errors.append("DAG 没有节点")
+        return errors
+
+    # 节点名重复
+    errors.extend(_validate_unique_names(nodes))
+
+    # start inputs（后续 condition / $ 引用校验需要）
+    start = next(
+        (n for n in nodes.values() if _get_node_attr(n, "type") == "start"),
+        None,
+    )
+    start_inputs = _get_node_attr(start, "inputs") if start else None
+
+    # depends_on 类型校验 + 构建 edges dict
+    edges: dict[str, list[str]] = {}
+    for node_name, node in nodes.items():
+        raw_deps = (node.depends_on if hasattr(node, "depends_on")
+                    else node.get("depends_on") if isinstance(node, dict)
+                    else [])
+        if raw_deps is None:
+            raw_deps = []
+        if not isinstance(raw_deps, list):
+            errors.append(f"节点 {node_name!r}: depends_on 必须是字符串列表")
+            # 保留节点名在 edges 中（空依赖），避免下游误报「不在 DAG 中」
+            edges.setdefault(node_name, [])
+            continue
+        edges[node_name] = raw_deps
+
+    # 图结构校验
+    errors.extend(_validate_graph(edges))
+
+    # 条件表达式语法 + 引用来源校验
+    for node_name, node in nodes.items():
+        condition = _get_node_attr(node, "condition")
+        if condition and isinstance(condition, str):
+            try:
+                keys = condition_keys(condition)
+            except ValueError as exc:
+                errors.append(f"节点 {node_name!r}: {exc}")
+            else:
+                deps = set(edges.get(node_name, []))
+                for key in keys:
+                    if key == "iteration":
+                        continue
+                    errors.extend(
+                        f"节点 {node_name!r}: condition {msg}"
+                        for msg in _check_ref(f"${key}", deps, nodes)
+                    )
+
+    # inputs $ 引用来源校验
+    errors.extend(validate_input_references(nodes, start_inputs, edges))
+
+    # retry 校验
+    for node_name, node in nodes.items():
+        retry = _get_node_attr(node, "retry")
+        if isinstance(retry, int) and retry < 0:
+            errors.append(f"节点 {node_name!r}: retry 不能为负数，实际是 {retry}")
+
+    return errors
+
+
+def _validate_graph(edges: dict[str, list[str]]) -> list[str]:
+    """依赖存在性 + 环检测 — 节点名 → depends_on 列表的映射。"""
+    errors: list[str] = []
+    for name, deps in edges.items():
+        if not deps:
+            continue
+        for dep in deps:
+            if dep not in edges:
+                errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
+
+    # ---- DFS 环检测 ----
+    WHITE, GRAY, BLACK = 0, 1, 2
+    colour: dict[str, int] = {n: WHITE for n in edges}
+    path_stack: list[str] = []
+
+    def dfs(node_name: str) -> list[str] | None:
+        colour[node_name] = GRAY
+        path_stack.append(node_name)
+        for dep in edges[node_name]:
+            if dep not in colour:
+                continue
+            if colour[dep] == GRAY:
+                return path_stack[path_stack.index(dep):]
+            if colour[dep] == WHITE:
+                cycle = dfs(dep)
+                if cycle:
+                    return cycle
+        colour[node_name] = BLACK
+        path_stack.pop()
+        return None
+
+    for name in edges:
+        if colour[name] == WHITE:
+            cycle = dfs(name)
+            if cycle:
+                errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
+                break
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# $ 引用来源校验
+# ---------------------------------------------------------------------------
+
+def validate_input_references(
+    nodes: dict[str, Any],
+    start_inputs: Any,
+    edges: dict[str, list[str]],
+) -> list[str]:
+    """校验每个节点 inputs 中 ``$root.path`` 的 ``root`` 是否合法来源。
+
+    合法来源：上游依赖节点名、``__start__`` 参数键。
+    ``_`` 开头的键（``_review`` 等内部协议键）不校验。
+
+    当引用的 root 是上游节点时，还会校验引用路径是否存在于该节点的 output_schema 中。
+    """
+    errors: list[str] = []
+    param_keys = set(start_inputs) if start_inputs else set()
+
+    for node_name, node in nodes.items():
+        inputs = _get_node_attr(node, "inputs")
+        if not inputs or not isinstance(inputs, dict):
+            continue
+        deps = set(edges.get(node_name, []))
+        available = deps | param_keys
+        if "__start__" in nodes:
+            available.add("__start__")
+        for key, val in inputs.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(val, str) and val.startswith("$"):
+                root = val[1:].partition(".")[0]
+                if root not in available:
+                    errors.append(
+                        f"节点 {node_name!r}: inputs 引用 ${root}，"
+                        f"不是参数键或上游依赖节点"
+                    )
+                elif root in deps:
+                    errors.extend(
+                        f"节点 {node_name!r}: inputs {msg}"
+                        for msg in _check_ref(val, deps, nodes)
+                    )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# 运行时输入校验（从 pipeline.py 迁入）
+# ---------------------------------------------------------------------------
+
+def validate_runtime_inputs(
+    inputs: dict[str, Any],
+    declared: dict[str, Any],
+) -> list[str]:
+    """校验运行时 ``inputs`` 是否符合 ``__start__`` 参数声明。
+
+    ``declared`` 的值是 dict（required / default / …）。
+    """
+    errors: list[str] = []
+    if declared is None:
+        declared = {}
+
+    declared_keys = set(declared)
+    provided_keys = set(inputs) if inputs else set()
+
+    if declared_keys:
+        undeclared = sorted(provided_keys - declared_keys)
+    else:
+        undeclared = sorted(provided_keys)
+    if undeclared:
+        errors.append(f"未声明的参数键: {', '.join(undeclared)}")
+
+    if declared:
+        for key, schema in declared.items():
+            if not schema.get("required"):
+                continue
+            if key in inputs:
+                val = inputs[key]
+                if val is None or (isinstance(val, str) and not val.strip()):
+                    errors.append(f"必填参数缺失或为空: {key}")
+            elif schema.get("default") is None:
+                errors.append(f"必填参数缺失或为空: {key}")
+
+    return errors
+
+
+# 公共别名（orchestrator / tests / pipeline.py import 用）
+validate_inputs = validate_runtime_inputs

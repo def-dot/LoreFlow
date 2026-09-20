@@ -4,13 +4,13 @@ from typing import Any
 
 import pytest
 
-from app.engine import DAG, DAGExecutionError, NodeStatus, RetryPolicy
+from app.engine import PipeLine, DAGExecutionError, NodeStatus, RetryPolicy
 
 
 async def test_retry_then_success() -> None:
     calls = {"n": 0}
 
-    dag = DAG("retry")
+    dag = PipeLine.from_name("retry")
 
     @dag.node("flaky", retry=RetryPolicy(max_retries=3, backoff_base=0.01, jitter=False))
     async def flaky(ctx: dict[str, Any]) -> str:
@@ -26,7 +26,7 @@ async def test_retry_then_success() -> None:
 
 
 async def test_retry_on_filters_exceptions() -> None:
-    dag = DAG("retry_on")
+    dag = PipeLine.from_name("retry_on")
 
     @dag.node(
         "boom",
@@ -46,7 +46,7 @@ async def test_retry_on_filters_exceptions() -> None:
 async def test_no_retry_by_default() -> None:
     calls = {"n": 0}
 
-    dag = DAG("no_retry")
+    dag = PipeLine.from_name("no_retry")
 
     @dag.node("boom")
     async def boom(ctx: dict[str, Any]) -> str:
@@ -59,7 +59,7 @@ async def test_no_retry_by_default() -> None:
 
 
 async def test_retries_exhausted_records_attempts() -> None:
-    dag = DAG("exhausted")
+    dag = PipeLine.from_name("exhausted")
 
     @dag.node("always_fails", retry=RetryPolicy(max_retries=2, backoff_base=0.01, jitter=False))
     async def always_fails(ctx: dict[str, Any]) -> str:

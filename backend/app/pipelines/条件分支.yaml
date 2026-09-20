@@ -1,67 +1,65 @@
 name: 条件分支
 description: 客服分流：闲聊 LLM 直接回答；知识类问题先检索知识库再作答；提示词包含「人工」转人工客服。
-
 nodes:
-  __start__:
-    type: start
-    inputs:
-      prompt:
-        required: true
-        multiline: true
-        label: 用户诉求
-        description: 任意问题或闲聊；包含「人工」直接转人工客服
-
-  intent_recognition:
-    type: llm_classify
-    label: 意图识别
-    inputs:
-      prompt: $__start__.prompt
-      classify_system: >-
-        你是客服意图分类器，只允许输出 chat、rag 两个单词之一，
-        禁止输出其他任何内容（包括标点、解释或其他语言）：
-        chat —— 问候、闲聊、创作、翻译等无需查询资料的请求；
-        rag —— 需要查询知识库/设定资料才能回答的问题；
-      classify_labels: [chat, rag]
-    depends_on: [__start__]
-
-  llm_chat:
-    type: llm_chat
-    label: LLM回答
-    depends_on: [intent_recognition]
-    condition: $intent_recognition.intent == chat
-    inputs: {prompt: $__start__.prompt}
-
-  rag_retrieve:
-    type: rag_retrieve
-    label: 知识库检索
-    depends_on: [intent_recognition]
-    condition: $intent_recognition.intent == rag
-
-  format_chunks:
-    type: code
-    label: 格式化检索片段
-    depends_on: [rag_retrieve]
-    inputs:
-      script: |
-        def main(chunks):
-            if not isinstance(chunks, list) or not chunks:
-                return "知识库中没有检索到相关内容。"
-            lines = [f"[{i}] {c.get('source', '')} {c.get('text', '')}" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]
-            return "\n\n".join(lines)
-      chunks: $rag_retrieve.result
-
-  rag_answer:
-    type: llm_chat
-    label: LLM检索回答
-    depends_on: [format_chunks]
-    inputs:
-      prompt: $__start__.prompt
-      context: $format_chunks.result
-      system: 你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。
-
-  __end__:
-    depends_on: [llm_chat, rag_answer]
-    type: end
-    inputs:
-      llm_chat: $llm_chat
-      rag_answer: $rag_answer
+- name: __start__
+  type: start
+  inputs:
+    prompt:
+      required: true
+      multiline: true
+      label: 用户诉求
+      description: 任意问题或闲聊；包含「人工」直接转人工客服
+- name: intent_recognition
+  type: llm_classify
+  label: 意图识别
+  inputs:
+    prompt: $__start__.prompt
+    classify_system: 你是客服意图分类器，只允许输出 chat、rag 两个单词之一， 禁止输出其他任何内容（包括标点、解释或其他语言）： chat
+      —— 问候、闲聊、创作、翻译等无需查询资料的请求； rag —— 需要查询知识库/设定资料才能回答的问题；
+    classify_labels:
+    - chat
+    - rag
+  depends_on:
+  - __start__
+- name: llm_chat
+  type: llm_chat
+  label: LLM回答
+  depends_on:
+  - intent_recognition
+  condition: $intent_recognition.intent == chat
+  inputs:
+    prompt: $__start__.prompt
+- name: rag_retrieve
+  type: rag_retrieve
+  label: 知识库检索
+  depends_on:
+  - intent_recognition
+  condition: $intent_recognition.intent == rag
+- name: format_chunks
+  type: code
+  label: 格式化检索片段
+  depends_on:
+  - rag_retrieve
+  inputs:
+    script: "def main(chunks):\n    if not isinstance(chunks, list) or not chunks:\n\
+      \        return \"知识库中没有检索到相关内容。\"\n    lines = [f\"[{i}] {c.get('source', '')}\
+      \ {c.get('text', '')}\" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]\n\
+      \    return \"\\n\\n\".join(lines)\n"
+    chunks: $rag_retrieve.result
+- name: rag_answer
+  type: llm_chat
+  label: LLM检索回答
+  depends_on:
+  - format_chunks
+  inputs:
+    prompt: $__start__.prompt
+    context: $format_chunks.result
+    system: 你是知识库问答助手。仅依据参考资料回答问题；资料不足以回答时明确说明，不要编造。
+- name: __end__
+  depends_on:
+  - llm_chat
+  - rag_answer
+  type: end
+  inputs:
+    llm_chat: $llm_chat
+    rag_answer: $rag_answer

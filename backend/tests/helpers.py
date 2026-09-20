@@ -4,13 +4,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.engine.schema import PipelineConfig
+from app.engine.pipeline import Pipeline
 
 
 def validate_config(config: dict[str, Any]) -> list[str]:
     """校验完整 DAG 配置，返回全部错误（空列表 = 合法）。"""
     try:
-        PipelineConfig(**config)
+        Pipeline(**config)
         return []
     except ValidationError as exc:
         errors: list[str] = []

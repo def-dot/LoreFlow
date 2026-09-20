@@ -20,14 +20,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.registry import REGISTRY
 from .condition import eval_condition
-from .node import HumanRejected, Node, wired_ctx
+from .node import HumanRejected, wired_ctx
+from .pipeline import Node, RetryPolicy
 from .types import (
     DAGExecutionError,
     NodeEventFunc,
     NodeResult,
     NodeStatus,
-    RetryPolicy,
     SuspendExecution,
 )
 
@@ -193,7 +194,7 @@ class DAGExecutor:
 
             # ---- 4. Execute with retry ----
             await self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
-            retry = node.retry or RetryPolicy(max_retries=0)
+            retry = node.retry if isinstance(node.retry, RetryPolicy) else RetryPolicy(max_retries=node.retry or 0)
             last_error: Exception | None = None
             retry_history: list[dict[str, Any]] = []
 
@@ -317,13 +318,14 @@ class DAGExecutor:
     # ------------------------------------------------------------------
 
     async def _call(self, node: Node) -> Any:
-        """Invoke *node.func* with timeout, output validation and deep $-resolution."""
+        """Invoke the node function (from REGISTRY) with timeout, output validation and deep $-resolution."""
         target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
         self._resolve_deep_inputs(target)
 
-        kwargs = self._build_kwargs(node.func, target)
-        coro = node.func(**kwargs)
+        func = REGISTRY[node.type].func
+        kwargs = self._build_kwargs(func, target)
+        coro = func(**kwargs)
 
         output = await asyncio.wait_for(coro, timeout=node.timeout) if node.timeout is not None else await coro
         return self._validate_output(node, output)

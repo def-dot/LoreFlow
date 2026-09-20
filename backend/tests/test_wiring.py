@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from app.engine.declarative import load_dag
+from app.engine import PipeLine, load_config
 from helpers import validate_config
 from app.registry.types import func, unregister
 
@@ -42,14 +42,14 @@ CFG: dict[str, Any] = {
 
 async def test_wiring_remaps_and_shadows_param() -> None:
     """接线键重映射上游输出，且可遮蔽同名参数（仅本节点视图）。"""
-    results = await load_dag(CFG).run()
+    results = await PipeLine(load_config(CFG)).run()
     producer_out = results["生产者"].output
     assert results["消费者"].output == {"seen_document": producer_out}
 
 
 async def test_wiring_does_not_leak_to_shared_ctx() -> None:
     """接线只改节点视图：未接线的后续节点看到的仍是参数原件。"""
-    results = await load_dag(CFG).run()
+    results = await PipeLine(load_config(CFG)).run()
     assert results["旁观察者"].output == {"seen_document": "参数原件"}
 
 
@@ -67,7 +67,7 @@ async def test_wiring_feeds_condition_true() -> None:
             },
         },
     }
-    results = await load_dag(cfg).run()
+    results = await PipeLine(load_config(cfg)).run()
     assert results["走条件"].status.value == "completed"
 
 
@@ -86,21 +86,21 @@ async def test_wiring_feeds_condition_false_skips() -> None:
             },
         },
     }
-    results = await load_dag(cfg).run()
+    results = await PipeLine(load_config(cfg)).run()
     assert results["跳过条件"].status.value == "skipped"
 
 
 async def test_wiring_string_literal() -> None:
     """不带 @ 的裸字符串 = 字面量：原样注入视图，不当作引用校验。"""
     cfg = {"nodes": {"节点": {"type": "wire_probe", "inputs": {"document": "固定文本"}}}}
-    results = await load_dag(cfg).run()
+    results = await PipeLine(load_config(cfg)).run()
     assert results["节点"].output == {"seen_document": "固定文本"}
 
 
 async def test_wiring_non_string_literal() -> None:
     """非字符串值 = 字面量原样注入视图。"""
     cfg = {"nodes": {"节点": {"type": "wire_probe", "inputs": {"document": 5}}}}
-    results = await load_dag(cfg).run()
+    results = await PipeLine(load_config(cfg)).run()
     assert results["节点"].output == {"seen_document": 5}
 
 

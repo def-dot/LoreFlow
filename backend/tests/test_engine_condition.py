@@ -2,12 +2,12 @@
 
 from typing import Any
 
-from app.engine import DAG, NodeStatus
+from app.engine import PipeLine, NodeStatus
 
 
 async def test_condition_false_skips_node_and_cascades() -> None:
     """条件不满足：节点 SKIPPED，且单依赖的下游级联 UPSTREAM_SKIPPED（不执行）。"""
-    dag = DAG("cond")
+    dag = PipeLine.from_name("cond")
 
     @dag.node("router")
     async def router(ctx: dict[str, Any]) -> dict:
@@ -33,7 +33,7 @@ async def test_condition_false_skips_node_and_cascades() -> None:
 
 
 async def test_condition_true_runs_node() -> None:
-    dag = DAG("cond_true")
+    dag = PipeLine.from_name("cond_true")
 
     @dag.node("router")
     async def router(ctx: dict[str, Any]) -> dict:
@@ -52,7 +52,7 @@ async def test_condition_true_runs_node() -> None:
 
 
 async def test_condition_raising_skips_node() -> None:
-    dag = DAG("cond_raise")
+    dag = PipeLine.from_name("cond_raise")
 
     def bad_condition(ctx: dict[str, Any]) -> bool:
         raise RuntimeError("condition boom")
@@ -67,7 +67,7 @@ async def test_condition_raising_skips_node() -> None:
 
 async def test_skip_cascades_transitively() -> None:
     """级联是隔代传递的：条件跳过 → 无条件下游 → 再下游，整条路径 UPSTREAM_SKIPPED。"""
-    dag = DAG("cascade")
+    dag = PipeLine.from_name("cascade")
 
     @dag.node("router")
     async def router(ctx: dict[str, Any]) -> dict:
@@ -99,7 +99,7 @@ async def test_join_runs_when_any_upstream_completed() -> None:
     """汇合（any-success）：依赖里只要有一条路径跑成，汇合节点照常执行——
     互斥分支 + 汇合拓扑下任一支路必跳，全跳才级联的严格语义会让汇合
     节点永远不跑。"""
-    dag = DAG("join")
+    dag = PipeLine.from_name("join")
 
     @dag.node("router")
     async def router(ctx: dict[str, Any]) -> dict:
@@ -130,7 +130,7 @@ async def test_join_runs_when_any_upstream_completed() -> None:
 
 async def test_join_skips_when_all_upstreams_skipped() -> None:
     """汇合的全部依赖路径都跳过 → 汇合节点跟着级联跳过。"""
-    dag = DAG("join_all_skip")
+    dag = PipeLine.from_name("join_all_skip")
 
     @dag.node("router")
     async def router(ctx: dict[str, Any]) -> dict:
@@ -172,7 +172,7 @@ async def test_resume_restores_skipped_without_reeval() -> None:
         calls += 1
         return ctx["router"]["tier"] == "premium"
 
-    dag = DAG("resume_skip")
+    dag = PipeLine.from_name("resume_skip")
 
     @dag.node("router")
     async def router(ctx: dict[str, Any]) -> dict:

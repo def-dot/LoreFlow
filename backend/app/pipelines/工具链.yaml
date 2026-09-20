@@ -1,70 +1,69 @@
 name: 工具链
-description: >
-  演示「工具 → LLM → 工具」链式调用：
-  查天气 → LLM 根据天气建议活动 → 搜索相关攻略。
-  三种工具各司其职，中间由 LLM 做决策衔接。
+description: '演示「工具 → LLM → 工具」链式调用： 查天气 → LLM 根据天气建议活动 → 搜索相关攻略。 三种工具各司其职，中间由 LLM
+  做决策衔接。
 
+  '
 nodes:
-  __start__:
-    type: start
-    inputs:
-      city:
-        required: true
-        label: 城市
-        description: 例如「北京」
+- name: __start__
+  type: start
+  inputs:
+    city:
+      required: true
+      label: 城市
+      description: 例如「北京」
+- name: weather
+  type: agent
+  label: 查天气
+  inputs:
+    system: 搜索城市当前天气，简洁报告温度、天气状况和风力。
+    prompt: $__start__.city
+    tools:
+    - web_search
+    max_iterations: 3
+  depends_on:
+  - __start__
+  timeout: 60
+- name: suggest
+  type: llm_chat
+  label: 推荐活动
+  depends_on:
+  - weather
+  inputs:
+    system: '根据天气推荐一种户外活动，只输出活动名称（如：爬山、逛公园、滑雪）。
 
-  # ── 第一步：工具调用 — 查天气 ──────────────────────
-  weather:
-    type: agent
-    label: 查天气
-    inputs:
-      system: 搜索城市当前天气，简洁报告温度、天气状况和风力。
-      prompt: $__start__.city
-      tools: [web_search]
-      max_iterations: 3
-    depends_on: [__start__]
-    timeout: 60
-
-  # ── 第二步：LLM — 根据天气推荐活动 ─────────────────
-  suggest:
-    type: llm_chat
-    label: 推荐活动
-    depends_on: [weather]
-    inputs:
-      system: >
-        根据天气推荐一种户外活动，只输出活动名称（如：爬山、逛公园、滑雪）。
-      prompt: $weather.content
-    timeout: 30
-
-  # ── 拼接搜索提示词 ─────────────────────────────────
-  build_query:
-    type: code
-    label: 拼接搜索词
-    depends_on: [suggest]
-    inputs:
-      script: |
-        def main(city, activity):
-            return f"{city}有什么好的{activity}地点推荐？"
-      city: $__start__.city
-      activity: $suggest.content
-    timeout: 5
-
-  # ── 第三步：工具调用 — 搜索攻略 ────────────────────
-  search:
-    type: agent
-    label: 搜攻略
-    depends_on: [build_query]
-    inputs:
-      system: 搜索推荐活动的相关攻略和地点。
-      prompt: $build_query.result
-      tools: [web_search]
-      max_iterations: 3
-    timeout: 60
-
-  __end__:
-    depends_on: [search, suggest, weather]
-    type: end
-    inputs:
-      weather: $weather.content
-      suggestion: $suggest.content
-      guide: $search.content
+      '
+    prompt: $weather.content
+  timeout: 30
+- name: build_query
+  type: code
+  label: 拼接搜索词
+  depends_on:
+  - suggest
+  inputs:
+    script: "def main(city, activity):\n    return f\"{city}有什么好的{activity}地点推荐？\"\
+      \n"
+    city: $__start__.city
+    activity: $suggest.content
+  timeout: 5
+- name: search
+  type: agent
+  label: 搜攻略
+  depends_on:
+  - build_query
+  inputs:
+    system: 搜索推荐活动的相关攻略和地点。
+    prompt: $build_query.result
+    tools:
+    - web_search
+    max_iterations: 3
+  timeout: 60
+- name: __end__
+  depends_on:
+  - search
+  - suggest
+  - weather
+  type: end
+  inputs:
+    weather: $weather.content
+    suggestion: $suggest.content
+    guide: $search.content

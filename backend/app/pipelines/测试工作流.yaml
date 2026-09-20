@@ -1,8 +1,7 @@
 name: 测试工作流
 description: 一句话描述
-
 nodes:
-  publish:
-    type: cfg_publish
-    label: 发布
-    description: 
+- name: publish
+  type: cfg_publish
+  label: 发布
+  description: null

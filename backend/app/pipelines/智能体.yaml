@@ -1,53 +1,51 @@
 name: 智能体
-description: >
-  通用智能助手。能闲聊、答疑，也能自主调用工具和技能完成复杂任务。
+description: '通用智能助手。能闲聊、答疑，也能自主调用工具和技能完成复杂任务。'
 
 nodes:
-  __start__:
-    type: start
-    inputs:
-      prompt:
-        required: true
-        multiline: true
-        label: 提示词
-        description: 用户输入的问题
-      tools:
-        label: 工具
-        default: ["*"]
-        description: 默认加载全部，可选择指定工具
-      skills:
-        label: 技能
-        default: ["*"]
-        description: 默认加载全部，可选择指定技能
-      file:
-        file: true
-        label: 上传文件
-        description: 可选，上传文件供智能体分析
+- name: __start__
+  type: start
+  inputs:
+    prompt:
+      required: true
+      multiline: true
+      label: 提示词
+      description: 用户输入的问题
+    tools:
+      label: 工具
+      default:
+      - '*'
+      description: 默认加载全部，可选择指定工具
+    skills:
+      label: 技能
+      default:
+      - '*'
+      description: 默认加载全部，可选择指定技能
+    file:
+      file: true
+      label: 上传文件
+      description: 可选，上传文件供智能体分析
+- name: agent
+  type: agent
+  label: 智能助手
+  depends_on:
+  - __start__
+  description: 根据问题自主判断是否需要工具，闲聊时直接回复，复杂任务时调用工具逐步完成
+  inputs:
+    system: '你是一个通用智能助手，能够闲聊、回答问题，也能调用工具完成复杂任务。
 
-  agent:
-    type: agent
-    label: 智能助手
-    depends_on: [__start__]
-    description: 根据问题自主判断是否需要工具，闲聊时直接回复，复杂任务时调用工具逐步完成
-    inputs:
-      system: >
-        你是一个通用智能助手，能够闲聊、回答问题，也能调用工具完成复杂任务。
+      行为准则： - 闲聊或简单问答：直接回复，不需要调用工具。 - 需要实时信息、计算、代码执行、文件操作等能力时：使用 function calling
+      调用工具。 - 禁止在回复文本中模拟工具调用，必须使用 function calling。 - 工具执行出错时，分析原因并重试，不要放弃。 - 有可用技能时，先读取技能文件获取指令，再按指令执行。
 
-        行为准则：
-        - 闲聊或简单问答：直接回复，不需要调用工具。
-        - 需要实时信息、计算、代码执行、文件操作等能力时：使用 function calling 调用工具。
-        - 禁止在回复文本中模拟工具调用，必须使用 function calling。
-        - 工具执行出错时，分析原因并重试，不要放弃。
-        - 有可用技能时，先读取技能文件获取指令，再按指令执行。
-      prompt: $__start__.prompt
-      tools: $__start__.tools
-      skills: $__start__.skills
-      file_names: $__start__.file
-      max_iterations: 10
-    timeout: 300
-
-  __end__:
-    depends_on: [agent]
-    type: end
-    inputs:
-      reply: $agent.content
+      '
+    prompt: $__start__.prompt
+    tools: $__start__.tools
+    skills: $__start__.skills
+    file_names: $__start__.file
+    max_iterations: 10
+  timeout: 300
+- name: __end__
+  depends_on:
+  - agent
+  type: end
+  inputs:
+    reply: $agent.content

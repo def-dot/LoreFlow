@@ -1,80 +1,62 @@
 name: 代码执行
-description: >
-  演示 code 节点：接收原始 JSON 数据，用 Python 脚本解析、计算统计指标，
-  最终汇总为 Markdown 报告。全程不依赖 LLM。
+description: '演示 code 节点：接收原始 JSON 数据，用 Python 脚本解析、计算统计指标， 最终汇总为 Markdown 报告。全程不依赖
+  LLM。
 
+  '
 nodes:
-  __start__:
-    type: start
-    inputs:
-      data:
-        required: true
-        label: 数据
-        description: JSON 数组，如 [{"name":"A","score":85},{"name":"B","score":92}]
-        multiline: true
-
-  # ── 第一步：解析 JSON ──────────────────────────────
-  parse:
-    type: code
-    label: 解析数据
-    inputs:
-      script: |
-        def main(raw):
-            import json
-            items = json.loads(raw)
-            if not isinstance(items, list):
-                raise ValueError("输入必须是 JSON 数组")
-            return items
-      raw: $__start__.data
-    depends_on: [__start__]
-    timeout: 10
-
-  # ── 第二步：计算统计指标 ────────────────────────────
-  stats:
-    type: code
-    label: 计算统计
-    depends_on: [parse]
-    inputs:
-      script: |
-        def main(items):
-            scores = [x["score"] for x in items if "score" in x]
-            return {
-                "count": len(items),
-                "score_count": len(scores),
-                "sum": sum(scores),
-                "avg": round(sum(scores) / len(scores), 2) if scores else 0,
-                "max": max(scores) if scores else None,
-                "min": min(scores) if scores else None,
-            }
-      items: $parse.result
-    timeout: 10
-
-  # ── 第三步：生成 Markdown 报告 ─────────────────────
-  report:
-    type: code
-    label: 生成报告
-    depends_on: [parse, stats]
-    inputs:
-      script: |
-        def main(items, stats):
-            lines = [f"# 数据报告\n",
-                     f"共 **{stats['count']}** 条记录，**{stats['score_count']}** 条含分数。\n",
-                     f"| 指标 | 值 |",
-                     f"|------|------|",
-                     f"| 总分 | {stats['sum']} |",
-                     f"| 平均分 | {stats['avg']} |",
-                     f"| 最高分 | {stats['max']} |",
-                     f"| 最低分 | {stats['min']} |\n",
-                     f"## 明细\n"]
-            for i, item in enumerate(items, 1):
-                lines.append(f"{i}. **{item.get('name', '?')}** — {item.get('score', 'N/A')}")
-            return "\n".join(lines)
-      items: $parse.result
-      stats: $stats.result
-    timeout: 10
-
-  __end__:
-    depends_on: [report]
-    type: end
-    inputs:
-      report: $report.result
+- name: __start__
+  type: start
+  inputs:
+    data:
+      required: true
+      label: 数据
+      description: JSON 数组，如 [{"name":"A","score":85},{"name":"B","score":92}]
+      multiline: true
+- name: parse
+  type: code
+  label: 解析数据
+  inputs:
+    script: "def main(raw):\n    import json\n    items = json.loads(raw)\n    if\
+      \ not isinstance(items, list):\n        raise ValueError(\"输入必须是 JSON 数组\")\n\
+      \    return items\n"
+    raw: $__start__.data
+  depends_on:
+  - __start__
+  timeout: 10
+- name: stats
+  type: code
+  label: 计算统计
+  depends_on:
+  - parse
+  inputs:
+    script: "def main(items):\n    scores = [x[\"score\"] for x in items if \"score\"\
+      \ in x]\n    return {\n        \"count\": len(items),\n        \"score_count\"\
+      : len(scores),\n        \"sum\": sum(scores),\n        \"avg\": round(sum(scores)\
+      \ / len(scores), 2) if scores else 0,\n        \"max\": max(scores) if scores\
+      \ else None,\n        \"min\": min(scores) if scores else None,\n    }\n"
+    items: $parse.result
+  timeout: 10
+- name: report
+  type: code
+  label: 生成报告
+  depends_on:
+  - parse
+  - stats
+  inputs:
+    script: "def main(items, stats):\n    lines = [f\"# 数据报告\\n\",\n             f\"\
+      共 **{stats['count']}** 条记录，**{stats['score_count']}** 条含分数。\\n\",\n        \
+      \     f\"| 指标 | 值 |\",\n             f\"|------|------|\",\n             f\"\
+      | 总分 | {stats['sum']} |\",\n             f\"| 平均分 | {stats['avg']} |\",\n  \
+      \           f\"| 最高分 | {stats['max']} |\",\n             f\"| 最低分 | {stats['min']}\
+      \ |\\n\",\n             f\"## 明细\\n\"]\n    for i, item in enumerate(items,\
+      \ 1):\n        lines.append(f\"{i}. **{item.get('name', '?')}** — {item.get('score',\
+      \ 'N/A')}\")\n    return \"\\n\".join(lines)\n"
+    items: $parse.result
+    stats: $stats.result
+  timeout: 10
+- name: __end__
+  depends_on:
+  - report
+  type: end
+  inputs:
+    report: $report.result

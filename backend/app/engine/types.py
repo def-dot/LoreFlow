@@ -2,7 +2,6 @@
 Core types for the DAG Flow orchestration engine.
 """
 
-import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -22,41 +21,6 @@ class NodeStatus(Enum):
     SKIPPED = "skipped"
     UPSTREAM_SKIPPED = "upstream_skipped"
     CANCELLED = "cancelled"
-
-
-@dataclass
-class RetryPolicy:
-    """Configurable retry policy with exponential backoff and jitter.
-
-    Attributes:
-        max_retries: Maximum number of retry attempts (0 = no retry).
-        backoff_base: Initial backoff delay in seconds.
-        backoff_factor: Multiplier for exponential growth.
-        backoff_max: Maximum backoff delay in seconds.
-        retry_on: Tuple of exception types that trigger a retry.
-        jitter: If True, add ±50% random jitter to the delay.
-    """
-
-    max_retries: int = 0
-    backoff_base: float = 1.0
-    backoff_factor: float = 2.0
-    backoff_max: float = 60.0
-    retry_on: tuple[type[Exception], ...] = (Exception,)
-    jitter: bool = True
-
-    def get_delay(self, attempt: int) -> float:
-        """Compute the backoff delay for a given retry attempt (0-indexed)."""
-        delay = self.backoff_base * (self.backoff_factor**attempt)
-        delay = min(delay, self.backoff_max)
-        if self.jitter:
-            delay *= 0.5 + random.random()
-        return delay
-
-    def should_retry(self, exception: Exception, attempt: int) -> bool:
-        """Return True if the exception is retryable and attempts remain."""
-        if attempt >= self.max_retries:
-            return False
-        return isinstance(exception, self.retry_on)
 
 
 @dataclass

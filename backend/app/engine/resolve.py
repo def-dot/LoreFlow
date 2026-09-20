@@ -13,7 +13,7 @@ import importlib
 from functools import cache
 from typing import Any, cast
 
-from .types import RetryPolicy
+from .pipeline import RetryPolicy
 
 
 @cache

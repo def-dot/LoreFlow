@@ -6,7 +6,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.response import UnifiedResponseRoute
-from app.engine import NodeStatus, load_dag
+from app.engine import Pipeline, NodeStatus
 from app.models.run import RunStatus
 from app.schemas.pipelines import PipelineDetail
 from app.schemas.runs import (
@@ -66,7 +66,7 @@ async def get_run(run_id: int) -> RunDetail:
         try:
             config = yaml.safe_load(record.definition)
             if isinstance(config, dict):
-                data["mermaid"] = load_dag(config).to_mermaid()
+                data["mermaid"] = Pipeline(config).to_mermaid()
         except Exception:
             data["mermaid"] = ""
     cfg = yaml.safe_load(record.definition) if record.definition else {}

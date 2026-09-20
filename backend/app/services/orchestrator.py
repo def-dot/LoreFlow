@@ -16,12 +16,11 @@ from app.core import database
 from app.core.logging import get_logger
 
 from app.engine import (
-    DAG,
+    Pipeline,
     NodeResult,
     SuspendExecution,
-    load_dag,
 )
-from app.engine.dag import validate_inputs
+from app.engine.validator import validate_inputs
 from app.models.run import RunRecord, RunStatus
 from app.services import runs
 from app.services.pipelines import get_pipeline
@@ -39,7 +38,7 @@ async def approve_and_resume(record: RunRecord, node_name: str, decision: dict[s
     await resume_record(record)
 
 
-async def run_pipeline(record: RunRecord, dag: DAG) -> None:
+async def run_pipeline(record: RunRecord, dag: Pipeline) -> None:
     """执行一次 run。挂起与终态均走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
     """
 
@@ -122,7 +121,7 @@ async def create_run(
         raise ValueError("pipeline 必填")
     inputs = dict(inputs) if inputs else {}
     text, config = get_pipeline(pipeline)
-    dag = load_dag(config)
+    dag = Pipeline(config)
     record = RunRecord(
         name=name or dag.name,
         pipeline=dag.name,
@@ -130,11 +129,16 @@ async def create_run(
     )
     record.definition = text
 
-    errors = validate_inputs(inputs, dag.inputs)
+    # 声明参数来自 __start__ 节点（唯一来源）
+    start = dag.nodes.get("__start__")
+    declared = (start.inputs or {}) if start is not None else {}
+
+    errors = validate_inputs(inputs, declared)
     if errors:
         raise ValueError("\n".join(errors))
 
-    record.inputs = {**dag.default_inputs, **inputs}
+    defaults = {k: v["default"] for k, v in declared.items() if "default" in v}
+    record.inputs = {**defaults, **inputs}
 
     await runs.create(record)
     task = asyncio.create_task(run_pipeline(record, dag))
@@ -190,7 +194,7 @@ async def resume_record(record: RunRecord) -> None:
     
     record.status = RunStatus.RUNNING
    
-    dag = load_dag(yaml.safe_load(record.definition))
+    dag = Pipeline(yaml.safe_load(record.definition))
 
     task = asyncio.create_task(run_pipeline(record, dag))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
