@@ -98,14 +98,12 @@ class PipelineConfig(BaseModel):
         errors.extend(self._validate_graph())
 
         for name, spec in self.nodes.items():
-            loc = f"节点 {name!r}"
-
             if spec.type not in REGISTRY:
-                errors.append(f"{loc}: 类型函数 {spec.type!r} 未注册")
+                errors.append(f"节点 {name!r}: 类型函数 {spec.type!r} 未注册")
                 continue
 
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_inputs(name, spec))
-            errors.extend(f"{loc}: {msg}" for msg in self._validate_condition(name, spec))
+            errors.extend(self._validate_inputs(name, spec))
+            errors.extend(self._validate_condition(name, spec))
 
         if errors:
             raise ValueError("DAG 配置无效:\n  " + "\n  ".join(errors))
@@ -123,12 +121,12 @@ class PipelineConfig(BaseModel):
 
         for key, finfo in input_schema.items():
             if finfo.is_required() and key not in inputs:
-                errors.append(f"inputs 缺少必填参数 {key!r}")
+                errors.append(f"节点 {name!r}: inputs 缺少必填参数 {key!r}")
 
         upstream = self.get_upstream_nodes(name)
         for key, value in inputs.items():
             if isinstance(value, str) and value.startswith("$"):
-                errors.extend(f"inputs.{key}: {msg}" for msg in self._check_ref(value, upstream))
+                errors.extend(f"节点 {name!r}: inputs.{key}: {msg}" for msg in self._check_ref(value, upstream))
 
         return errors
 
