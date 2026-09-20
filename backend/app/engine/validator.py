@@ -51,10 +51,9 @@ def validate_nodes(nodes: list["Node"]) -> list[str]:
     最后转 dict 走 ``validate_pipeline``（图结构、跨节点引用等）。
     """
     errors = _validate_unique_names(nodes)
-    edges = {n.name: list(n.depends_on) for n in nodes}
-    errors.extend(_validate_graph(edges))
+    errors.extend(_validate_graph(nodes))
     for node in nodes:
-        errors.extend(_validate_node(node))
+        errors.extend(_validate_node(node, nodes=nodes))
     return errors
 
 
@@ -98,8 +97,11 @@ def _validate_node_condition(name: str, condition: Any) -> list[str]:
     return errors
 
 
-def _validate_node(node: "Node") -> list[str]:
-    """单节点字段级校验（不依赖其他节点）。"""
+def _validate_node(
+    node: "Node",
+    nodes: dict[str, "Node"] | None = None,
+) -> list[str]:
+    """单节点字段级校验。传入 nodes/edges 时额外校验 inputs 中的 $ 引用。"""
     from app.registry import REGISTRY
 
     errors: list[str] = []
@@ -114,7 +116,8 @@ def _validate_node(node: "Node") -> list[str]:
         if not dep or not dep.strip():
             errors.append(f"节点 {name!r}: depends_on 中有空字符串")
 
-    errors.extend(_validate_node_inputs(node))
+    upstream = set(edges.get(name, [])) if edges else None
+    errors.extend(_validate_node_inputs(node, upstream=upstream, nodes=nodes))
     errors.extend(_validate_node_condition(name, node.condition))
 
     # retry 校验
@@ -160,8 +163,19 @@ def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]
     return []
 
 
-def _validate_node_inputs(node: "Node") -> list[str]:
-    """节点 inputs 校验（start 参数声明 + 其他类型 input_schema）。"""
+def _validate_node_inputs(
+    node: "Node",
+    *,
+    upstream: set[str] | None = None,
+    nodes: dict[str, Any] | None = None,
+    param_keys: set[str] | None = None,
+) -> list[str]:
+    """节点 inputs 校验（start 参数声明 + 其他类型 input_schema + $引用）。
+
+    ``upstream`` 为当前节点上游依赖名集合，``nodes`` 为全图节点映射，
+    ``param_keys`` 为 __start__ 声明的参数键集合。
+    传入后会对 inputs 中的 ``$`` 引用做来源与字段存在性校验。
+    """
     from app.registry import REGISTRY
 
     errors: list[str] = []
@@ -191,9 +205,30 @@ def _validate_node_inputs(node: "Node") -> list[str]:
         for key in fields:
             if fields[key].is_required() and key not in inputs:
                 errors.append(f"节点 {name!r}: inputs 缺少必填参数 {key!r}")
-                
+
         if unexpected := set(inputs) - set(fields):
             errors.append(f"节点 {name!r}: inputs 包含未知参数 {unexpected!r}")
+
+    # ---- $引用校验（需要 upstream / nodes 上下文） ----
+    if upstream is not None and nodes is not None:
+        available = upstream | (param_keys or set())
+        if "__start__" in nodes:
+            available.add("__start__")
+        for key, val in inputs.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(val, str) and val.startswith("$"):
+                root = val[1:].partition(".")[0]
+                if root not in available:
+                    errors.append(
+                        f"节点 {name!r}: inputs 引用 ${root}，"
+                        f"不是参数键或上游依赖节点"
+                    )
+                elif root in upstream:
+                    errors.extend(
+                        f"节点 {name!r}: inputs {msg}"
+                        for msg in _check_ref(val, upstream, nodes)
+                    )
 
     return errors
 
@@ -226,6 +261,7 @@ def validate_pipeline(
         None,
     )
     start_inputs = _get_node_attr(start, "inputs") if start else None
+    param_keys = set(start_inputs) if start_inputs else set()
 
     # depends_on 类型校验 + 构建 edges dict
     edges: dict[str, list[str]] = {}
@@ -242,8 +278,16 @@ def validate_pipeline(
             continue
         edges[node_name] = raw_deps
 
-    # 图结构校验
-    errors.extend(_validate_graph(edges))
+
+    # inputs 校验（schema + $引用来源）
+    for node_name, node in nodes.items():
+        upstream = set(edges.get(node_name, []))
+        errors.extend(_validate_node_inputs(
+            node,
+            upstream=upstream,
+            nodes=nodes,
+            param_keys=param_keys,
+        ))
 
     # 条件表达式语法 + 引用来源校验
     for node_name, node in nodes.items():
@@ -263,9 +307,6 @@ def validate_pipeline(
                         for msg in _check_ref(f"${key}", deps, nodes)
                     )
 
-    # inputs $ 引用来源校验
-    errors.extend(validate_input_references(nodes, start_inputs, edges))
-
     # retry 校验
     for node_name, node in nodes.items():
         retry = _get_node_attr(node, "retry")
@@ -275,15 +316,17 @@ def validate_pipeline(
     return errors
 
 
-def _validate_graph(edges: dict[str, list[str]]) -> list[str]:
-    """依赖存在性 + 环检测 — 节点名 → depends_on 列表的映射。"""
+def _validate_graph(nodes: list['Node']) -> list[str]:
+    """依赖存在性 + 环检测。接受 ``list[Node]``。"""
+    node_names: set[str] = {n.name for n in nodes}
+    edges: dict[str, list[str]] = {}
     errors: list[str] = []
-    for name, deps in edges.items():
-        if not deps:
-            continue
-        for dep in deps:
-            if dep not in edges:
-                errors.append(f"节点 {name!r} 依赖的 {dep!r} 不在 DAG 中")
+
+    for node in nodes:
+        edges[node.name] = node.depends_on
+        for dep in node.depends_on:
+            if dep not in node_names:
+                errors.append(f"节点 {node.name!r} 依赖的 {dep!r} 不在 DAG 中")
 
     # ---- DFS 环检测 ----
     WHITE, GRAY, BLACK = 0, 1, 2
@@ -313,51 +356,6 @@ def _validate_graph(edges: dict[str, list[str]]) -> list[str]:
                 errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
                 break
 
-    return errors
-
-
-# ---------------------------------------------------------------------------
-# $ 引用来源校验
-# ---------------------------------------------------------------------------
-
-def validate_input_references(
-    nodes: dict[str, Any],
-    start_inputs: Any,
-    edges: dict[str, list[str]],
-) -> list[str]:
-    """校验每个节点 inputs 中 ``$root.path`` 的 ``root`` 是否合法来源。
-
-    合法来源：上游依赖节点名、``__start__`` 参数键。
-    ``_`` 开头的键（``_review`` 等内部协议键）不校验。
-
-    当引用的 root 是上游节点时，还会校验引用路径是否存在于该节点的 output_schema 中。
-    """
-    errors: list[str] = []
-    param_keys = set(start_inputs) if start_inputs else set()
-
-    for node_name, node in nodes.items():
-        inputs = _get_node_attr(node, "inputs")
-        if not inputs or not isinstance(inputs, dict):
-            continue
-        deps = set(edges.get(node_name, []))
-        available = deps | param_keys
-        if "__start__" in nodes:
-            available.add("__start__")
-        for key, val in inputs.items():
-            if key.startswith("_"):
-                continue
-            if isinstance(val, str) and val.startswith("$"):
-                root = val[1:].partition(".")[0]
-                if root not in available:
-                    errors.append(
-                        f"节点 {node_name!r}: inputs 引用 ${root}，"
-                        f"不是参数键或上游依赖节点"
-                    )
-                elif root in deps:
-                    errors.extend(
-                        f"节点 {node_name!r}: inputs {msg}"
-                        for msg in _check_ref(val, deps, nodes)
-                    )
     return errors
 
 
