@@ -114,6 +114,7 @@ class PipelineConfig(BaseModel):
 
     def _validate_inputs(self, name: str, spec: NodeSpec) -> list[str]:
         """$引用上游存在性 + 字段存在性 + required。"""
+        loc = f"节点 {name!r}"
         errors: list[str] = []
         func_def = REGISTRY[spec.type]
         inputs = spec.inputs or {}
@@ -121,33 +122,34 @@ class PipelineConfig(BaseModel):
 
         for key, finfo in input_schema.items():
             if finfo.is_required() and key not in inputs:
-                errors.append(f"节点 {name!r}: inputs 缺少必填参数 {key!r}")
+                errors.append(f"{loc}: inputs 缺少必填参数 {key!r}")
 
         upstream = self.get_upstream_nodes(name)
         for key, value in inputs.items():
             if isinstance(value, str) and value.startswith("$"):
-                errors.extend(f"节点 {name!r}: inputs.{key}: {msg}" for msg in self._check_ref(value, upstream))
+                errors.extend(f"{loc}: inputs.{key}: {msg}" for msg in self._check_ref(value, upstream))
 
         return errors
 
     # ---- condition 校验 ----
 
     def _validate_condition(self, name: str, spec: NodeSpec) -> list[str]:
+        loc = f"节点 {name!r}"
         condition = spec.condition
         if not condition:
             return []
         if isinstance(condition, bool):
             return []
         if not isinstance(condition, str) or not condition.strip():
-            return [f"condition 必须是非空表达式字符串，实际是 {condition!r}"]
+            return [f"{loc}: condition 必须是非空表达式字符串，实际是 {condition!r}"]
         try:
             refs = condition_keys(condition)
         except ValueError as exc:
-            return [str(exc)]
+            return [f"{loc}: {exc}"]
         upstream = self.get_upstream_nodes(name)
         errors: list[str] = []
         for ref in refs:
-            errors.extend(self._check_ref(f"${ref}", upstream))
+            errors.extend(f"{loc}: {msg}" for msg in self._check_ref(f"${ref}", upstream))
         return errors
 
     # ---- $引用校验 ----
