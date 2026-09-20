@@ -72,8 +72,6 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
 <template>
   <div>
     <!-- 无自身头部：仅用于 Runs 页 drawer，名称/文件名由 drawer 标题展示 -->
-    <!-- description 是整条流水线的导语：正文字号置顶，先读说明再看图，
-         图中的重试/条件标记才有解释；参数另起 panel 卡片，与导语明确分区 -->
     <p v-if="detail.description" class="desc">{{ detail.description }}</p>
     <div class="panels">
       <section class="panel">

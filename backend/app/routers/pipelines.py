@@ -3,8 +3,8 @@
 from fastapi import APIRouter
 
 from app.core.response import UnifiedResponseRoute
+from app.engine.schema import PipelineConfig
 from app.schemas.pipelines import (
-    PipelineCreateResponse,
     PipelineDefinitionRequest,
     PipelineDetail,
     PipelineListItem,
@@ -25,16 +25,14 @@ async def get_pipeline(name: str) -> PipelineDetail:
     return PipelineDetail(**pipeline_service.detail_from_config(raw=raw, config=config))
 
 
-@router.post("", response_model=PipelineCreateResponse, status_code=201)
-async def create_pipeline(body: PipelineDefinitionRequest) -> PipelineCreateResponse:
-    name = pipeline_service.create_pipeline(definition=body.definition)
-    return PipelineCreateResponse(name=name)
+@router.post("", response_model=PipelineConfig, status_code=201)
+async def create_pipeline(body: PipelineDefinitionRequest) -> PipelineConfig:
+    return pipeline_service.create_pipeline(definition=body.definition)
 
 
-@router.put("/{name}", response_model=PipelineCreateResponse)
-async def update_pipeline(name: str, body: PipelineDefinitionRequest) -> PipelineCreateResponse:
-    new_name = pipeline_service.update_pipeline(name=name, definition=body.definition)
-    return PipelineCreateResponse(name=new_name)
+@router.put("/{name}", response_model=PipelineConfig)
+async def update_pipeline(name: str, body: PipelineDefinitionRequest) -> PipelineConfig:
+    return pipeline_service.update_pipeline(name=name, definition=body.definition)
 
 
 @router.delete("/{name}")

@@ -123,8 +123,8 @@ def detail_from_config(
 # ---------------------------------------------------------------------------
 
 
-def create_pipeline(definition: str) -> str:
-    """创建 pipeline 文件：校验 YAML → 写入目录。返回 name。"""
+def create_pipeline(definition: str) -> PipelineConfig:
+    """创建 pipeline 文件：校验 YAML → 写入目录。"""
     try:
         data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
@@ -135,11 +135,11 @@ def create_pipeline(definition: str) -> str:
     if dest.is_file():
         raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
     dest.write_text(definition, encoding="utf-8")
-    return cfg.name
+    return cfg
 
 
-def update_pipeline(name: str, definition: str) -> str:
-    """更新 pipeline 文件。如果 YAML name 变了，自动重命名文件。返回最终 name。"""
+def update_pipeline(name: str, definition: str) -> PipelineConfig:
+    """更新 pipeline 文件。如果 YAML name 变了，自动重命名文件。"""
     path = PIPELINES_DIR / (name + ".yaml")
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
@@ -154,9 +154,9 @@ def update_pipeline(name: str, definition: str) -> str:
             raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
         new_path.write_text(definition, encoding="utf-8")
         path.unlink()
-        return cfg.name
+        return cfg
     path.write_text(definition, encoding="utf-8")
-    return name
+    return cfg
 
 
 def delete_pipeline(name: str) -> bool:

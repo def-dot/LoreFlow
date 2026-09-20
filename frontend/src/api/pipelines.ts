@@ -54,7 +54,7 @@ export function getPipeline(name: string): Promise<PipelineDetail> {
 /** 创建用户自定义 pipeline（name 从 YAML 自动生成） */
 export function createPipeline(data: {
   definition: string
-}): Promise<{ name: string }> {
+}): Promise<PipelineListItem> {
   return api.post('/pipelines', data)
 }
 
@@ -62,7 +62,7 @@ export function createPipeline(data: {
 export function updatePipeline(
   name: string,
   data: { definition: string },
-): Promise<{ name: string }> {
+): Promise<PipelineListItem> {
   return api.put(`/pipelines/${encodeURIComponent(name)}`, data)
 }
 

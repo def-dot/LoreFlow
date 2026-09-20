@@ -41,6 +41,3 @@ class PipelineDetail(BaseModel):
 class PipelineDefinitionRequest(BaseModel):
     definition: str
 
-
-class PipelineCreateResponse(BaseModel):
-    name: str
