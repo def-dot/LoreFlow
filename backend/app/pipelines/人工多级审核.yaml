@@ -12,7 +12,7 @@ nodes:
       required: true
       label: 正文
       description: 待审文章正文
-      multiline: true
+      type: paragraph
 - name: first_review
   type: human
   label: 编辑初审

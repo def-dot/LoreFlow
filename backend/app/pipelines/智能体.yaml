@@ -7,7 +7,7 @@ nodes:
   inputs:
     prompt:
       required: true
-      multiline: true
+      type: paragraph
       label: 提示词
       description: 用户输入的问题
     tools:
@@ -21,7 +21,7 @@ nodes:
       - '*'
       description: 默认加载全部，可选择指定技能
     file:
-      file: true
+      type: file
       label: 上传文件
       description: 可选，上传文件供智能体分析
 - name: agent

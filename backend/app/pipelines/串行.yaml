@@ -6,7 +6,7 @@ nodes:
   inputs:
     document:
       required: true
-      file: true
+      type: file
       label: 上传文档
       description: 上传 txt/md 等文本文件入库
 - name: load

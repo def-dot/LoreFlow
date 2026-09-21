@@ -38,6 +38,10 @@ class FuncDef:
     output_schema: type[BaseModel] | None = None
 
 
+# ---------------------------------------------------------------------------
+# 注册表
+# ---------------------------------------------------------------------------
+
 #: 节点注册表：name → FuncDef（DAG 引擎 / 节点扫描）
 REGISTRY: dict[str, FuncDef] = {}
 
@@ -114,5 +118,5 @@ def unregister(name: str) -> FuncDef | None:
 
 
 def unregister_tool(name: str) -> FuncDef | None:
-    """从工具注册表删除一个工具。"""
+    """从工具注册表删除一个节点。"""
     return TOOL_REGISTRY.pop(name, None)

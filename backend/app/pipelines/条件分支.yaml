@@ -6,7 +6,7 @@ nodes:
   inputs:
     prompt:
       required: true
-      multiline: true
+      type: paragraph
       label: 用户诉求
       description: 任意问题或闲聊；包含「人工」直接转人工客服
 - name: intent_recognition

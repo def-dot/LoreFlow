@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import enum
 import logging
 import random
 import re
@@ -23,6 +24,19 @@ from .validator import validate_inputs, validate_nodes
 
 logger = logging.getLogger(__name__)
 
+
+class ParamType(str, enum.Enum):
+    """输入参数类型（类似 Dify）。"""
+
+    TEXT = "text"            # 单行文本
+    PARAGRAPH = "paragraph"  # 多行文本（textarea）
+    NUMBER = "number"        # 数字
+    SELECT = "select"        # 下拉选项
+    CHECKBOX = "checkbox"    # 复选框
+    FILE = "file"            # 单文件
+    FILE_LIST = "file_list"  # 文件列表
+
+
 class InputParamDef(BaseModel):
     """``__start__`` 节点里单个输入参数的声明（required / label / …）。"""
 
@@ -32,8 +46,33 @@ class InputParamDef(BaseModel):
     default: Any = None
     label: str | None = None
     description: str | None = None
-    multiline: bool | None = None
-    file: bool | None = None
+    type: ParamType = ParamType.TEXT
+    options: list[str] | None = None  # type=select 时的选项列表
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_migrate(cls, data: Any) -> Any:
+        """兼容旧格式：multiline/file bool → ParamType。"""
+        if not isinstance(data, dict):
+            return data
+        # 如果已经显式指定了 type，直接返回
+        if "type" in data:
+            return data
+        # multiline: true → type=paragraph（仅当值是 bool 时迁移，否则留给 extra:forbid 报错）
+        if "multiline" in data:
+            mv = data.pop("multiline")
+            if mv is True:
+                data["type"] = ParamType.PARAGRAPH
+            elif mv is not False and mv is not None:
+                raise ValueError("multiline 必须是布尔值")
+        # file: true → type=file
+        if "file" in data:
+            fv = data.pop("file")
+            if fv is True:
+                data["type"] = ParamType.FILE
+            elif fv is not False and fv is not None:
+                raise ValueError("file 必须是布尔值")
+        return data
 
 
 class RetryPolicy(BaseModel):
@@ -86,6 +125,28 @@ class Node(BaseModel):
         if isinstance(v, str):
             return [v]
         return v if v is not None else []
+
+    def resolve_input_schema(self) -> type[BaseModel] | None:
+        """返回本节点的输入 schema（来自 REGISTRY）。"""
+        func_def = REGISTRY.get(self.type)
+        return func_def.input_schema if func_def else None
+
+    def resolve_output_schema(self) -> type[BaseModel] | None:
+        """返回本节点的输出 schema。
+
+        优先用 REGISTRY 中的 ``output_schema``；
+        没有则从 ``self.inputs`` 的 key 动态生成（start 等声明式节点）；
+        都没有返回 ``None``（不校验字段）。
+        """
+        from pydantic import create_model
+
+        func_def = REGISTRY.get(self.type)
+        if func_def and func_def.output_schema is not None:
+            return func_def.output_schema
+        if self.inputs:
+            fields: dict[str, Any] = {k: (Any, None) for k in self.inputs}
+            return create_model(f"DynamicOutput_{self.type}", **fields)
+        return None
 
     def __repr__(self) -> str:
         deps = ",".join(self.depends_on) if self.depends_on else "root"

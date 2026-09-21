@@ -8,7 +8,7 @@ nodes:
   inputs:
     prompt:
       required: true
-      multiline: true
+      type: paragraph
       label: 用户问题
       description: 例如「北京今天天气怎么样」「帮我算一下 123 * 456」
 - name: agent

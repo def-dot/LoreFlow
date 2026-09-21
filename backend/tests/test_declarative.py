@@ -260,7 +260,7 @@ def test_inputs_rich_form() -> None:
         "query": {"required": True, "label": "查询词", "description": "要检索的内容"},
         "topic": {"default": "默认主题", "label": "主题"},
         "limit": {"default": 5},  # 可选、无 label → 展示层 label 退化为键名
-        "body": {"required": True, "multiline": True},  # 多行文本（前端 textarea）
+        "body": {"required": True, "type": "paragraph"},  # 多行文本（前端 textarea）
     }
     dag = Pipeline({"nodes": {"only": {"type": "test_fetch"}, "__start__": {"type": "start", "inputs": params}}})
     assert dag.inputs == params  # 声明原样保留
@@ -289,8 +289,8 @@ async def test_inputs_rich_form_runs(registered: Any) -> None:
     assert results["search"].output == {"query": "洛伦佐", "topic": "默认主题"}
 
 def test_inputs_unknown_field_rejected() -> None:
-    errors = validate_config({'nodes': {'__start__': {'type': 'start', 'inputs': {'q': {'type': 'string'}}}}})
-    assert errors == ["参数 'q': 不支持的字段 ['type']"]
+    errors = validate_config({'nodes': {'__start__': {'type': 'start', 'inputs': {'q': {'bogus': 1}}}})
+    assert errors == ["参数 'q': 不支持的字段 ['bogus']"]
 
 def test_inputs_collects_all_errors() -> None:
     """多个参数错误一次性全部返回，而非遇错即抛。"""

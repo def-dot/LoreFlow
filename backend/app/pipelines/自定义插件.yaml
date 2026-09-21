@@ -12,7 +12,7 @@ nodes:
       required: true
       label: 正文
       description: 待审核文章正文
-      multiline: true
+      type: paragraph
 - name: review
   type: human
   label: 内容审核

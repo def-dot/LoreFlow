@@ -20,12 +20,12 @@ async def test_pipelines_list(client: AsyncClient) -> None:
     assert main["description"]
     assert all(p["name"] for p in pipelines)
 
-    # 08：两个必填参数，label/multiline 齐全
+    # 08：两个必填参数，label/type 齐全
     params_08 = {p["name"]: p for p in by_file["08_dual_review.yaml"]["params"]}
     assert params_08["title"]["label"] == "标题"
     assert params_08["title"]["required"] is True and params_08["title"]["has_default"] is False
     assert params_08["content"]["description"]
-    assert params_08["content"]["multiline"] is True and params_08["title"]["multiline"] is False
+    assert params_08["content"]["type"] == "paragraph" and params_08["title"]["type"] == "text"
 
 
 async def test_pipeline_detail_retry(client: AsyncClient) -> None:

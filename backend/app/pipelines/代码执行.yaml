@@ -11,7 +11,7 @@ nodes:
       required: true
       label: 数据
       description: JSON 数组，如 [{"name":"A","score":85},{"name":"B","score":92}]
-      multiline: true
+      type: paragraph
 - name: parse
   type: code
   label: 解析数据

@@ -130,24 +130,18 @@ def _check_ref(
     ``upstream`` 是当前节点的上游依赖节点名集合（start 隐式包含）。
     ``nodes`` 是全图节点映射，用于读取上游节点类型。
     """
-    from app.registry import REGISTRY
-
-    root, _, field = ref.partition(".")
+    raw_root, _, field = ref.partition(".")
+    root = raw_root.lstrip("$")
     if root not in upstream:
         return [f"引用的 {root!r} 不是上游依赖节点"]
     if not field:
         return [f"引用 {root!r} 缺少字段名"]
     up_node = nodes.get(root)
-    # start 节点：用 inputs 声明的参数键做字段校验
-    if up_node.type == "start":
-        if up_node.inputs and field.split(".")[0] not in up_node.inputs:
-            return [f"引用的 {root!r} 输出中没有字段 {field.split('.')[0]!r}"]
-    else:
-        func_def = REGISTRY.get(up_node.type)
-        if func_def and func_def.output_schema:
-            top_field = field.split(".")[0]
-            if top_field not in func_def.output_schema.model_fields:
-                return [f"引用的 {root!r} 输出中没有字段 {top_field!r}"]
+    out_schema = up_node.resolve_output_schema()
+    if out_schema is not None:
+        top_field = field.split(".")[0]
+        if top_field not in out_schema.model_fields:
+            return [f"引用的 {root!r} 输出中没有字段 {top_field!r}"]
     return []
 
 
@@ -161,7 +155,7 @@ def _validate_node_inputs(
     errors: list[str] = []
     inputs = node.inputs or {}
 
-    # ---- start 节点：用 InputParamDef 校验每个参数声明 ----
+    # ---- inputs 校验 ----
     if node.type == "start":
         from pydantic import ValidationError
         from .pipeline import InputParamDef
@@ -169,22 +163,15 @@ def _validate_node_inputs(
             try:
                 InputParamDef.model_validate(val)
             except ValidationError as exc:
-                detail = "; ".join(
-                    e["msg"] for e in exc.errors()
-                )
-                errors.append(
-                    f"节点 {node.name!r}: start 参数 {key!r} 定义无效 — {detail}"
-                )
-
-    # ---- 非 start 节点：input_schema 校验（即使 inputs 为空也要检查必填项） ----
+                detail = "; ".join(e["msg"] for e in exc.errors())
+                errors.append(f"节点 {node.name!r}: start 参数 {key!r} 定义无效 — {detail}")
     else:
         func_def = REGISTRY.get(node.type)
-        fields = func_def.input_schema.model_fields if func_def.input_schema else {}
-
+        schema = func_def.input_schema if func_def else None
+        fields = schema.model_fields if schema else {}
         for key in fields:
             if fields[key].is_required() and key not in inputs:
                 errors.append(f"节点 {node.name!r}: inputs 缺少必填参数 {key!r}")
-
         if unexpected := set(inputs) - set(fields):
             errors.append(f"节点 {node.name!r}: inputs 包含未知参数 {unexpected!r}")
 
