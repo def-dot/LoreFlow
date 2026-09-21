@@ -23,11 +23,6 @@ from .validator import validate_inputs, validate_nodes
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Pydantic 子模型
-# ---------------------------------------------------------------------------
-
 class InputParamDef(BaseModel):
     """``__start__`` 节点里单个输入参数的声明（required / label / …）。"""
 
@@ -105,11 +100,6 @@ class Node(BaseModel):
             extras.append(f"timeout={self.timeout}s")
         tag = f", {', '.join(extras)}" if extras else ""
         return f"Node({self.name!r}, type={self.type!r}, deps=[{deps}]{tag})"
-
-
-# ---------------------------------------------------------------------------
-# Pipeline
-# ---------------------------------------------------------------------------
 
 
 class Pipeline(BaseModel):
