@@ -72,7 +72,7 @@ class NodeResult:
 NodeEventFunc = Callable[[NodeResult], Awaitable[None]]
 
 
-class DAGExecutionError(Exception):
+class PipeLineExecutionError(Exception):
     """Raised when the DAG execution fails (one or more nodes failed)."""
 
     def __init__(self, message: str, results: dict[str, NodeResult]):

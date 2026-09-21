@@ -25,7 +25,7 @@ from .condition import eval_condition
 from .types import HumanRejected, wired_ctx
 from .pipeline import Node, RetryPolicy
 from .types import (
-    DAGExecutionError,
+    PipeLineExecutionError,
     NodeEventFunc,
     NodeResult,
     NodeStatus,
@@ -117,12 +117,12 @@ class PipeLineExecutor:
         # ----- surface failures as DAGExecutionError -----
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
-            fail_lines = [f"DAG 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}"]
+            fail_lines = [f"PipeLine 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}"]
             for name in failed:
                 result = results[name]
                 if result.error is not None:
                     fail_lines.append(f"  {name}: {type(result.error).__name__}: {result.error}")
-            raise DAGExecutionError("\n".join(fail_lines), results)
+            raise PipeLineExecutionError("\n".join(fail_lines), results)
 
         return results
 
