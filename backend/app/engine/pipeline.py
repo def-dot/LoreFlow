@@ -241,12 +241,11 @@ class Pipeline(BaseModel):
     # ---- Mermaid 可视化 ----
 
     def to_mermaid(self) -> str:
-        nodes = {n.name: n for n in self.nodes}
         lines = ["graph TD"]
-        for name, node in nodes.items():
-            nid = re.sub(r"[ \-]", "_", name)
+        for node in self.nodes:
+            nid = re.sub(r"[ \-]", "_", node.name)
             func_def = REGISTRY.get(node.type)
-            main_text = node.label or name
+            main_text = node.label or node.name
             small: list[str] = []
             if func_def and func_def.label:
                 small.append(func_def.label)
