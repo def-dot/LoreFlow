@@ -1,6 +1,6 @@
 """start — 工作流输入节点。
 
-虚拟入口，将 inputs 声明注入拓扑排序，本身不产出值。
+声明输入参数（InputParamDef），执行时透传外部输入供下游 $ 引用。
 """
 
 from __future__ import annotations
@@ -12,5 +12,5 @@ from ..types import func
 
 @func(node=True, tool=False, label="输入")
 async def start(**kwargs: Any):
-    """无操作 — inputs 在 DAG.run() 初始化 ctx 时已就位。"""
-    return None
+    """透传外部输入，供下游节点通过 $ 引用取值。"""
+    return kwargs
