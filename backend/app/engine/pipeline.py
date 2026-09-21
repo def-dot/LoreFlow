@@ -49,31 +49,6 @@ class InputParamDef(BaseModel):
     type: ParamType = ParamType.TEXT
     options: list[str] | None = None  # type=select 时的选项列表
 
-    @model_validator(mode="before")
-    @classmethod
-    def _compat_migrate(cls, data: Any) -> Any:
-        """兼容旧格式：multiline/file bool → ParamType。"""
-        if not isinstance(data, dict):
-            return data
-        # 如果已经显式指定了 type，直接返回
-        if "type" in data:
-            return data
-        # multiline: true → type=paragraph（仅当值是 bool 时迁移，否则留给 extra:forbid 报错）
-        if "multiline" in data:
-            mv = data.pop("multiline")
-            if mv is True:
-                data["type"] = ParamType.PARAGRAPH
-            elif mv is not False and mv is not None:
-                raise ValueError("multiline 必须是布尔值")
-        # file: true → type=file
-        if "file" in data:
-            fv = data.pop("file")
-            if fv is True:
-                data["type"] = ParamType.FILE
-            elif fv is not False and fv is not None:
-                raise ValueError("file 必须是布尔值")
-        return data
-
 
 class RetryPolicy(BaseModel):
     """可配置的重试策略（指数退避 + 抖动）。"""
