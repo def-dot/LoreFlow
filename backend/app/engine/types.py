@@ -44,6 +44,7 @@ class NodeResult:
     attempts: int = 0
     duration_ms: float = 0.0
     retry_history: list[dict[str, Any]] | None = None
+    inputs: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe dict (the shape the web UI consumes)."""
@@ -58,6 +59,8 @@ class NodeResult:
             d["duration_ms"] = round(self.duration_ms)
         if self.retry_history:
             d["attempts_log"] = self.retry_history
+        if self.inputs:
+            d["inputs"] = self.inputs
         return d
 
     def __repr__(self) -> str:

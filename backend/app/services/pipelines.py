@@ -15,27 +15,13 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.engine import RetryPolicy
-from app.engine.resolve import parse_retry
+
 from app.engine.pipeline import Node, Pipeline
 from app.registry import REGISTRY
 
 logger = get_logger(__name__)
 
 PIPELINES_DIR = settings.PIPELINES_DIR
-
-
-def _coerce_nodes(data: dict[str, Any]) -> dict[str, Any]:
-    """YAML 原始数据预处理：retry int/dict → RetryPolicy，depends_on str → list。"""
-    for node in data.get("nodes") or []:
-        if not isinstance(node, dict):
-            continue
-        raw = node.get("retry")
-        if isinstance(raw, (int, dict)):
-            node["retry"] = parse_retry(raw)
-        dep = node.get("depends_on")
-        if isinstance(dep, str):
-            node["depends_on"] = [dep]
-    return data
 
 
 def list_pipelines() -> list[Pipeline]:
@@ -45,7 +31,7 @@ def list_pipelines() -> list[Pipeline]:
         try:
             raw = path.read_text(encoding="utf-8")
             data = yaml.safe_load(raw)
-            cfg = Pipeline.model_validate(_coerce_nodes(data))
+            cfg = Pipeline.model_validate(data)
         except Exception as exc:
             logger.warning("Skip pipeline %s: %s", path.name, exc)
             continue
@@ -78,7 +64,7 @@ def get_pipeline(name: str) -> tuple[str, dict[str, Any]]:
         raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
     raw = path.read_text(encoding="utf-8")
     data = yaml.safe_load(raw)
-    cfg = Pipeline.model_validate(_coerce_nodes(data))
+    cfg = Pipeline.model_validate(data)
     return raw, cfg.model_dump()
 
 
@@ -117,8 +103,8 @@ def _to_mermaid(cfg: Pipeline) -> str:
             small.append(node_type.label)
         if node_cfg.condition:
             small.append("[?]")
-        rp = parse_retry(node_cfg.retry)
-        if rp and rp.max_retries:
+        rp = node_cfg.retry
+        if isinstance(rp, RetryPolicy) and rp.max_retries:
             small.append(f"[R{rp.max_retries}]")
         text = main_text + (f"<br/><i>{' '.join(small)}</i>" if small else "")
         lines.append(f'    {nid}["{text}"]')
@@ -133,7 +119,7 @@ def detail_from_config(
     config: dict[str, Any],
 ) -> dict[str, Any]:
     """已解析的 YAML 配置 → 详情展示数据（图、节点行、YAML 原文）。"""
-    cfg = Pipeline.model_validate(_coerce_nodes(config))
+    cfg = Pipeline.model_validate(config)
     by_name = cfg.node_map
     rows: list[dict[str, Any]] = []
     for name in _topo_sort(cfg.nodes):
@@ -150,7 +136,7 @@ def detail_from_config(
             "type_output_schema": node_type.output_schema.model_json_schema() if node_type and node_type.output_schema else None,
             "depends_on": list(node_cfg.depends_on),
             "inputs": node_cfg.inputs,
-            "retry": _retry_summary(parse_retry(node_cfg.retry)),
+            "retry": _retry_summary(node_cfg.retry),
             "condition": node_cfg.condition,
         })
 
@@ -175,7 +161,7 @@ def create_pipeline(definition: str) -> Pipeline:
         data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
         raise ValueError(f"YAML 解析失败: {exc}") from exc
-    cfg = Pipeline.model_validate(_coerce_nodes(data))
+    cfg = Pipeline.model_validate(data)
     PIPELINES_DIR.mkdir(parents=True, exist_ok=True)
     dest = PIPELINES_DIR / f"{cfg.name}.yaml"
     if dest.is_file():
@@ -193,7 +179,7 @@ def update_pipeline(name: str, definition: str) -> Pipeline:
         data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
         raise ValueError(f"YAML 解析失败: {exc}") from exc
-    cfg = Pipeline.model_validate(_coerce_nodes(data))
+    cfg = Pipeline.model_validate(data)
     new_path = PIPELINES_DIR / f"{cfg.name}.yaml"
     if new_path != path:
         if new_path.is_file():

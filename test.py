@@ -1,28 +1,36 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class User(BaseModel):
-  age: int
+class Node(BaseModel):
+    # 进制额外字段，防止拼写错误
+    model_config = ConfigDict(extra="forbid")
 
-  # 1. before 模式：在转成 int 之前介入，可以处理带单位的字符串
-  @field_validator("age", mode="before")
-  def clean_age(cls, v):
-    if isinstance(v, str) and v.endswith("岁"):
-      return int(v.replace("岁", ""))
-    return v
-
-  # 2. after 模式：在转成 int 之后介入，用来做数值范围校验
-  @field_validator("age", mode="after")
-  def validate_age_range(cls, v):
-    # 此时 v 保证已经是 int 类型了
-    if v < 0 or v > 150:
-      raise ValueError("年龄必须在 0 到 150 之间")
-    return v
+    name: str
+    node_type: str = Field(alias="type")
 
 
-# 测试：
-# 1. 传入 "18岁" -> before 把它变成 18 -> after 检查通过
-# print(User(age="18岁"))  # 输出: age=18
+class Pipeline(BaseModel):
+    name: str
+    nodes: list[Node]
 
-# 2. 传入 -5 -> before 不动它 (-5) -> after 抛出 ValueError
-User(age=-5)
+
+# 准备一份有多个错误的数据
+bad_data = {
+    "name": "My Pipeline",
+    "nodes": [
+        {"name": "Node A", "type": "llm", "condtion": "x"},  # 错误 1: 字段名拼错 condtion
+        {"type": "llm"},  # 错误 2: 缺失 name 字段
+        {"name": 12345, "type": "tool"},  # 错误 3: name 类型不对（且无法强转时）
+    ],
+}
+
+try:
+    Pipeline.model_validate(bad_data)
+except Exception as e:
+    # 打印所有的错误项
+    print(f"共捕获到 {len(e.errors())} 个错误：\n")
+    for err in e.errors():
+        print(f"错题路径 (loc) : {err['loc']}")
+        print(f"错误类型 (type): {err['type']}")
+        print(f"错误信息 (msg) : {err['msg']}")
+        print("-" * 40)

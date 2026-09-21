@@ -61,5 +61,5 @@ nodes:
   - rag_answer
   type: end
   inputs:
-    llm_chat: $llm_chat
-    rag_answer: $rag_answer
+    llm_chat: $llm_chat.content
+    rag_answer: $rag_answer.content

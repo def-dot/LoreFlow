@@ -139,6 +139,7 @@ class PipeLineExecutor:
         """Lifecycle of a single node: 等依赖 → 失败/跳过级联 → 条件判断 → 带重试执行 → 收尾。
         """
         result: NodeResult | None = None
+        node_inputs: dict[str, Any] | None = None
         try:
             # ---- 1. Wait for dependencies ----
             for dep in node.depends_on:
@@ -170,6 +171,12 @@ class PipeLineExecutor:
                     status=NodeStatus.UPSTREAM_SKIPPED,
                 )
                 return result
+
+            # ---- Record resolved inputs ----
+            if node.type == "start":
+                node_inputs = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
+            else:
+                node_inputs = wired_ctx(self.ctx, node.inputs)
 
             # ---- 3. Evaluate condition (branching) ----
             if node.condition is not None:
@@ -311,6 +318,8 @@ class PipeLineExecutor:
         finally:
             await self._emit(result)
             events[node.name].set()
+        if result is not None:
+            result.inputs = node_inputs
         return result
 
     # ------------------------------------------------------------------

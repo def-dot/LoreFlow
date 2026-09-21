@@ -1,7 +1,8 @@
 """Pipeline — JSON dict → pydantic 对象 + 运行时执行。
 
 - ``nodes`` 是 ``list[Node]``（pydantic 校验，未知字段拒绝）
-- start 节点的 inputs 保持原始 dict，由 ``validate_nodes`` 统一校验
+- start 节点的 inputs 保持原值；``Pipeline.inputs`` 属性按需转成
+  InputParamDef，非法声明的报错由 ``PipeLineValidator`` 统一输出
 - ``run()`` / ``validate()`` / ``to_mermaid()`` 直接查 REGISTRY 取函数 / output_schema
 - YAML 加载由调用方（services/pipelines.py）负责，Pipeline 只认 dict
 """
@@ -101,12 +102,21 @@ class Node(BaseModel):
             return [v]
         return v if v is not None else []
 
+    @field_validator("retry", mode="before")
+    @classmethod
+    def _coerce_retry(cls, v: Any) -> Any:
+        """retry int/dict → RetryPolicy（委托 resolve.parse_retry）。"""
+        if isinstance(v, (int, dict)):
+            from app.engine.resolve import parse_retry
+            return parse_retry(v)
+        return v
+
     @model_validator(mode="after")
     def _coerce_start_inputs(self) -> Node:
-        """start 节点的 inputs 值从 raw dict 反序列化为 InputParamDef。"""
+        """start 节点的 inputs 值从 raw dict 反序列化为 InputParamDef（非法值由 pydantic 收集报错）。"""
         if self.type == "start" and self.inputs:
             self.inputs = {
-                k: InputParamDef.model_validate(v) if isinstance(v, dict) else v
+                k: v if isinstance(v, InputParamDef) else InputParamDef.model_validate(v)
                 for k, v in self.inputs.items()
             }
         return self
@@ -156,7 +166,7 @@ class Pipeline(BaseModel):
         p = Pipeline(**data)
         results, _ = await p.run(inputs={"q": "hello"})
 
-    ``__start__`` 节点的 ``inputs`` 会在校验阶段自动转成 ``dict[str, InputParamDef]``。
+    ``inputs`` 属性把 ``__start__`` 节点的声明按需转成 ``dict[str, InputParamDef]``。
     YAML 加载由 ``services/pipelines.py`` 负责，本类只认 dict。
     """
 
@@ -168,11 +178,16 @@ class Pipeline(BaseModel):
 
     @model_validator(mode="after")
     def _validate_pipeline(self) -> Pipeline:
-        """构造期校验"""
+        """构造期校验（结构错误聚合报告；字段错误由 pydantic 先行拦截，两阶段不同时报告）。"""
         errors = PipeLineValidator.validate(self.nodes)
         if errors:
             raise ValueError("\n".join(errors))
         return self
+
+    @property
+    def node_map(self) -> dict[str, Node]:
+        """节点名字 → Node 映射。"""
+        return {n.name: n for n in self.nodes}
 
     @property
     def start_node(self) -> Node:
@@ -186,8 +201,11 @@ class Pipeline(BaseModel):
 
     @property
     def inputs(self) -> dict[str, InputParamDef]:
-        """start 节点的参数声明（``InputParamDef`` 字典）。"""
-        return dict(self.start_node.inputs) if self.start_node and self.start_node.inputs else {}
+        """start 节点的参数声明（raw 值按需转 InputParamDef；构造期已校验）。"""
+        start = self.start_node
+        if start is None or not start.inputs:
+            return {}
+        return {k: InputParamDef.model_validate(v) for k, v in start.inputs.items()}
 
     @property
     def required_inputs(self) -> list[str]:

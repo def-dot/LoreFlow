@@ -131,26 +131,16 @@ class PipeLineValidator:
         inputs = node.inputs or {}
 
         # ---- 参数声明 / schema 校验 ----
-        if node.type == "start":
-            from pydantic import ValidationError
-            from .pipeline import InputParamDef
-
-            for key, val in inputs.items():
-                try:
-                    InputParamDef.model_validate(val)
-                except ValidationError as exc:
-                    detail = "; ".join(e["msg"] for e in exc.errors())
-                    errors.append(
-                        f"节点 {node.name!r}: start 参数 {key!r} 定义无效 — {detail}"
-                    )
-        else:
+        # start 节点的 InputParamDef 校验由 pydantic 字段校验完成
+        if node.type != "start":
             func_def = REGISTRY.get(node.type)
             schema = func_def.input_schema if func_def else None
             fields = schema.model_fields if schema else {}
             for key in fields:
                 if fields[key].is_required() and key not in inputs:
                     errors.append(f"节点 {node.name!r}: inputs 缺少必填参数 {key!r}")
-            if unexpected := set(inputs) - set(fields):
+            # schema=None 表示输入动态，不做未知参数检查
+            if schema is not None and (unexpected := set(inputs) - set(fields)):
                 errors.append(f"节点 {node.name!r}: inputs 包含未知参数 {unexpected!r}")
 
         # ---- $引用校验 ----
