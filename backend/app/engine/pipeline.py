@@ -227,7 +227,7 @@ class Pipeline(BaseModel):
             inputs["_approver"] = approver
 
         executor = PipeLineExecutor(
-            nodes=self.nodes, inputs=inputs,
+            nodes=self.nodes, ctx=inputs,
             concurrency=concurrency, on_event=on_event,
         )
         results = await executor.execute(resume=resume)

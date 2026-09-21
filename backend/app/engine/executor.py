@@ -51,7 +51,7 @@ class PipeLineExecutor:
     def __init__(
         self,
         nodes: list[Node],
-        inputs: dict[str, Any] | None = None,
+        ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
     ):
@@ -59,7 +59,7 @@ class PipeLineExecutor:
         # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
         # 控制流簿记（events/tasks）是 execute 的过程状态，留在方法内
         self.nodes: dict[str, Node] = {node.name: node for node in nodes}
-        self.inputs: dict[str, Any] = inputs if inputs is not None else {}
+        self.ctx: dict[str, Any] = ctx if ctx is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
 
@@ -319,86 +319,15 @@ class PipeLineExecutor:
 
     async def _call(self, node: Node) -> Any:
         """Invoke the node function (from REGISTRY) with timeout, output validation and deep $-resolution."""
-        # start 节点：inputs 是 schema 声明（InputParamDef），不是接线；
-        # 真实输入值已在 ctx 顶层（Pipeline.run 放入），直接透传。
         if node.type == "start":
+            # start 节点：inputs 是声明，实际输入在 ctx 中
             target = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
         else:
             target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
-        self._resolve_deep_inputs(target)
 
-        func = REGISTRY[node.type].func
-        kwargs = self._build_kwargs(func, target)
-        coro = func(**kwargs)
-
-        output = await asyncio.wait_for(coro, timeout=node.timeout) if node.timeout is not None else await coro
-        return self._validate_output(node, output)
-
-    # ---- argument resolution ----
-
-    @staticmethod
-    def _build_kwargs(func: Callable, target: dict[str, Any]) -> dict[str, Any]:
-        """从 target 构造 func 的 kwargs。三种派发路径：
-        1. ctx 参数 → 传整个 target
-        2. BaseModel 参数 → 从 target 字段自动构造实例
-        3. 普通 kwargs → 按名称匹配 target 键
-        """
-        sig = inspect.signature(func)
-
-        # 1) ctx 风格
-        if "ctx" in sig.parameters:
-            return {"ctx": target}
-
-        # 识别 BaseModel 参数
-        model_params: dict[str, type[BaseModel]] = {}
-        for pname, param in sig.parameters.items():
-            if pname.startswith("_") or param.kind in (
-                inspect.Parameter.VAR_POSITIONAL,
-                inspect.Parameter.VAR_KEYWORD,
-            ):
-                continue
-            ann = param.annotation
-            if isinstance(ann, type) and issubclass(ann, BaseModel):
-                model_params[pname] = ann
-
-        # 2) BaseModel 派发
-        if model_params:
-            kwargs: dict[str, Any] = {}
-            remaining = dict(target)
-
-            for pname, model_cls in model_params.items():
-                fields = set(model_cls.model_fields)
-                kwargs[pname] = model_cls(**{k: remaining.pop(k) for k in fields if k in remaining})
-
-            # 处理剩余参数：_前缀透传、VAR_KEYWORD 收集、普通参数匹配
-            for pname, param in sig.parameters.items():
-                if pname in kwargs:
-                    continue
-                if param.kind == inspect.Parameter.VAR_KEYWORD:
-                    kwargs[pname] = {k: v for k, v in remaining.items() if not k.startswith("_")}
-                    if "_approver" in remaining:
-                        kwargs[pname]["_approver"] = remaining["_approver"]
-                    remaining.clear()
-                elif pname in target:
-                    kwargs[pname] = target[pname]
-
-            return kwargs
-
-        # 3) 普通 kwargs 派发
-        kwargs = {p: target[p] for p in sig.parameters if p in target}
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            kwargs.update({k: v for k, v in target.items() if k not in kwargs and not k.startswith("_")})
-            # VAR_KEYWORD 节点需要 _approver 来驱动 human 节点
-            if "_approver" in target and "_approver" not in kwargs:
-                kwargs["_approver"] = target["_approver"]
-        return kwargs
-
-    # ---- deep $-resolution ----
-
-    def _resolve_deep_inputs(self, target: dict[str, Any]) -> None:
-        """对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）。"""
-        def _resolve(obj: Any) -> Any:
+        # 对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）
+        def resolve_deep(obj: Any) -> Any:
             if isinstance(obj, str) and obj.startswith("$"):
                 val: Any = self.ctx
                 for part in obj[1:].split("."):
@@ -407,15 +336,46 @@ class PipeLineExecutor:
                     val = val[part]
                 return val
             if isinstance(obj, dict):
-                return {k: _resolve(v) for k, v in obj.items()}
+                return {k: resolve_deep(v) for k, v in obj.items()}
             if isinstance(obj, list):
-                return [_resolve(v) for v in obj]
+                return [resolve_deep(v) for v in obj]
             return obj
 
         for k, v in list(target.items()):
             if isinstance(v, dict):
                 target[f"_raw_{k}"] = v
-                target[k] = _resolve(v)
+                target[k] = resolve_deep(v)
+
+        func = REGISTRY[node.type].func
+        sig = inspect.signature(func)
+
+        # 构造 kwargs：BaseModel 参数自动构造，**kwargs 收集剩余
+        kwargs: dict[str, Any] = {}
+        remaining = dict(target)
+
+        for pname, param in sig.parameters.items():
+            if param.kind == inspect.Parameter.VAR_KEYWORD:
+                # **kwargs 收集所有剩余（过滤 _ 前缀，但保留 _approver）
+                kwargs[pname] = {k: v for k, v in remaining.items() if not k.startswith("_")}
+                if "_approver" in remaining:
+                    kwargs[pname]["_approver"] = remaining["_approver"]
+                remaining.clear()
+            elif pname.startswith("_"):
+                # _ 前缀参数透传
+                kwargs[pname] = target.get(pname)
+            else:
+                ann = param.annotation
+                if isinstance(ann, type) and issubclass(ann, BaseModel):
+                    # BaseModel 参数：从 remaining 取字段构造
+                    fields = set(ann.model_fields)
+                    kwargs[pname] = ann(**{k: remaining.pop(k) for k in fields if k in remaining})
+                elif pname in target:
+                    kwargs[pname] = target[pname]
+
+        coro = func(**kwargs)
+
+        output = await asyncio.wait_for(coro, timeout=node.timeout) if node.timeout is not None else await coro
+        return self._validate_output(node, output)
 
     # ---- output validation ----
 

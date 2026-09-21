@@ -21,7 +21,7 @@ from app.registry.funcs.human import human
 from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
 from .validator import PipeLineValidator
 from .types import (
-    DAGExecutionError,
+    PipeLineExecutionError,
     HumanRejected,
     NodeResult,
     NodeStatus,
@@ -30,7 +30,7 @@ from .types import (
 )
 
 __all__ = [
-    "DAGExecutionError",
+    "PipeLineExecutionError",
     "HumanRejected",
     "Node",
     "NodeResult",
