@@ -1,5 +1,4 @@
-"""
-条件表达式 — YAML ``condition`` 声明的解析与求值。
+"""条件表达式 — YAML ``condition`` 声明的解析与求值。
 
 语法（对标 Argo ``when`` 的内嵌条件；键必须带 ``$`` 引用前缀——与
 inputs 接线同一拼法，``$`` 开头 = 引用上下文）::
@@ -14,10 +13,10 @@ inputs 接线同一拼法，``$`` 开头 = 引用上下文）::
     condition: $a == x or $b == y                   # or
 
 - 键在节点视图上取值（共享 ctx + ``inputs`` 接线本地键；loop 额外注入
-  ``iteration``），支持 ``a.b.c`` 点路径下钻 dict 字段。引用键不做加载期
-  校验——拼错键运行期取 ``None``，恒 False 跳过。
+  ``iteration``），支持 ``a.b.c`` 点路径下钻 dict 字段。引用键在加载期
+  由 ``_validate_node_condition`` 校验来源（参数键 / 上游依赖节点）。
 - 值为标量字面量：裸词按字符串（``chat``）、数字/true/false/null 按
-  字面量、带空格的字符串加引号；``in`` 的值是 ``[a, b]`` 列表。数字
+  字面量、带空格的字符串加引号；``in``/``not in`` 的值为逗号分隔列表。数字
   与字符串不隐式转换（``1 == "1"`` 为 False）。
 - 求值异常（类型不可比等）按 False 处理 —— 与执行器「条件异常 → 跳过」
   的既有语义一致。
@@ -27,7 +26,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any
+from functools import lru_cache
+from typing import Any, NamedTuple
 
 from .node import ConditionFunc
 
@@ -38,6 +38,21 @@ _EXPR_RE = re.compile(
     r"^\s*(?P<neg>not\s+)?\$(?P<key>[^\s=!<>]+)"
     r"(?:\s*(?P<op>not\s+in|==|!=|>=|<=|>|<|in)\s*(?P<value>\S.*?))?\s*$"
 )
+
+# 按逻辑运算符拆分，仅在运算符后跟 $/not $ 时生效（预编译）。
+_SPLIT_RE: dict[str, re.Pattern[str]] = {
+    "or": re.compile(r"\s+or\s+(?=\$|not\s+\$)"),
+    "and": re.compile(r"\s+and\s+(?=\$|not\s+\$)"),
+}
+
+
+class Atom(NamedTuple):
+    """单条原子条件的解析结果。"""
+
+    neg: bool
+    key: str
+    op: str | None
+    expected: Any
 
 
 def _parse_scalar(raw: str) -> Any:
@@ -59,8 +74,8 @@ def _parse_scalar(raw: str) -> Any:
     return raw
 
 
-def _parse_atom(raw: str) -> tuple[bool, str, str | None, Any]:
-    """单条原子表达式 → ``(取反, 键, 操作符或 None, 期望值)``；语法错抛中文 ValueError。"""
+def _parse_atom(raw: str) -> Atom:
+    """单条原子表达式；语法错抛中文 ValueError。"""
     m = _EXPR_RE.match(raw)
     if not m:
         raise ValueError(
@@ -68,49 +83,49 @@ def _parse_atom(raw: str) -> tuple[bool, str, str | None, Any]:
         )
 
     value_raw = m.group("value")
+    op = m.group("op")
     if value_raw is not None:
         val = value_raw.strip()
-        if val.startswith("[") and val.endswith("]"):
-            inner = val[1:-1].strip()
-            value = [_parse_scalar(p.strip()) for p in inner.split(",") if p.strip()] if inner else []
+        if op in ("in", "not in"):
+            value = [_parse_scalar(p.strip()) for p in val.split(",") if p.strip()]
         else:
             value = _parse_scalar(val)
     else:
         value = None
 
-    return (
-        m.group("neg") is not None,
-        m.group("key"),
-        m.group("op"),
-        value,
+    return Atom(
+        neg=m.group("neg") is not None,
+        key=m.group("key"),
+        op=op,
+        expected=value,
     )
-
-
-def _parse(expr: str) -> list[list[tuple[bool, str, str | None, Any]]]:
-    """复合表达式 → ``[[and 组1], [and 组2], ...]``；or 最低，and 居中。
-
-    ``A and B or C`` → ``[[A, B], [C]]``（and 优先于 or）。
-    不支持括号嵌套。
-    """
-    or_groups: list[list[tuple[bool, str, str | None, Any]]] = []
-    for or_part in _split_logic(expr, "or"):
-        and_atoms = [_parse_atom(a) for a in _split_logic(or_part, "and")]
-        or_groups.append(and_atoms)
-    return or_groups
 
 
 def _split_logic(expr: str, op: str) -> list[str]:
     """按逻辑运算符拆分，仅在运算符后跟 $/not $ 时生效。"""
+    pat = _SPLIT_RE[op]
     parts: list[str] = []
     while True:
-        # 找下一个 op+$ 或 op+not $
-        m = re.search(rf"\s+{op}\s+(?=\$|not\s+\$)", expr)
+        m = pat.search(expr)
         if not m:
             parts.append(expr)
             break
         parts.append(expr[: m.start()])
         expr = expr[m.end():]
     return parts
+
+
+def parse_condition(expr: str) -> list[list[Atom]]:
+    """复合表达式 → ``[[and 组1], [and 组2], ...]``；or 最低，and 居中。
+
+    ``A and B or C`` → ``[[A, B], [C]]``（and 优先于 or）。
+    不支持括号嵌套。
+    """
+    or_groups: list[list[Atom]] = []
+    for or_part in _split_logic(expr, "or"):
+        and_atoms = [_parse_atom(a) for a in _split_logic(or_part, "and")]
+        or_groups.append(and_atoms)
+    return or_groups
 
 
 def _compare(actual: Any, op: str, expected: Any) -> bool:
@@ -135,22 +150,22 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
         return False
 
 
-def _eval_atom(ctx: dict[str, Any], atom: tuple[bool, str, str | None, Any]) -> bool:
+def _eval_atom(ctx: dict[str, Any], atom: Atom) -> bool:
     """单条原子条件在视图上求值。"""
-    neg, key, op, expected = atom
     actual = ctx
-    for part in key.split("."):
+    for part in atom.key.split("."):
         if not isinstance(actual, Mapping) or part not in actual:
             actual = None
             break
         actual = actual[part]
-    result = _compare(actual, op, expected) if op else bool(actual)
-    return not result if neg else result
+    result = _compare(actual, atom.op, atom.expected) if atom.op else bool(actual)
+    return not result if atom.neg else result
 
 
-def compile_condition(expr: str) -> ConditionFunc:
-    """表达式字符串 → ``(视图) -> bool`` 谓词（解析一次，循环内重复求值）。"""
-    groups = _parse(expr)  # [[and 组], ...]
+@lru_cache(maxsize=256)
+def _compile(expr: str) -> ConditionFunc:
+    """表达式字符串 → ``(视图) -> bool`` 谓词（缓存解析结果，循环内重复求值零开销）。"""
+    groups = parse_condition(expr)
 
     def cond(ctx: dict[str, Any]) -> bool:
         return any(all(_eval_atom(ctx, atom) for atom in and_group) for and_group in groups)
@@ -158,19 +173,12 @@ def compile_condition(expr: str) -> ConditionFunc:
     return cond
 
 
-def condition_keys(expr: str) -> list[str]:
-    """复合表达式引用的所有根键（点路径取首段）—— 加载期核对键存在的依据。"""
-    seen: list[str] = []
-    for and_group in _parse(expr):
-        for _, key, _, _ in and_group:
-            root = key.split(".")[0]
-            if root not in seen:
-                seen.append(root)
-    return seen
+# 对外 API 保持不变
+compile_condition = _compile
 
 
 def eval_condition(cond: str | bool, view: dict[str, Any]) -> bool:
     """节点条件求值（原始声明 → bool）：布尔常量 / 表达式字符串（接线视图上）。"""
     if isinstance(cond, bool):
         return cond
-    return bool(compile_condition(cond)(view))
+    return bool(_compile(cond)(view))
