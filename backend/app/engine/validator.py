@@ -210,10 +210,7 @@ def _validate_node_inputs(
         if isinstance(val, str) and val.startswith("$"):
             root = val[1:].partition(".")[0]
             if root not in upstream:
-                errors.append(
-                    f"节点 {node.name!r}: inputs 引用 ${root}，"
-                    f"不是参数键或上游依赖节点"
-                )
+                errors.append(f"节点 {node.name!r}: inputs 引用 ${root}，不是上游依赖节点")
             else:
                 errors.extend(
                     f"节点 {node.name!r}: inputs {msg}"
