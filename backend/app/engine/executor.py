@@ -51,7 +51,7 @@ class PipeLineExecutor:
     def __init__(
         self,
         nodes: list[Node],
-        ctx: dict[str, Any] | None = None,
+        inputs: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
     ):
@@ -59,7 +59,7 @@ class PipeLineExecutor:
         # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
         # 控制流簿记（events/tasks）是 execute 的过程状态，留在方法内
         self.nodes: dict[str, Node] = {node.name: node for node in nodes}
-        self.ctx: dict[str, Any] = ctx if ctx is not None else {}
+        self.inputs: dict[str, Any] = inputs if inputs is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
 
@@ -319,7 +319,12 @@ class PipeLineExecutor:
 
     async def _call(self, node: Node) -> Any:
         """Invoke the node function (from REGISTRY) with timeout, output validation and deep $-resolution."""
-        target = wired_ctx(self.ctx, node.inputs)
+        # start 节点：inputs 是 schema 声明（InputParamDef），不是接线；
+        # 真实输入值已在 ctx 顶层（Pipeline.run 放入），直接透传。
+        if node.type == "start":
+            target = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
+        else:
+            target = wired_ctx(self.ctx, node.inputs)
         target["_node"] = node.name
         self._resolve_deep_inputs(target)
 
