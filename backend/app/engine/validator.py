@@ -13,20 +13,6 @@ from .condition import parse_condition
 if TYPE_CHECKING:
     from .pipeline import Node
 
-
-# ---------------------------------------------------------------------------
-# 属性读取兼容（Node 对象 / dict）
-# ---------------------------------------------------------------------------
-
-def _get_node_attr(node: Any, attr: str, default: Any = None) -> Any:
-    """从 Node 对象或 dict 安全读取属性。"""
-    if hasattr(node, attr):
-        return getattr(node, attr)
-    if isinstance(node, dict):
-        return node.get(attr, default)
-    return default
-
-
 # ---------------------------------------------------------------------------
 # Node 列表校验入口（Pipeline 构造期调用）
 # ---------------------------------------------------------------------------
@@ -37,10 +23,9 @@ def validate_nodes(nodes: list["Node"]) -> list[str]:
     先逐节点校验，再图结构校验（节点名去重、依赖存在性、环检测）。
     """
     errors: list[str] = []
-    nodes_dict = {item.name: item for item in nodes}
     for node in nodes:
-        errors.extend(_validate_node(node, nodes_dict))
-    errors.extend(_validate_graph(nodes_dict))
+        errors.extend(_validate_node(node, nodes=nodes))
+    errors.extend(_validate_graph(nodes))
     return errors
 
 
@@ -85,7 +70,7 @@ def _validate_node_condition(
 
 def _validate_node(
     node: "Node",
-    nodes: dict[str, Node],
+    nodes: list["Node"],
 ) -> list[str]:
     """单节点字段级校验。传入 nodes/edges 时额外校验 inputs 中的 $ 引用。"""
     from app.registry import REGISTRY
@@ -98,8 +83,10 @@ def _validate_node(
         errors.append(f"节点 {name!r}: 未知的 type {node.type!r}")
         return errors
 
-    errors.extend(_validate_node_inputs(node, nodes))
-    errors.extend(_validate_node_condition(node, nodes))
+    nodes_dict = {item.name: item for item in nodes}
+
+    errors.extend(_validate_node_inputs(node, nodes_dict))
+    errors.extend(_validate_node_condition(node, nodes_dict))
 
     # retry 校验
     retry = node.retry
@@ -213,8 +200,9 @@ def _validate_node_inputs(
     return errors
 
 
-def _validate_graph(nodes: dict[str, Node]) -> list[str]:
+def _validate_graph(nodes: list['Node']) -> list[str]:
     """依赖存在性 + 环检测。接受 ``list[Node]``。"""
+    names = [n.name for n in nodes]
     edges: dict[str, list[str]] = {n.name: n.depends_on for n in nodes}
     errors: list[str] = []
 
@@ -262,10 +250,10 @@ def _validate_graph(nodes: dict[str, Node]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# 运行时输入校验（从 pipeline.py 迁入）
+# 运行时输入校验
 # ---------------------------------------------------------------------------
 
-def validate_runtime_inputs(
+def validate_inputs(
     inputs: dict[str, Any],
     declared: dict[str, Any],
 ) -> list[str]:
@@ -299,7 +287,3 @@ def validate_runtime_inputs(
                 errors.append(f"必填参数缺失或为空: {key}")
 
     return errors
-
-
-# 公共别名（orchestrator / tests / pipeline.py import 用）
-validate_inputs = validate_runtime_inputs

@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.registry import REGISTRY
 from .node import ApproverFunc
 from .types import NodeResult
-from . import validator
 from .validator import validate_nodes
 
 logger = logging.getLogger(__name__)
@@ -131,11 +130,6 @@ class Pipeline(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    @property
-    def node_map(self) -> dict[str, Node]:
-        """节点名 → Node 对象。"""
-        return {node.name: node for node in self.nodes}
-
     @model_validator(mode="after")
     def _validate_pipeline(self) -> Pipeline:
         """构造期校验"""
@@ -143,31 +137,6 @@ class Pipeline(BaseModel):
         if errors:
             raise ValueError("\n".join(errors))
         return self
-
-    def _find_node_by_type(self, node_type: str) -> Node | None:
-        for node in self.nodes:
-            if node.type == node_type:
-                return node
-        return None
-
-    @property
-    def _declared_params(self) -> dict[str, dict[str, Any]]:
-        """参数声明 — 没有 ``__start__`` 则为空（= 自由上下文）。"""
-        start = self._find_node_by_type("start")
-        if start is not None and start.inputs:
-            return start.inputs
-        return {}
-
-    # ---- 运行时校验（REGISTRY）----
-
-    def validate(self) -> list[str]:
-        """结构 + REGISTRY 校验。"""
-        nodes = self.node_map
-        errors = validator.validate_inputs({}, self._declared_params)
-        errors.extend(validator.validate_pipeline(self.name or "", nodes))
-        return errors
-
-    # ---- 执行 ----
 
     async def run(
         self,
