@@ -37,9 +37,10 @@ def validate_nodes(nodes: list["Node"]) -> list[str]:
     先逐节点校验，再图结构校验（节点名去重、依赖存在性、环检测）。
     """
     errors: list[str] = []
+    nodes_dict = {item.name: item for item in nodes}
     for node in nodes:
-        errors.extend(_validate_node(node, nodes=nodes))
-    errors.extend(_validate_graph(nodes))
+        errors.extend(_validate_node(node, nodes_dict))
+    errors.extend(_validate_graph(nodes_dict))
     return errors
 
 
@@ -84,7 +85,7 @@ def _validate_node_condition(
 
 def _validate_node(
     node: "Node",
-    nodes: list["Node"],
+    nodes: dict[str, Node],
 ) -> list[str]:
     """单节点字段级校验。传入 nodes/edges 时额外校验 inputs 中的 $ 引用。"""
     from app.registry import REGISTRY
@@ -97,10 +98,8 @@ def _validate_node(
         errors.append(f"节点 {name!r}: 未知的 type {node.type!r}")
         return errors
 
-    nodes_dict = {item.name: item for item in nodes}
-
-    errors.extend(_validate_node_inputs(node, nodes_dict))
-    errors.extend(_validate_node_condition(node, nodes_dict))
+    errors.extend(_validate_node_inputs(node, nodes))
+    errors.extend(_validate_node_condition(node, nodes))
 
     # retry 校验
     retry = node.retry
@@ -120,9 +119,8 @@ def _validate_node(
 # ---------------------------------------------------------------------------
 
 def _get_upstream_nodes(node: "Node", nodes: dict[str, Node]) -> set[str]:
-    """返回 node 的所有上游节点（传递闭包）。start 节点隐式作为所有非 start 节点的上游。"""
-    start_name = next((n for n, nd in nodes.items() if nd.type == "start"), None)
-    seen: set[str] = {start_name} if start_name and node.type != "start" else set()
+    """返回 node 的所有上游节点（传递闭包）。"""
+    seen: set[str] = set()
     stack = list(node.depends_on or [])
     while stack:
         dep = stack.pop()
@@ -215,86 +213,8 @@ def _validate_node_inputs(
     return errors
 
 
-# ---------------------------------------------------------------------------
-# 主校验入口
-# ---------------------------------------------------------------------------
-
-def validate_pipeline(
-    name: str,
-    nodes: dict[str, Any],
-) -> list[str]:
-    """统一校验入口 — 返回错误列表（空 = 合法）。
-
-    ``nodes`` 的值是 NodeSpec / Node / dict 皆可，只要支持：
-    ``["depends_on"]``, ``.get("condition")``, ``.get("retry")``。
-    """
-    errors: list[str] = []
-
-    if not nodes:
-        errors.append("DAG 没有节点")
-        return errors
-
-    # depends_on 类型校验 + 构建 edges dict
-    edges: dict[str, list[str]] = {}
-    for node_name, node in nodes.items():
-        raw_deps = (node.depends_on if hasattr(node, "depends_on")
-                    else node.get("depends_on") if isinstance(node, dict)
-                    else [])
-        if raw_deps is None:
-            raw_deps = []
-        if not isinstance(raw_deps, list):
-            errors.append(f"节点 {node_name!r}: depends_on 必须是字符串列表")
-            # 保留节点名在 edges 中（空依赖），避免下游误报「不在 DAG 中」
-            edges.setdefault(node_name, [])
-            continue
-        edges[node_name] = raw_deps
-
-    # inputs 校验（schema + $引用来源）
-    for node_name, node in nodes.items():
-        errors.extend(_validate_node_inputs(
-            node,
-            nodes=nodes,
-        ))
-
-    # 条件表达式语法 + 引用来源校验（已由 _validate_node_condition 统一处理，
-    # 此处仅对 dict 形式节点补跑，因为 validate_nodes 只处理 Node 对象）
-    start_name = next((n for n, nd in nodes.items() if _get_node_attr(nd, "type") == "start"), None)
-    for node_name, node in nodes.items():
-        if isinstance(node, dict):
-            condition = _get_node_attr(node, "condition")
-            if condition and isinstance(condition, str):
-                try:
-                    groups = parse_condition(condition)
-                except ValueError as exc:
-                    errors.append(f"节点 {node_name!r}: {exc}")
-                else:
-                    upstream = set(edges.get(node_name, []))
-                    if start_name and _get_node_attr(node, "type") != "start":
-                        upstream.add(start_name)
-                    seen: list[str] = []
-                    for and_group in groups:
-                        for _, key, _, _ in and_group:
-                            root = key.split(".")[0]
-                            if root in seen or root == "iteration":
-                                continue
-                            seen.append(root)
-                            errors.extend(
-                                f"节点 {node_name!r}: condition {msg}"
-                                for msg in _check_ref(f"${root}", upstream, nodes)
-                            )
-
-    # retry 校验
-    for node_name, node in nodes.items():
-        retry = _get_node_attr(node, "retry")
-        if isinstance(retry, int) and retry < 0:
-            errors.append(f"节点 {node_name!r}: retry 不能为负数，实际是 {retry}")
-
-    return errors
-
-
-def _validate_graph(nodes: list['Node']) -> list[str]:
+def _validate_graph(nodes: dict[str, Node]) -> list[str]:
     """依赖存在性 + 环检测。接受 ``list[Node]``。"""
-    names = [n.name for n in nodes]
     edges: dict[str, list[str]] = {n.name: n.depends_on for n in nodes}
     errors: list[str] = []
 
