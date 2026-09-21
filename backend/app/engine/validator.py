@@ -201,8 +201,6 @@ def _validate_node_inputs(
     # ---- $引用校验 ----
     upstream = _get_upstream_nodes(node, nodes)
     for key, val in inputs.items():
-        if key.startswith("_"):
-            continue
         if isinstance(val, str) and val.startswith("$"):
             errors.extend(
                 f"节点 {node.name!r}: inputs {msg}"
