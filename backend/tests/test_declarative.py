@@ -8,7 +8,6 @@ from app.core.config import settings
 from app.engine import Pipeline, Node, NodeStatus, RetryPolicy
 import yaml
 from app.engine.resolve import parse_retry
-from app.engine.validator import validate_inputs
 from helpers import validate_config
 from app.registry import REGISTRY, FuncDef
 
@@ -162,9 +161,8 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
     dag = Pipeline({'nodes': {'only': {'type': 't_only'}, '__start__': {'type': 'start', 'inputs': {'query': {'required': True}}}}})
 
     assert dag.validate() == []
-    assert validate_inputs({}, dag.inputs) == ["必填参数缺失或为空: query"]
 
-    with pytest.raises(ValueError, match="必填参数缺失或为空"):
+    with pytest.raises(ValueError, match="必填参数缺失"):
         await dag.run()
 
     results = await dag.run(inputs={"query": "hello"})
@@ -190,8 +188,9 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
     assert results["only"].output == "建议值"
     assert ran["n"] == 1
 
-    # 显式空 = 未提供，不回退 default（create_run 校验原始 inputs 时拦截）
-    assert validate_inputs({}, dag.inputs) == ["必填参数缺失或为空: query"]
+    # 显式空 = 未提供，required=True 拒绝
+    with pytest.raises(ValueError, match="必填参数缺失"):
+        await dag.run(inputs={})
 
     results = await dag.run(inputs={"query": "显式值"})
     assert results["only"].output == "显式值"
@@ -212,12 +211,10 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
     dag = Pipeline(
         {'nodes': {'echo': {'type': 't_echo_count'}, '__start__': {'type': 'start', 'inputs': {'count': {'required': True}}}}})
 
-    for bad in (None, "", "   "):
-        assert validate_inputs({"count": bad}, dag.inputs) == ["必填参数缺失或为空: count"]
-
-    for good in (0, False):
-        results = await dag.run(inputs={"count": good})
-        assert results["echo"].output == good  # 0/False 是填了的合法值
+    # key 存在即算已提供（不检查值内容）
+    for val in (None, "", "   ", 0, False):
+        results = await dag.run(inputs={"count": val})
+        assert results["echo"].output == val
 
 async def test_undeclared_inputs_reject_all_inputs(registered: Any) -> None:
     """输入键必须是声明参数的子集：声明了 inputs → 实际输入 ⊆ 声明键；
@@ -229,15 +226,16 @@ async def test_undeclared_inputs_reject_all_inputs(registered: Any) -> None:
 
     registered("t_echo_extra", echo)
 
-    # 声明了 inputs 契约：extra 未声明 → 拒
+    # 声明了 inputs 契约：extra 静默忽略（只取声明的 key）
     declared = Pipeline(
         {'nodes': {'echo': {'type': 't_echo_extra'}, '__start__': {'type': 'start', 'inputs': {'q': {'required': True}}}}})
-    inputs = {"q": "ok", "extra": 1}
-    assert validate_inputs(inputs, declared.inputs) == ["未声明的参数键: extra"]
+    results = await declared.run(inputs={"q": "ok", "extra": 1})
+    assert results["echo"].output == "ok"  # extra 被忽略
 
-    # 未声明 inputs：白名单为空，q/extra 都是未声明的
+    # 未声明 inputs：无 start 节点，原样进 ctx
     free = Pipeline({"nodes": {"echo": {"type": "t_echo_extra"}}})
-    assert validate_inputs(inputs, free.inputs) == ["未声明的参数键: extra, q"]
+    results = await free.run(inputs={"extra": 1})
+    assert results["echo"].output == 1
 
     # 未声明 inputs = 自由上下文种子：run() 不设白名单，原样进 ctx
     results = await free.run(inputs={"extra": 1})
@@ -282,7 +280,9 @@ async def test_inputs_rich_form_runs(registered: Any) -> None:
         {'nodes': {'search': {'type': 't_search'}, '__start__': {'type': 'start', 'inputs': {'query': {'required': True, 'label': '查询词'}, 'topic': {'default': '默认主题'}}}}})
     assert dag.default_inputs == {"topic": "默认主题"}
     assert dag.required_inputs == ["query"]
-    assert validate_inputs({}, dag.inputs) == ["必填参数缺失或为空: query"]
+
+    with pytest.raises(ValueError, match="必填参数缺失"):
+        await dag.run()
 
     # run(inputs=...) 整体替换默认值；合并语义在 orchestrator（runtime 覆盖默认）
     results = await dag.run(inputs={**dag.default_inputs, "query": "洛伦佐"})

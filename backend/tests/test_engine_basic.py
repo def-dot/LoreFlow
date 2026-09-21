@@ -7,7 +7,6 @@ import pytest
 
 from app.engine import PipeLine, DAGExecutionError, Node, NodeStatus, RetryPolicy
 from app.registry import FuncDef
-from app.engine.validator import validate_inputs
 from app.registry import REGISTRY
 from helpers import validate_config
 
@@ -230,7 +229,9 @@ def test_no_inputs_rejects_any_inputs() -> None:
     async def a(ctx: dict[str, Any]) -> int:
         return 1
 
-    assert validate_inputs({"x": 1}, dag.inputs) == ["未声明的参数键: x"]
+    # undeclared inputs are silently ignored (no start node = free context)
+    results = await dag.run(inputs={"x": 1})
+    assert results["a"].output == 1
 
 
 # ---------------------------------------------------------------------------

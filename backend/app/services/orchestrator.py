@@ -20,7 +20,6 @@ from app.engine import (
     NodeResult,
     SuspendExecution,
 )
-from app.engine.validator import validate_inputs
 from app.models.run import RunRecord, RunStatus
 from app.services import runs
 from app.services.pipelines import get_pipeline
@@ -130,15 +129,16 @@ async def create_run(
     record.definition = text
 
     # 声明参数来自 __start__ 节点（唯一来源）
-    start = dag.nodes.get("__start__")
-    declared = (start.inputs or {}) if start is not None else {}
+    inputs = inputs or {}
 
-    errors = validate_inputs(inputs, declared)
-    if errors:
-        raise ValueError("\n".join(errors))
-
-    defaults = {k: v["default"] for k, v in declared.items() if "default" in v}
-    record.inputs = {**defaults, **inputs}
+    if dag.inputs:
+        if missing := set(dag.required_inputs) - set(inputs):
+            raise ValueError(f"必填参数缺失: {missing}")
+        if extra := set(inputs) - set(dag.inputs):
+            raise ValueError(f"多余的参数: {extra}")
+        record.inputs = {**dag.default_inputs, **inputs}
+    else:
+        record.inputs = dict(inputs)
 
     await runs.create(record)
     task = asyncio.create_task(run_pipeline(record, dag))

@@ -52,7 +52,7 @@ async def human(params: HumanReviewParams, _approver: Any = None, _node: str = "
         logger.info("[%s] approved by human reviewer", _node)
         return HumanReviewOutput(payload=payload, decision=HumanDecision(**decision))
 
-    from app.engine.node import HumanRejected
+    from app.engine.types import HumanRejected
 
     reason = f"人工审核拒绝：{decision.get("reason")}"
     logger.warning("[%s] REJECTED by human reviewer: %s", _node, reason)

@@ -18,9 +18,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.registry import REGISTRY
-from .node import ApproverFunc
+from .types import ApproverFunc
 from .types import NodeResult
-from .validator import validate_inputs, validate_nodes
+from .validator import PipeLineValidator
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,16 @@ class Node(BaseModel):
             return [v]
         return v if v is not None else []
 
+    @model_validator(mode="after")
+    def _coerce_start_inputs(self) -> Node:
+        """start 节点的 inputs 值从 raw dict 反序列化为 InputParamDef。"""
+        if self.type == "start" and self.inputs:
+            self.inputs = {
+                k: InputParamDef.model_validate(v) if isinstance(v, dict) else v
+                for k, v in self.inputs.items()
+            }
+        return self
+
     def resolve_input_schema(self) -> type[BaseModel] | None:
         """返回本节点的输入 schema（来自 REGISTRY）。"""
         func_def = REGISTRY.get(self.type)
@@ -159,10 +169,35 @@ class Pipeline(BaseModel):
     @model_validator(mode="after")
     def _validate_pipeline(self) -> Pipeline:
         """构造期校验"""
-        errors = validate_nodes(self.nodes)
+        errors = PipeLineValidator.validate(self.nodes)
         if errors:
             raise ValueError("\n".join(errors))
         return self
+
+    @property
+    def start_node(self) -> Node:
+        """start 节点"""
+        return next((n for n in self.nodes if n.type == "start"), None)
+    
+    @property
+    def end_node(self) -> Node:
+        """end 节点"""
+        return next((n for n in self.nodes if n.type == "end"), None)
+
+    @property
+    def inputs(self) -> dict[str, InputParamDef]:
+        """start 节点的参数声明（``InputParamDef`` 字典）。"""
+        return dict(self.start_node.inputs) if self.start_node and self.start_node.inputs else {}
+
+    @property
+    def required_inputs(self) -> list[str]:
+        """必填参数键列表。"""
+        return [k for k, v in self.inputs.items() if v.required]
+
+    @property
+    def default_inputs(self) -> dict[str, Any]:
+        """有默认值的参数键 → 默认值。"""
+        return {k: v.default for k, v in self.inputs.items() if v.default is not None}
 
     async def run(
         self,
@@ -178,46 +213,35 @@ class Pipeline(BaseModel):
         Returns:
             ``(results, output)`` — 节点结果映射 + __end__ 输出（若有）。
         """
-        from .executor import DAGExecutor
+        from .executor import PipeLineExecutor
 
-        nodes = self.node_map
-        declared = self._declared_params
+        # ---- start 节点：按 InputParamDef 合并默认值 + 校验必填 ----
+        inputs = inputs or {}
+        if missing := set(self.required_inputs) - set(inputs):
+            raise ValueError(f"必填参数缺失: {missing}")
+        if extra := set(inputs) - set(self.inputs):
+            raise ValueError(f"多余的参数: {extra}")
+        inputs = {**self.default_inputs, **inputs}
 
-        # ---- input validation（未声明参数 = 自由上下文，不做白名单）----
-        if declared:
-            validation_errors = validate_inputs(inputs or {}, declared)
-            if validation_errors:
-                raise ValueError("输入校验失败: " + "; ".join(validation_errors))
-
-        # ---- materialise defaults ----
-        merged = {k: v["default"] for k, v in declared.items() if v.get("default") is not None}
-        if inputs:
-            merged.update(inputs)
         if approver is not None:
-            merged["_approver"] = approver
+            inputs["_approver"] = approver
 
-        # start 参数同时以 $start.key 路径可用
-        start_node = self._find_node_by_type("start")
-        if start_node is not None:
-            merged[start_node.name] = {k: v for k, v in merged.items() if not k.startswith("_")}
-
-        executor = DAGExecutor(
-            nodes=nodes, ctx=merged,
+        executor = PipeLineExecutor(
+            nodes=self.nodes, ctx=inputs,
             concurrency=concurrency, on_event=on_event,
         )
         results = await executor.execute(resume=resume)
 
         output = None
-        end_result = results.get("__end__")
-        if end_result is not None and end_result.output:
-            output = end_result.output
+        if self.end_node and results.get(self.end_node.name):
+            output = results[self.end_node.name].output
 
         return results, output
 
     # ---- Mermaid 可视化 ----
 
     def to_mermaid(self) -> str:
-        nodes = self.node_map
+        nodes = {n.name: n for n in self.nodes}
         lines = ["graph TD"]
         for name, node in nodes.items():
             nid = re.sub(r"[ \-]", "_", name)

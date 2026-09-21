@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from app.engine import PipeLine, RetryPolicy
-from app.engine.node import Node
+from app.engine.pipeline import Node
 from app.registry import FuncDef
 from app.models.run import RunRecord
 from app.services.orchestrator import run_pipeline

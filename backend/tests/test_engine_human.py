@@ -12,7 +12,7 @@ from app.engine import (
     RetryPolicy,
     SuspendExecution,
 )
-from app.engine.node import ApproverFunc
+from app.engine.types import ApproverFunc
 
 
 def fake_approver(decision: dict[str, Any]) -> ApproverFunc:

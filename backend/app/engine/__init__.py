@@ -19,13 +19,14 @@ Quick start::
 from app.registry.funcs.human import human
 
 from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
-from .node import HumanRejected, wired_ctx
-from .validator import validate_inputs
+from .validator import PipeLineValidator
 from .types import (
     DAGExecutionError,
+    HumanRejected,
     NodeResult,
     NodeStatus,
     SuspendExecution,
+    wired_ctx,
 )
 
 __all__ = [
@@ -39,6 +40,6 @@ __all__ = [
     "SuspendExecution",
     "human",
     "terminal_approver",
-    "validate_inputs",
+    "PipeLineValidator",
     "wired_ctx",
 ]

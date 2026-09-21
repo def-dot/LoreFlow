@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any, NamedTuple
 
-from .node import ConditionFunc
+from .types import ConditionFunc
 
 #: 表达式 = [not] $键 [操作符 值]。键以 ``$`` 开头（引用上下文，与 inputs
 #: 接线同拼法），不含空白/比较符字符（支持中文与 ``.`` 字段路径）；值至少

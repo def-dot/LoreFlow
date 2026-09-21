@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from app.registry import REGISTRY
 from .condition import eval_condition
-from .node import HumanRejected, wired_ctx
+from .types import HumanRejected, wired_ctx
 from .pipeline import Node, RetryPolicy
 from .types import (
     DAGExecutionError,
@@ -35,7 +35,7 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 
-class DAGExecutor:
+class PipeLineExecutor:
     """Executes a DAG concurrently, respecting node dependencies.
 
     字段 = 构造输入与配置（nodes/ctx/semaphore/on_event，回答"执行什么"）；
@@ -50,7 +50,7 @@ class DAGExecutor:
 
     def __init__(
         self,
-        nodes: dict[str, Node] | None = None,
+        nodes: list[Node],
         ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
@@ -58,7 +58,7 @@ class DAGExecutor:
         # 执行对象（nodes）与共享上下文（ctx）都从构造器进：
         # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
         # 控制流簿记（events/tasks）是 execute 的过程状态，留在方法内
-        self.nodes: dict[str, Node] = nodes if nodes is not None else {}
+        self.nodes: dict[str, Node] = {node.name: node for node in nodes}
         self.ctx: dict[str, Any] = ctx if ctx is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
@@ -417,9 +417,11 @@ class DAGExecutor:
     @staticmethod
     def _validate_output(node: Node, output: Any) -> dict[str, Any]:
         """若 node 声明了 output_schema，用 Pydantic 校验并转 dict。"""
-        func_def = node.func_def
-        if func_def is not None and func_def.output_schema is not None:
-            if isinstance(output, func_def.output_schema):
+        if output is None:
+            return output
+        schema = node.resolve_output_schema()
+        if schema is not None:
+            if isinstance(output, schema):
                 return output.model_dump()
-            return func_def.output_schema.model_validate(output).model_dump()
+            return schema.model_validate(output).model_dump()
         return output
