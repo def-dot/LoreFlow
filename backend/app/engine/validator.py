@@ -36,16 +36,9 @@ def validate_nodes(nodes: list["Node"]) -> list[str]:
 
     先逐节点校验，再图结构校验（节点名去重、依赖存在性、环检测）。
     """
-    # 提取 __start__ 参数键，供 condition / inputs $引用校验
-    param_keys: set[str] | None = None
-    for node in nodes:
-        if node.type == "start" and node.inputs:
-            param_keys = set(node.inputs)
-            break
-
     errors: list[str] = []
     for node in nodes:
-        errors.extend(_validate_node(node, nodes=nodes, param_keys=param_keys))
+        errors.extend(_validate_node(node, nodes=nodes))
     errors.extend(_validate_graph(nodes))
     return errors
 
@@ -56,9 +49,8 @@ def validate_nodes(nodes: list["Node"]) -> list[str]:
 def _validate_node_condition(
     node: "Node",
     nodes: dict[str, Node],
-    param_keys: set[str] | None = None,
 ) -> list[str]:
-    """校验节点 ``condition`` 属性：类型、表达式语法、引用来源（参数键 / 上游依赖）。"""
+    """校验节点 ``condition`` 属性：类型、表达式语法、引用来源。"""
     if node.condition is None or isinstance(node.condition, bool):
         return []
 
@@ -85,7 +77,7 @@ def _validate_node_condition(
         for _, key, _, _ in and_group:
             errors.extend(
                 f"节点 {node.name!r}: condition {msg}"
-                for msg in _check_ref(f"${key}", upstream, nodes, param_keys)
+                for msg in _check_ref(f"${key}", upstream, nodes)
             )
     return errors
 
@@ -93,7 +85,6 @@ def _validate_node_condition(
 def _validate_node(
     node: "Node",
     nodes: list["Node"],
-    param_keys: set[str] | None = None,
 ) -> list[str]:
     """单节点字段级校验。传入 nodes/edges 时额外校验 inputs 中的 $ 引用。"""
     from app.registry import REGISTRY
@@ -108,8 +99,8 @@ def _validate_node(
 
     nodes_dict = {item.name: item for item in nodes}
 
-    errors.extend(_validate_node_inputs(node, nodes_dict, param_keys))
-    errors.extend(_validate_node_condition(node, nodes_dict, param_keys))
+    errors.extend(_validate_node_inputs(node, nodes_dict))
+    errors.extend(_validate_node_condition(node, nodes_dict))
 
     # retry 校验
     retry = node.retry
@@ -129,8 +120,9 @@ def _validate_node(
 # ---------------------------------------------------------------------------
 
 def _get_upstream_nodes(node: "Node", nodes: dict[str, Node]) -> set[str]:
-    """返回 node 的所有上游节点（传递闭包）。"""
-    seen: set[str] = set()
+    """返回 node 的所有上游节点（传递闭包）。start 节点隐式作为所有非 start 节点的上游。"""
+    start_name = next((n for n, nd in nodes.items() if nd.type == "start"), None)
+    seen: set[str] = {start_name} if start_name and node.type != "start" else set()
     stack = list(node.depends_on or [])
     while stack:
         dep = stack.pop()
@@ -146,46 +138,39 @@ def _check_ref(
     ref: str,
     upstream: set[str],
     nodes: dict[str, Node],
-    param_keys: set[str] | None = None,
 ) -> list[str]:
-    """校验单个 $引用：参数键 / 上游节点存在性 + 字段存在性。
+    """校验单个 $引用：上游节点存在性 + 字段存在性。
 
     ``ref`` 形如 ``"$node.field"`` 或 ``"$node"``。
-    ``upstream`` 是当前节点的上游依赖节点名集合。
+    ``upstream`` 是当前节点的上游依赖节点名集合（start 隐式包含）。
     ``nodes`` 是全图节点映射，用于读取上游节点类型。
-    ``param_keys`` 是 ``__start__`` 节点声明的参数键集合。
     """
     from app.registry import REGISTRY
 
     root, _, field = ref.partition(".")
-    if root not in upstream and root not in (param_keys or set()):
-        return [f"引用的 {root!r} 不是参数键或上游依赖节点"]
+    if root not in upstream:
+        return [f"引用的 {root!r} 不是上游依赖节点"]
     if not field:
-        return []
-    # 参数键没有 output_schema，跳过字段校验
-    if root in (param_keys or set()):
-        return []
+        return [f"引用 {root!r} 缺少字段名"]
     up_node = nodes.get(root)
-    if up_node is None:
-        return []
-    func_def = REGISTRY.get(up_node.type)
-    if func_def and func_def.output_schema:
-        top_field = field.split(".")[0]
-        if top_field not in func_def.output_schema.model_fields:
-            return [f"引用的 {root!r} 输出中没有字段 {top_field!r}"]
+    # start 节点：用 inputs 声明的参数键做字段校验
+    if up_node.type == "start":
+        if up_node.inputs and field.split(".")[0] not in up_node.inputs:
+            return [f"引用的 {root!r} 输出中没有字段 {field.split('.')[0]!r}"]
+    else:
+        func_def = REGISTRY.get(up_node.type)
+        if func_def and func_def.output_schema:
+            top_field = field.split(".")[0]
+            if top_field not in func_def.output_schema.model_fields:
+                return [f"引用的 {root!r} 输出中没有字段 {top_field!r}"]
     return []
 
 
 def _validate_node_inputs(
     node: "Node",
     nodes: dict[str, Node] | None = None,
-    param_keys: set[str] | None = None,
 ) -> list[str]:
-    """节点 inputs 校验（start 参数声明 + 其他类型 input_schema + $引用）。
-
-    ``edges`` / ``param_keys`` 由调用方预计算传入时，$引用校验直接复用，
-    避免每个节点重复查找上游闭包和 start 节点。
-    """
+    """节点 inputs 校验（start 参数声明 + 其他类型 input_schema + $引用）。"""
     from app.registry import REGISTRY
 
     errors: list[str] = []
@@ -224,7 +209,7 @@ def _validate_node_inputs(
         if isinstance(val, str) and val.startswith("$"):
             errors.extend(
                 f"节点 {node.name!r}: inputs {msg}"
-                for msg in _check_ref(val, upstream, nodes, param_keys)
+                for msg in _check_ref(val, upstream, nodes)
             )
 
     return errors
@@ -264,24 +249,16 @@ def validate_pipeline(
             continue
         edges[node_name] = raw_deps
 
-    # 提取 __start__ 参数键
-    param_keys: set[str] | None = None
-    for node_name, node in nodes.items():
-        inputs = _get_node_attr(node, "inputs")
-        if _get_node_attr(node, "type") == "start" and inputs:
-            param_keys = set(inputs)
-            break
-
     # inputs 校验（schema + $引用来源）
     for node_name, node in nodes.items():
         errors.extend(_validate_node_inputs(
             node,
             nodes=nodes,
-            param_keys=param_keys,
         ))
 
     # 条件表达式语法 + 引用来源校验（已由 _validate_node_condition 统一处理，
     # 此处仅对 dict 形式节点补跑，因为 validate_nodes 只处理 Node 对象）
+    start_name = next((n for n, nd in nodes.items() if _get_node_attr(nd, "type") == "start"), None)
     for node_name, node in nodes.items():
         if isinstance(node, dict):
             condition = _get_node_attr(node, "condition")
@@ -292,6 +269,8 @@ def validate_pipeline(
                     errors.append(f"节点 {node_name!r}: {exc}")
                 else:
                     upstream = set(edges.get(node_name, []))
+                    if start_name and _get_node_attr(node, "type") != "start":
+                        upstream.add(start_name)
                     seen: list[str] = []
                     for and_group in groups:
                         for _, key, _, _ in and_group:
@@ -301,7 +280,7 @@ def validate_pipeline(
                             seen.append(root)
                             errors.extend(
                                 f"节点 {node_name!r}: condition {msg}"
-                                for msg in _check_ref(f"${root}", upstream, nodes, param_keys)
+                                for msg in _check_ref(f"${root}", upstream, nodes)
                             )
 
     # retry 校验

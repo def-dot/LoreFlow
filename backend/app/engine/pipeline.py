@@ -201,6 +201,11 @@ class Pipeline(BaseModel):
         if approver is not None:
             merged["_approver"] = approver
 
+        # start 参数同时以 $start.key 路径可用
+        start_node = self._find_node_by_type("start")
+        if start_node is not None:
+            merged[start_node.name] = {k: v for k, v in merged.items() if not k.startswith("_")}
+
         executor = DAGExecutor(
             nodes=nodes, ctx=merged,
             concurrency=concurrency, on_event=on_event,
