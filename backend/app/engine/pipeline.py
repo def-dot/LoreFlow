@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.registry import REGISTRY
 from .node import ApproverFunc
 from .types import NodeResult
-from .validator import validate_nodes
+from .validator import validate_inputs, validate_nodes
 
 logger = logging.getLogger(__name__)
 
