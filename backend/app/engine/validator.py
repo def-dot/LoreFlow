@@ -98,7 +98,9 @@ def _validate_node(
         errors.append(f"节点 {name!r}: 未知的 type {node.type!r}")
         return errors
 
-    errors.extend(_validate_node_inputs(node, nodes=nodes))
+    nodes_dict = {item.name: item for item in nodes}
+
+    errors.extend(_validate_node_inputs(node, nodes_dict))
     errors.extend(_validate_node_condition(name, node.condition))
 
     # retry 校验
@@ -118,9 +120,8 @@ def _validate_node(
 # $引用校验公共方法
 # ---------------------------------------------------------------------------
 
-def _get_upstream_nodes(node: "Node", nodes: list["Node"]) -> set[str]:
+def _get_upstream_nodes(node: "Node", nodes: dict[str, Node]) -> set[str]:
     """返回 node 的所有上游节点（传递闭包）。"""
-    nodes_by_name = {n.name: n for n in nodes}
     seen: set[str] = set()
     stack = list(node.depends_on or [])
     while stack:
@@ -128,12 +129,12 @@ def _get_upstream_nodes(node: "Node", nodes: list["Node"]) -> set[str]:
         if dep not in seen:
             seen.add(dep)
             stack.extend(
-                getattr(nodes_by_name.get(dep), "depends_on", None) or []
+                getattr(nodes.get(dep), "depends_on", None) or []
             )
     return seen
 
 
-def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]:
+def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Node]) -> list[str]:
     """校验单个 $引用：上游节点存在性 + 字段存在性。
 
     ``ref`` 形如 ``"$node.field"`` 或 ``"$node"``。
@@ -148,10 +149,7 @@ def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]
     if not field:
         return []
     up_node = nodes.get(root)
-    up_type = _get_node_attr(up_node, "type")
-    if not up_type:
-        return []
-    func_def = REGISTRY.get(up_type)
+    func_def = REGISTRY.get(up_node.type)
     if func_def and func_def.output_schema:
         top_field = field.split(".")[0]
         if top_field not in func_def.output_schema.model_fields:
@@ -161,9 +159,7 @@ def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Any]) -> list[str]
 
 def _validate_node_inputs(
     node: "Node",
-    nodes: dict[str, Any] | None = None,
-    edges: dict[str, list[str]] | None = None,
-    param_keys: set[str] | None = None,
+    nodes: dict[str, Node] | None = None,
 ) -> list[str]:
     """节点 inputs 校验（start 参数声明 + 其他类型 input_schema + $引用）。
 
@@ -203,19 +199,15 @@ def _validate_node_inputs(
             errors.append(f"节点 {node.name!r}: inputs 包含未知参数 {unexpected!r}")
 
     # ---- $引用校验 ----
-    upstream = _get_upstream_nodes(node, list(nodes.values()))
+    upstream = _get_upstream_nodes(node, nodes)
     for key, val in inputs.items():
         if key.startswith("_"):
             continue
         if isinstance(val, str) and val.startswith("$"):
-            root = val[1:].partition(".")[0]
-            if root not in upstream:
-                errors.append(f"节点 {node.name!r}: inputs 引用 ${root}，不是上游依赖节点")
-            else:
-                errors.extend(
-                    f"节点 {node.name!r}: inputs {msg}"
-                    for msg in _check_ref(val, upstream, nodes)
-                )
+            errors.extend(
+                f"节点 {node.name!r}: inputs {msg}"
+                for msg in _check_ref(val, upstream, nodes)
+            )
 
     return errors
 
@@ -239,14 +231,6 @@ def validate_pipeline(
         errors.append("DAG 没有节点")
         return errors
 
-    # start inputs（后续 condition / $ 引用校验需要）
-    start = next(
-        (n for n in nodes.values() if _get_node_attr(n, "type") == "start"),
-        None,
-    )
-    start_inputs = _get_node_attr(start, "inputs") if start else None
-    param_keys = set(start_inputs) if start_inputs else set()
-
     # depends_on 类型校验 + 构建 edges dict
     edges: dict[str, list[str]] = {}
     for node_name, node in nodes.items():
@@ -268,8 +252,6 @@ def validate_pipeline(
         errors.extend(_validate_node_inputs(
             node,
             nodes=nodes,
-            edges=edges,
-            param_keys=param_keys,
         ))
 
     # 条件表达式语法 + 引用来源校验
