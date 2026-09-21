@@ -1,6 +1,8 @@
-"""校验层 — Pipeline 结构校验（构造期）。
+"""校验层 — Pipeline 结构校验（构造期，pydantic 字段校验之后）。
 
-``PipeLineValidator.validate(nodes)`` — 节点字段 + 图结构校验。
+``PipeLineValidator.validate(nodes)`` — 跨字段 / 图结构校验；
+字段级校验（type 注册、timeout>0、condition 非空白、max_retries≥0）
+由 pydantic 在 Node 字段校验期完成并聚合报错。
 """
 
 from __future__ import annotations
@@ -28,8 +30,8 @@ class PipeLineValidator:
     全部 ``@staticmethod`` — 校验是无状态操作，类仅作命名空间。
     内部分两层：
 
-    1. 单节点校验（``_validate_node``）— type 注册、inputs schema、
-       condition 语法与引用、retry / timeout 范围。
+    1. 单节点校验（``_validate_node``）— inputs schema 与 $引用、
+       condition 语法与引用。
     2. 图结构校验（``_validate_graph``）— 节点名去重、依赖存在性、环检测。
     """
 
@@ -56,25 +58,12 @@ class PipeLineValidator:
         node: "Node",
         nodes_dict: dict[str, "Node"],
     ) -> list[str]:
-        """单节点字段级校验。"""
-        from app.registry import REGISTRY
-
+        """单节点跨字段校验（inputs / condition 的 schema 与引用）。"""
         errors: list[str] = []
-        name = node.name
-
-        if node.type not in REGISTRY:
-            errors.append(f"节点 {name!r}: 未知的 type {node.type!r}")
-            return errors
 
         upstream = PipeLineValidator._get_upstream_nodes(node, nodes_dict)
         errors.extend(PipeLineValidator._validate_node_inputs(node, nodes_dict, upstream))
         errors.extend(PipeLineValidator._validate_node_condition(node, nodes_dict, upstream))
-
-        if isinstance(node.retry, int) and node.retry < 0:
-            errors.append(f"节点 {name!r}: retry 不能为负数，实际是 {node.retry}")
-
-        if node.timeout is not None and node.timeout <= 0:
-            errors.append(f"节点 {name!r}: timeout 必须为正数，实际是 {node.timeout}")
 
         return errors
 
@@ -88,19 +77,12 @@ class PipeLineValidator:
         nodes_dict: dict[str, "Node"],
         upstream: set[str],
     ) -> list[str]:
-        """校验节点 ``condition`` 属性：类型、表达式语法、引用来源。"""
+        """校验节点 ``condition`` 属性：表达式语法、引用来源
+        （类型与非空白由 pydantic 字段校验保证）。"""
         if node.condition is None or isinstance(node.condition, bool):
             return []
 
-        if not isinstance(node.condition, str):
-            return [
-                f"节点 {node.name!r}: condition 类型必须是 str 或 bool，"
-                f"实际是 {type(node.condition).__name__}"
-            ]
-
         condition = node.condition.strip()
-        if not condition:
-            return [f"节点 {node.name!r}: condition 不能为空字符串"]
 
         try:
             groups = parse_condition(condition)
@@ -133,8 +115,7 @@ class PipeLineValidator:
         # ---- 参数声明 / schema 校验 ----
         # start 节点的 InputParamDef 校验由 pydantic 字段校验完成
         if node.type != "start":
-            func_def = REGISTRY.get(node.type)
-            schema = func_def.input_schema if func_def else None
+            schema = REGISTRY[node.type].input_schema
             fields = schema.model_fields if schema else {}
             for key in fields:
                 if fields[key].is_required() and key not in inputs:

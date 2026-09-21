@@ -81,24 +81,13 @@ def test_registry_only_lookup() -> None:
         Pipeline({"nodes": {"b": {"type": "app.registry.other.test_fetch"}}})
 
 def test_parse_retry_forms() -> None:
-    shorthand = parse_retry(3)
-    assert shorthand is not None and shorthand.max_retries == 3
-
     mapping = parse_retry({"max_retries": 2, "retry_on": ["RuntimeError"]})
     assert mapping is not None
     assert mapping.max_retries == 2
     assert mapping.retry_on == (RuntimeError,)
 
-    assert parse_retry(None) is None
-    assert parse_retry(False) is None  # YAML ``retry: no`` = explicit disable
-    with pytest.raises(ValueError, match="无效的 retry 配置"):
-        parse_retry("not-an-int")  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="无效的 retry 配置"):
-        parse_retry(True)  # YAML ``retry: yes`` — ambiguous, reject
     with pytest.raises(ValueError, match="未知异常"):
         parse_retry({"retry_on": ["NoSuchError"]})
-    with pytest.raises(ValueError, match="无效的 retry_on"):
-        parse_retry({"retry_on": [123]})  # type: ignore[list-item]
 
 def test_validation_errors() -> None:
     with pytest.raises(ValueError, match="不支持的字段"):

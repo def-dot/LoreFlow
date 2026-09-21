@@ -54,7 +54,7 @@ class InputParamDef(BaseModel):
 class RetryPolicy(BaseModel):
     """可配置的重试策略（指数退避 + 抖动）。"""
 
-    max_retries: int = 0
+    max_retries: int = Field(default=0, ge=0)
     backoff_base: float = 1.0
     backoff_factor: float = 2.0
     backoff_max: float = 60.0
@@ -92,7 +92,7 @@ class Node(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     condition: str | bool | None = None
     retry: int | RetryPolicy | None = None
-    timeout: float | None = None
+    timeout: float | None = Field(default=None, gt=0)
 
     @field_validator("depends_on", mode="before")
     @classmethod
@@ -105,10 +105,26 @@ class Node(BaseModel):
     @field_validator("retry", mode="before")
     @classmethod
     def _coerce_retry(cls, v: Any) -> Any:
-        """retry int/dict → RetryPolicy（委托 resolve.parse_retry）。"""
-        if isinstance(v, (int, dict)):
+        """retry dict → RetryPolicy（int/RetryPolicy/None 透传）。"""
+        if isinstance(v, dict):
             from app.engine.resolve import parse_retry
             return parse_retry(v)
+        return v
+
+    @field_validator("type")
+    @classmethod
+    def _validate_type(cls, v: str) -> str:
+        """type 必须已在 REGISTRY 注册。"""
+        if v not in REGISTRY:
+            raise ValueError(f"未知的 type {v!r}")
+        return v
+
+    @field_validator("condition")
+    @classmethod
+    def _validate_condition(cls, v: str | bool | None) -> str | bool | None:
+        """condition 字符串不能为空白（类型约束由注解 ``str | bool | None`` 保证）。"""
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("condition 不能为空字符串")
         return v
 
     @model_validator(mode="after")

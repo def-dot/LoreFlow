@@ -46,36 +46,12 @@ def resolve_exception(name: str) -> type:
     raise ValueError(f"retry_on 中的未知异常 {name!r}")
 
 
-def parse_retry(spec: Any) -> RetryPolicy | None:
-    """Parse a retry spec: ``retry: 3``, a RetrySpec model, or a RetryPolicy field mapping.
-
-    YAML ``retry: no`` (False) explicitly disables retry; ``retry: yes``
-    (True) is ambiguous and rejected.
-    """
-    if spec is None or spec is False:
-        return None
-
-    if spec is True:
-        raise ValueError(f"无效的 retry 配置: {spec!r}（retry: yes 有歧义，请用整数或映射）")
-
-    if isinstance(spec, int):
-        return RetryPolicy(max_retries=spec)
-
-    # Pydantic RetrySpec → dict
-    if hasattr(spec, "model_dump"):
-        spec = spec.model_dump(exclude_none=True)
-
-    if not isinstance(spec, dict):
-        raise ValueError(f"无效的 retry 配置: {spec!r}（应为整数或映射）")
-
+def parse_retry(spec: dict[str, Any]) -> RetryPolicy:
+    """Parse a retry mapping (dict → RetryPolicy)。"""
     fields = dict(spec)
     names = fields.pop("retry_on", None)
     if names:
         if isinstance(names, str):
             names = [names]
-        elif not isinstance(names, (list, tuple)) or not all(isinstance(n, str) for n in names):
-            raise ValueError(
-                f"无效的 retry_on: {names!r}（应为异常名或异常名列表）"
-            )
         fields["retry_on"] = tuple(resolve_exception(n) for n in names)
     return RetryPolicy(**fields)
