@@ -52,15 +52,10 @@ def _validate_node_condition(name: str, condition: Any) -> list[str]:
 
     引用来源校验（上游依赖 / 参数键）由 ``validate_pipeline`` 负责。
     """
+    if condition is None or isinstance(condition, bool):
+        return []
+
     errors: list[str] = []
-
-    if condition is None:
-        return errors
-
-    # 类型校验：合法类型为 bool 或 str
-    if isinstance(condition, bool):
-        return errors
-
     if not isinstance(condition, str):
         errors.append(
             f"节点 {name!r}: condition 类型必须是 str 或 bool，"
@@ -147,7 +142,7 @@ def _check_ref(ref: str, upstream: set[str], nodes: dict[str, Node]) -> list[str
     if root not in upstream:
         return [f"引用的 {root!r} 不是上游依赖节点"]
     if not field:
-        return []
+        return [f"引用 {root!r} 缺少字段名"]
     up_node = nodes.get(root)
     func_def = REGISTRY.get(up_node.type)
     if func_def and func_def.output_schema:
