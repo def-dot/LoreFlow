@@ -81,18 +81,12 @@ def _validate_node_condition(
         return errors
 
     upstream = _get_upstream_nodes(node, nodes)
-    seen: list[str] = []
     for and_group in groups:
         for _, key, _, _ in and_group:
-            root = key.split(".")[0]
-            if root in seen or root == "iteration":
-                continue
-            seen.append(root)
             errors.extend(
                 f"节点 {node.name!r}: condition {msg}"
-                for msg in _check_ref(f"${root}", upstream, nodes, param_keys)
+                for msg in _check_ref(f"${key}", upstream, nodes, param_keys)
             )
-
     return errors
 
 
@@ -163,7 +157,7 @@ def _check_ref(
     """
     from app.registry import REGISTRY
 
-    root, _, field = ref[1:].partition(".")
+    root, _, field = ref.partition(".")
     if root not in upstream and root not in (param_keys or set()):
         return [f"引用的 {root!r} 不是参数键或上游依赖节点"]
     if not field:
