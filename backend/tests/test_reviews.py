@@ -121,6 +121,6 @@ async def test_approver_suspends_without_decision() -> None:
     record = await _persist_run()
 
     with pytest.raises(SuspendExecution) as excinfo:
-        await _make_approver(record)("review", {"payload": "x"})
+        await _make_approver(record)("review", {"payload": "x"}, {"payload": "Payload"})
 
-    assert excinfo.value.results == {"payload": {"payload": "x"}}
+    assert excinfo.value.results == {"payload": {"payload": "x"}, "labels": {"payload": "Payload"}}

@@ -48,14 +48,14 @@ async def run_pipeline(record: RunRecord, dag: Pipeline) -> None:
         except Exception as exc:
             logger.error("Failed to save run snapshot: %s", exc)
 
-    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         """人工审核时挂起；审核后恢复。"""
         entry = record.nodes.setdefault(node_name, {})
         output = entry.get("output") or {}
         if output.get("decision"):
             return output["decision"]
 
-        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批", {"payload": payload})
+        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批", {"payload": payload, "labels": labels or {}})
 
     outcome = RunStatus.COMPLETED
     error: str | None = None

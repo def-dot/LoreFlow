@@ -18,16 +18,21 @@ nodes:
   label: 内容审核
   description: 请审核文章内容是否可以发布
   inputs:
-    标题: $__start__.title
-    正文: $__start__.content
+    payload:
+      - key: title
+        label: 标题
+        value: $__start__.title
+      - key: content
+        label: 正文
+        value: $__start__.content
 - name: publish
-  type: cfg_publish
+  type: publish
   label: 内容发布
   depends_on:
   - review
   inputs:
-    title: $review.result.标题
-    content: $review.result.正文
+    title: $review.result.title
+    content: $review.result.content
 - name: notify
   type: send_email
   label: 邮件通知
@@ -35,6 +40,6 @@ nodes:
   - review
   - publish
   inputs:
-    subject: $review.result.标题
-    body: $review.result.正文
+    subject: $review.result.title
+    body: $review.result.content
     to: defdot36@gmail.com

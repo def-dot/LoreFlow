@@ -43,7 +43,7 @@ async def test_load_dag_from_dict_runs(registered: Any) -> None:
     assert results["clean"].output == "declarative config rocks"
 
 async def test_load_dag_with_human_node() -> None:
-    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         return {"approve": True}
 
     config = {
@@ -497,7 +497,7 @@ async def test_human_review_view_payload(registered: Any) -> None:
 
 def test_review_unknown_key_not_checked() -> None:
     """review 键拼错不拦截：载入照常，审核卡片上该字段显示「未提供」。"""
-    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         return {"approve": True}
 
     dag = Pipeline(
@@ -506,7 +506,7 @@ def test_review_unknown_key_not_checked() -> None:
 
 def test_review_param_key_allowed() -> None:
     """review 键可以是参数键（含无默认值的可选参数）——校验用参数声明全集。"""
-    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         return {"approve": True}
 
     dag = Pipeline(

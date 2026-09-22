@@ -18,7 +18,7 @@ from app.engine.types import ApproverFunc
 def fake_approver(decision: dict[str, Any]) -> ApproverFunc:
     """构造一个直接返回给定决策的 approver。"""
 
-    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         return decision
 
     return approver
@@ -78,10 +78,10 @@ async def test_edits_propagate_to_next_review() -> None:
     """
     seen: dict[str, Any] = {}
 
-    async def first_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def first_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         return {"approve": True, "edits": {"title": "修订后的标题"}}
 
-    async def final_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def final_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         seen["payload"] = payload
         return {"approve": True}
 
@@ -246,7 +246,7 @@ async def test_human_node_condition_false_skips_review() -> None:
     下游按级联语义标 UPSTREAM_SKIPPED（不带着缺失的审核输出执行）。"""
     called = False
 
-    async def spy_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def spy_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         nonlocal called
         called = True
         return {"approve": True}
@@ -343,7 +343,7 @@ async def test_review_keys_may_reference_params_and_nodes() -> None:
 
     seen: dict[str, Any] = {}
 
-    async def spy_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def spy_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         seen["payload"] = payload
         return {"approve": True}
 
@@ -362,7 +362,7 @@ async def test_review_keys_may_reference_params_and_nodes() -> None:
 async def test_approver_gets_payload_without_self() -> None:
     seen: dict[str, Any] = {}
 
-    async def spy_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def spy_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         seen["node"] = node_name
         seen["payload"] = payload
         return {"approve": True}
@@ -390,7 +390,7 @@ async def test_suspend_propagates_without_terminal_event() -> None:
     async def on_event(result: NodeResult) -> None:
         collected.append(result)
 
-    async def suspend_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def suspend_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         raise SuspendExecution("waiting", {"payload": payload})
 
     called = False

@@ -336,5 +336,5 @@ class Pipeline(BaseModel):
         return "\n".join(lines)
 
 
-def terminal_approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+def terminal_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
     return {"approve": True}

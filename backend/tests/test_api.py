@@ -143,7 +143,7 @@ async def test_node_types_catalog(client: AsyncClient) -> None:
     names = {t["name"] for t in types}
     expected = {
         "test_fetch",
-        "cfg_publish",
+        "publish",
         "cfg_report",
         "cfg_needs_report",
         "svc_external_api",

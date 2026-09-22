@@ -102,9 +102,10 @@ NodeFunc = Callable[..., Coroutine[Any, Any, Any]]
 #: Signature for a condition predicate: receives context, returns whether to run.
 ConditionFunc = Callable[[dict[str, Any]], bool]
 
-#: Signature for a human-review approver: receives ``(node_name, payload)``
+#: Signature for a human-review approver: receives ``(node_name, payload, labels)``
 #: and returns a decision dict: ``{"approve": bool, "reason": Optional[str]}``.
-ApproverFunc = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+#: ``labels`` maps payload keys to display names (e.g. ``{"title": "标题"}``).
+ApproverFunc = Callable[[str, dict[str, Any], dict[str, str]], Awaitable[dict[str, Any]]]
 
 
 def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[str, Any]:
