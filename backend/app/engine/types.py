@@ -125,6 +125,16 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
     return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
 
 
+class NodeContext:
+    """引擎注入的节点运行上下文（与用户 inputs 分离）。"""
+
+    __slots__ = ("node_name", "approver")
+
+    def __init__(self, node_name: str, approver: ApproverFunc | None = None):
+        self.node_name = node_name
+        self.approver = approver
+
+
 class HumanRejected(Exception):
     """Raised by a human review node when the reviewer rejects the payload.
 

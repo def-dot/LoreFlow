@@ -18,13 +18,8 @@ nodes:
   label: 编辑初审
   description: 初审把关：标题达意、正文完整可读再通过。
   inputs:
-    _review:
-      title:
-        label: 标题
-        value: $__start__.title
-      content:
-        label: 正文
-        value: $__start__.content
+    标题: $__start__.title
+    正文: $__start__.content
 - name: final_review
   type: human
   label: 主编终审
@@ -32,18 +27,13 @@ nodes:
   - first_review
   description: 终审把关：确认可对外发布再通过。
   inputs:
-    _review:
-      title:
-        label: 标题
-        value: $__start__.title
-      content:
-        label: 正文
-        value: $__start__.content
+    标题: $first_review.result.标题
+    正文: $first_review.result.正文
 - name: publish
   type: cfg_publish
   label: 发布
   depends_on:
   - final_review
   inputs:
-    title: $final_review.payload.review.title.value
-    content: $final_review.payload.review.content.value
+    title: $final_review.result.标题
+    content: $final_review.result.正文

@@ -16,13 +16,12 @@ Quick start::
     results, _ = await pipeline.run()
 """
 
-from app.registry.funcs.human import human
-
 from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
 from .validator import validate_dag, validate_ref
 from .types import (
     PipeLineExecutionError,
     HumanRejected,
+    NodeContext,
     NodeResult,
     NodeStatus,
     SuspendExecution,
@@ -33,12 +32,12 @@ __all__ = [
     "PipeLineExecutionError",
     "HumanRejected",
     "Node",
+    "NodeContext",
     "NodeResult",
     "NodeStatus",
     "Pipeline",
     "RetryPolicy",
     "SuspendExecution",
-    "human",
     "terminal_approver",
     "validate_dag",
     "validate_ref",

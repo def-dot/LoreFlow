@@ -22,9 +22,10 @@ from pydantic import BaseModel
 
 from app.registry import REGISTRY
 from .condition import eval_condition
-from .types import HumanRejected, wired_ctx
+from .types import HumanRejected, NodeContext, wired_ctx
 from .pipeline import Node, RetryPolicy
 from .types import (
+    ApproverFunc,
     PipeLineExecutionError,
     NodeEventFunc,
     NodeResult,
@@ -54,6 +55,7 @@ class PipeLineExecutor:
         ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
+        approver: ApproverFunc | None = None,
     ):
         # 执行对象（nodes）与共享上下文（ctx）都从构造器进：
         # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
@@ -62,6 +64,7 @@ class PipeLineExecutor:
         self.ctx: dict[str, Any] = ctx if ctx is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
+        self.approver = approver
 
     async def _emit(self, result: NodeResult) -> None:
         """Push a node state change to the ``on_event`` callback (if set)."""
@@ -334,7 +337,6 @@ class PipeLineExecutor:
             target = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
         else:
             target = wired_ctx(self.ctx, node.inputs or {})
-        target["_node"] = node.name
 
         # 对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）
         def resolve_deep(obj: Any) -> Any:
@@ -353,38 +355,27 @@ class PipeLineExecutor:
 
         for k, v in list(target.items()):
             if isinstance(v, dict):
-                target[f"_raw_{k}"] = v
                 target[k] = resolve_deep(v)
 
         func = REGISTRY[node.type].func
         sig = inspect.signature(func)
 
-        # 构造 kwargs：BaseModel 参数自动构造，**kwargs 收集剩余
+        # 构造 kwargs
         kwargs: dict[str, Any] = {}
         remaining = dict(target)
 
         for pname, param in sig.parameters.items():
+            ann = param.annotation
             if param.kind == inspect.Parameter.VAR_KEYWORD:
-                # **kwargs 收集所有剩余（过滤 _ 前缀，但保留 _approver）
-                kwargs[pname] = {k: v for k, v in remaining.items() if not k.startswith("_")}
-                if "_approver" in remaining:
-                    kwargs[pname]["_approver"] = remaining["_approver"]
+                kwargs[pname] = remaining
                 remaining.clear()
-            elif pname.startswith("_"):
-                val = target.get(pname)
-                ann = param.annotation
-                if isinstance(val, dict) and isinstance(ann, type) and issubclass(ann, BaseModel):
-                    kwargs[pname] = ann(**val)
-                else:
-                    kwargs[pname] = val
-            else:
-                ann = param.annotation
-                if isinstance(ann, type) and issubclass(ann, BaseModel):
-                    # BaseModel 参数：从 remaining 取字段构造
-                    fields = set(ann.model_fields)
-                    kwargs[pname] = ann(**{k: remaining.pop(k) for k in fields if k in remaining})
-                elif pname in target:
-                    kwargs[pname] = target[pname]
+            elif isinstance(ann, type) and issubclass(ann, NodeContext):
+                kwargs[pname] = NodeContext(node_name=node.name, approver=self.approver)
+            elif isinstance(ann, type) and issubclass(ann, BaseModel):
+                fields = set(ann.model_fields)
+                kwargs[pname] = ann(**{k: remaining.pop(k) for k in fields if k in remaining})
+            elif pname in target:
+                kwargs[pname] = target[pname]
 
         coro = func(**kwargs)
 

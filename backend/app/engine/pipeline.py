@@ -297,12 +297,10 @@ class Pipeline(BaseModel):
             raise ValueError(f"多余的参数: {extra}")
         inputs = {**self.default_inputs, **inputs}
 
-        if approver is not None:
-            inputs["_approver"] = approver
-
         executor = PipeLineExecutor(
             nodes=self.nodes, ctx=inputs,
             concurrency=concurrency, on_event=on_event,
+            approver=approver,
         )
         results = await executor.execute(resume=resume)
 
