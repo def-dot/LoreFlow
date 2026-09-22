@@ -124,7 +124,7 @@ async def create_run(
     if dag.params:
         if missing := set(dag.required_inputs) - set(inputs):
             raise ValueError(f"必填参数缺失: {missing}")
-        if extra := set(inputs) - set(dag.inputs):
+        if extra := set(inputs) - set(dag.params or {}):
             raise ValueError(f"多余的参数: {extra}")
         record.inputs = {**dag.default_inputs, **inputs}
     else:

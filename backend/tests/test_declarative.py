@@ -242,7 +242,7 @@ def test_inputs_rich_form() -> None:
         "body": {"required": True, "type": "paragraph"},  # 多行文本（前端 textarea）
     }
     dag = Pipeline({"nodes": {"only": {"type": "test_fetch"}, "__start__": {"type": "start", "inputs": params}}})
-    assert dag.inputs == params  # 声明原样保留
+    assert dag.params == params  # 声明原样保留
     assert dag.default_inputs == {"topic": "默认主题", "limit": 5}
     assert dag.required_inputs == ["query", "body"]
 

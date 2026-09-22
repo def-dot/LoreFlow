@@ -3,7 +3,6 @@
 - ``nodes`` 是 ``list[Node]``（pydantic 校验，未知字段拒绝）
 - ``params`` 是 Pipeline 级输入参数声明（InputParamDef），与节点 inputs（数据接线）分离
 - 所有节点的 inputs 统一保持 dict（数据接线）；
-  ``Pipeline.inputs`` 属性按需从 ``params`` 解析为 InputParamDef
 - ``run()`` / ``validate()`` / ``to_mermaid()`` 直接查 REGISTRY 取函数 / output_schema
 - YAML 加载由调用方（services/pipelines.py）负责，Pipeline 只认 dict
 """
@@ -199,7 +198,6 @@ class Pipeline(BaseModel):
         results, _ = await p.run(inputs={"q": "hello"})
 
     ``params`` 是 Pipeline 级输入参数声明（InputParamDef）；
-    ``inputs`` 属性按需从 ``params`` 解析。
     YAML 加载由 ``services/pipelines.py`` 负责，本类只认 dict。
     """
 
@@ -220,34 +218,19 @@ class Pipeline(BaseModel):
         return self
 
     @property
-    def node_map(self) -> dict[str, Node]:
-        """节点名字 → Node 映射。"""
-        return {n.name: n for n in self.nodes}
-
-    @property
-    def start_node(self) -> Node:
-        """start 节点"""
-        return next((n for n in self.nodes if n.type == "start"), None)
-    
-    @property
     def end_node(self) -> Node:
         """end 节点"""
         return next((n for n in self.nodes if n.type == "end"), None)
 
     @property
-    def inputs(self) -> dict[str, InputParamDef]:
-        """Pipeline 级参数声明。"""
-        return self.params or {}
-
-    @property
     def required_inputs(self) -> list[str]:
         """必填参数键列表。"""
-        return [k for k, v in self.inputs.items() if v.required]
+        return [k for k, v in (self.params or {}).items() if v.required]
 
     @property
     def default_inputs(self) -> dict[str, Any]:
         """有默认值的参数键 → 默认值。"""
-        return {k: v.default for k, v in self.inputs.items() if v.default is not None}
+        return {k: v.default for k, v in (self.params or {}).items() if v.default is not None}
 
     async def run(
         self,
@@ -268,7 +251,7 @@ class Pipeline(BaseModel):
         inputs = inputs or {}
         if missing := set(self.required_inputs) - set(inputs):
             raise ValueError(f"必填参数缺失: {missing}")
-        if extra := set(inputs) - set(self.inputs):
+        if extra := set(inputs) - set(self.params or {}):
             raise ValueError(f"多余的参数: {extra}")
         merged = {**self.default_inputs, **inputs}
 
