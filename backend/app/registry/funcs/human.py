@@ -37,35 +37,31 @@ async def human(
     ctx: NodeContext,
     params: HumanParams,
 ) -> HumanOutput:
-    """审核协议：等待审批 → 通过输出决策 / 拒绝抛异常（级联跳过下游）。
-
-    输入：payload 为列表，每项含 key（英文标识）、label（中文显示名）、value（字段值）。
-    输出：HumanReviewOutput（approve + reason + result）
-
-    approver 返回格式：
-    - {"approve": True}                                — 通过
-    - {"approve": True, "edits": {"title": "修改后"}}   — 通过，带修订
-    - {"approve": False, "reason": "原因"}               — 拒绝
+    """审核协议：有已存储决策则处理，否则挂起等待审批。
     """
-    if ctx.approver is None:
-        raise ValueError("人工审核节点缺少 approver —— dag.run(approver=...) 未提供")
-
-    logger.info(f"\n  [REVIEW] node {ctx.node_name!r} is waiting for human approval")
+    from app.engine.types import HumanRejected, SuspendExecution
 
     # 展平 payload 列表为 dict
     payload_dict = {item.key: item.value for item in params.payload}
     payload_display = {item.key: item.label for item in params.payload}
 
-    decision = await ctx.approver(ctx.node_name, payload_dict, payload_display)
-    edits = decision.get("edits", {})
-    final = {**payload_dict, **edits}
+    # 恢复场景：有已存储的决策
+    if ctx.stored_decision:
+        decision = ctx.stored_decision
+        edits = decision.get("edits", {})
+        final = {**payload_dict, **edits}
 
-    if decision.get("approve"):
-        logger.info("[%s] approved by human reviewer", ctx.node_name)
-        return HumanOutput(approve=True, reason=decision.get("reason", ""), result=final)
+        if decision.get("approve"):
+            logger.info("[%s] approved by human reviewer", ctx.node_name)
+            return HumanOutput(approve=True, reason=decision.get("reason", ""), result=final)
 
-    from app.engine.types import HumanRejected
+        reason = f"人工审核拒绝：{decision.get('reason')}"
+        logger.warning("[%s] REJECTED by human reviewer: %s", ctx.node_name, reason)
+        raise HumanRejected(reason, output=HumanOutput(approve=False, reason=decision.get("reason", ""), result=final))
 
-    reason = f"人工审核拒绝：{decision.get('reason')}"
-    logger.warning("[%s] REJECTED by human reviewer: %s", ctx.node_name, reason)
-    raise HumanRejected(reason, output=HumanOutput(approve=False, reason=decision.get("reason", ""), result=final))
+    # 首次运行：挂起
+    logger.info("[REVIEW] node %r is waiting for human approval", ctx.node_name)
+    raise SuspendExecution(
+        f"节点 {ctx.node_name} 等待人工审批",
+        {"payload": payload_dict, "labels": payload_display},
+    )

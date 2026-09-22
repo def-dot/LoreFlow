@@ -129,11 +129,11 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
 class NodeContext:
     """引擎注入的节点运行上下文（与用户 inputs 分离）。"""
 
-    __slots__ = ("node_name", "approver")
+    __slots__ = ("node_name", "stored_decision")
 
-    def __init__(self, node_name: str, approver: ApproverFunc | None = None):
+    def __init__(self, node_name: str, stored_decision: dict[str, Any] | None = None):
         self.node_name = node_name
-        self.approver = approver
+        self.stored_decision = stored_decision
 
 
 class HumanRejected(Exception):

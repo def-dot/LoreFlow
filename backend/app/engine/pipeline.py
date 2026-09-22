@@ -278,7 +278,6 @@ class Pipeline(BaseModel):
         inputs: dict[str, Any] | None = None,
         *,
         on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
-        approver: ApproverFunc | None = None,
         concurrency: int | None = None,
         resume: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[dict[str, NodeResult], dict[str, Any] | None]:
@@ -300,7 +299,6 @@ class Pipeline(BaseModel):
         executor = PipeLineExecutor(
             nodes=self.nodes, ctx=inputs,
             concurrency=concurrency, on_event=on_event,
-            approver=approver,
         )
         results = await executor.execute(resume=resume)
 

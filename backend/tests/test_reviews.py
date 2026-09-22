@@ -114,13 +114,3 @@ async def test_concurrent_claim_exactly_one_consumer() -> None:
         reviews.claim_decision(1, "n"),
     )
     assert sum(r is not None for r in results) == 1
-
-
-async def test_approver_suspends_without_decision() -> None:
-    """无未消费决策：挂起信号携带审核视图（results → 快照 output）。"""
-    record = await _persist_run()
-
-    with pytest.raises(SuspendExecution) as excinfo:
-        await _make_approver(record)("review", {"payload": "x"}, {"payload": "Payload"})
-
-    assert excinfo.value.results == {"payload": {"payload": "x"}, "labels": {"payload": "Payload"}}

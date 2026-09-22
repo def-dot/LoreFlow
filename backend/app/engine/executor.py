@@ -25,7 +25,6 @@ from .condition import eval_condition
 from .types import HumanRejected, NodeContext, wired_ctx
 from .pipeline import Node, RetryPolicy
 from .types import (
-    ApproverFunc,
     PipeLineExecutionError,
     NodeEventFunc,
     NodeResult,
@@ -55,7 +54,6 @@ class PipeLineExecutor:
         ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
-        approver: ApproverFunc | None = None,
     ):
         # 执行对象（nodes）与共享上下文（ctx）都从构造器进：
         # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
@@ -64,7 +62,7 @@ class PipeLineExecutor:
         self.ctx: dict[str, Any] = ctx if ctx is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
-        self.approver = approver
+        self._resume: dict[str, dict[str, Any]] = {}
 
     async def _emit(self, result: NodeResult) -> None:
         """Push a node state change to the ``on_event`` callback (if set)."""
@@ -93,11 +91,11 @@ class PipeLineExecutor:
         # ----- control-flow bookkeeping（图与数据在 self.nodes/self.ctx）-----
         events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in self.nodes}
         tasks: dict[str, asyncio.Future[NodeResult]] = {}
-        resume = resume or {}
+        self._resume = resume or {}
         loop = asyncio.get_running_loop()
 
         for node in self.nodes.values():
-            saved = resume.get(node.name)
+            saved = self._resume.get(node.name)
             if saved is not None and saved.get("status") in ("completed", "skipped", "upstream_skipped"):
                 events[node.name].set()
                 restored = NodeResult(
@@ -370,7 +368,12 @@ class PipeLineExecutor:
                 kwargs[pname] = remaining
                 remaining.clear()
             elif isinstance(ann, type) and issubclass(ann, NodeContext):
-                kwargs[pname] = NodeContext(node_name=node.name, approver=self.approver)
+                # 从 resume 数据中提取 stored_decision（如有）
+                saved = self._resume.get(node.name)
+                stored_decision = None
+                if saved and saved.get("output"):
+                    stored_decision = saved["output"].get("decision")
+                kwargs[pname] = NodeContext(node_name=node.name, stored_decision=stored_decision)
             elif isinstance(ann, type) and issubclass(ann, BaseModel):
                 fields = set(ann.model_fields)
                 kwargs[pname] = ann(**{k: remaining.pop(k) for k in fields if k in remaining})

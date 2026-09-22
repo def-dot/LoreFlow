@@ -5,7 +5,7 @@ from typing import Any, Literal
 import pytest
 
 from app.core.config import settings
-from app.engine import Pipeline, Node, NodeStatus, RetryPolicy
+from app.engine import Pipeline, Node, NodeStatus, RetryPolicy, SuspendExecution
 import yaml
 from app.engine.resolve import parse_retry
 from helpers import validate_config
@@ -43,9 +43,6 @@ async def test_load_dag_from_dict_runs(registered: Any) -> None:
     assert results["clean"].output == "declarative config rocks"
 
 async def test_load_dag_with_human_node() -> None:
-    async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
-        return {"approve": True}
-
     config = {
         "nodes": {
             "data": {"type": "test_fetch"},
@@ -53,23 +50,17 @@ async def test_load_dag_with_human_node() -> None:
         },
     }
     dag = Pipeline(config)
-    results = await dag.run(approver=approver)
-    assert results["review"].status == NodeStatus.COMPLETED
+    # human 节点会抛 SuspendExecution
+    with pytest.raises(SuspendExecution):
+        await dag.run()
 
 async def test_load_dag_human_with_condition() -> None:
-    """human 节点支持 condition 表达式 —— False 时跳过审核，approver 不被调用。"""
-    calls: list[tuple[str, dict[str, Any]]] = []
-
-    async def approver(node_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        calls.append((node_name, payload))
-        return {"approve": True}
-
+    """human 节点支持 condition 表达式 —— False 时跳过审核。"""
     config = {'nodes': {'data': {'type': 'test_fetch'}, 'review': {'type': 'human', 'depends_on': ['data'], 'condition': '$approved == true'}, '__start__': {'type': 'start', 'inputs': {'approved': {'default': False}}}}}
 
     dag = Pipeline(config)
-    results = await dag.run(approver=approver)
+    results = await dag.run()
     assert results["review"].status == NodeStatus.SKIPPED
-    assert calls == []
 
 def test_registry_only_lookup() -> None:
     # type 只能引用注册表中的名字，没有 functions 参数可传
@@ -109,8 +100,9 @@ def test_validation_errors() -> None:
                 }
             }
         )
-    with pytest.raises(ValueError, match="必须提供 approver"):
-        Pipeline({"nodes": {"r": {"type": "human"}}})
+    # human 节点不再需要 approver
+    dag = Pipeline({"nodes": {"r": {"type": "human"}}})
+    assert "r" in dag.nodes
     with pytest.raises((ValueError, TypeError)):
         Pipeline(123)  # type: ignore[arg-type]
 

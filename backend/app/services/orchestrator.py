@@ -1,4 +1,4 @@
-"""Run 编排服务 — 执行生命周期：审批器/事件落库、执行、挂起-恢复、启动选主。
+"""Run 编排服务 — 执行生命周期：事件落库、执行、挂起-恢复、启动选主。
 """
 
 from __future__ import annotations
@@ -48,15 +48,6 @@ async def run_pipeline(record: RunRecord, dag: Pipeline) -> None:
         except Exception as exc:
             logger.error("Failed to save run snapshot: %s", exc)
 
-    async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
-        """人工审核时挂起；审核后恢复。"""
-        entry = record.nodes.setdefault(node_name, {})
-        output = entry.get("output") or {}
-        if output.get("decision"):
-            return output["decision"]
-
-        raise SuspendExecution(f"run {record.id} 节点 {node_name} 等待人工审批", {"payload": payload, "labels": labels or {}})
-
     outcome = RunStatus.COMPLETED
     error: str | None = None
     output: dict[str, Any] | None = None
@@ -64,7 +55,6 @@ async def run_pipeline(record: RunRecord, dag: Pipeline) -> None:
         _, output = await dag.run(
             inputs=record.inputs,
             on_event=on_event,
-            approver=approver,
             resume=record.nodes,
         )
     except asyncio.CancelledError:
