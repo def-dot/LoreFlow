@@ -51,6 +51,20 @@ class InputParamDef(BaseModel):
     options: list[str] | None = None  # type=select 时的选项列表
 
 
+def validate_and_merge(
+    params: dict[str, InputParamDef],
+    inputs: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """校验必填 / 多余参数，合并默认值，返回最终输入。"""
+    inputs = inputs or {}
+    if missing := {k for k, v in params.items() if v.required} - set(inputs):
+        raise ValueError(f"必填参数缺失: {missing}")
+    if extra := set(inputs) - set(params):
+        raise ValueError(f"多余的参数: {extra}")
+    defaults = {k: v.default for k, v in params.items() if v.default is not None}
+    return {**defaults, **inputs}
+
+
 class RetryPolicy(BaseModel):
     """可配置的重试策略（指数退避 + 抖动）。"""
 
@@ -248,12 +262,7 @@ class Pipeline(BaseModel):
         from .executor import PipeLineExecutor
 
         # ---- 按 params 合并默认值 + 校验必填 ----
-        inputs = inputs or {}
-        if missing := set(self.required_inputs) - set(inputs):
-            raise ValueError(f"必填参数缺失: {missing}")
-        if extra := set(inputs) - set(self.params or {}):
-            raise ValueError(f"多余的参数: {extra}")
-        merged = {**self.default_inputs, **inputs}
+        merged = validate_and_merge(self.params or {}, inputs)
 
         executor = PipeLineExecutor(
             nodes=self.nodes, ctx={"input": merged},

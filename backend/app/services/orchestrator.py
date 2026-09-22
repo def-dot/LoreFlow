@@ -20,6 +20,7 @@ from app.engine import (
     NodeResult,
     SuspendExecution,
 )
+from app.engine.pipeline import validate_and_merge
 from app.models.run import RunRecord, RunStatus
 from app.services import runs
 from app.services.pipelines import get_pipeline
@@ -119,16 +120,10 @@ async def create_run(
     record.definition = text
 
     # 声明参数来自 Pipeline.params（唯一来源）
-    inputs = inputs or {}
-
     if dag.params:
-        if missing := set(dag.required_inputs) - set(inputs):
-            raise ValueError(f"必填参数缺失: {missing}")
-        if extra := set(inputs) - set(dag.params or {}):
-            raise ValueError(f"多余的参数: {extra}")
-        record.inputs = {**dag.default_inputs, **inputs}
+        record.inputs = validate_and_merge(dag.params, inputs)
     else:
-        record.inputs = dict(inputs)
+        record.inputs = dict(inputs) if inputs else {}
 
     await runs.create(record)
     task = asyncio.create_task(run_pipeline(record, dag))
