@@ -134,11 +134,9 @@ class Node(BaseModel):
     def _validate_and_coerce_inputs(self) -> Node:
         """inputs 校验 + start 节点反序列化。
 
-        - 非 start 节点：对照 REGISTRY input_schema 校验必填 / 未知参数
         - start 节点：raw dict → InputParamDef
+        - 非 start 节点：model_validate 校验必填 / 类型
         """
-        errors: list[str] = []
-
         if self.type == "start":
             if self.inputs:
                 self.inputs = {
@@ -147,19 +145,18 @@ class Node(BaseModel):
                 }
         else:
             func_def = REGISTRY.get(self.type)
-            if func_def is not None:
-                schema = func_def.input_schema
-                fields = schema.model_fields if schema else {}
-                inputs = self.inputs or {}
-                for key in fields:
-                    if fields[key].is_required() and key not in inputs:
-                        errors.append(f"inputs 缺少必填参数 {key!r}")
-                if schema is not None and (unexpected := set(inputs) - set(fields)):
-                    errors.append(f"inputs 包含未知参数 {unexpected!r}")
-
-        if errors:
-            raise ValueError("; ".join(errors))
+            if func_def is not None and func_def.input_schema is not None:
+                self.inputs = func_def.input_schema.model_validate(self.inputs or {})
         return self
+
+    @property
+    def inputs_dict(self) -> dict[str, Any]:
+        """inputs 的 dict 形式（Pydantic model / dict / None 通吃）。"""
+        if self.inputs is None:
+            return {}
+        if isinstance(self.inputs, BaseModel):
+            return self.inputs.model_dump()
+        return self.inputs
 
     def resolve_input_schema(self) -> type[BaseModel] | None:
         """返回本节点的输入 schema（来自 REGISTRY）。"""
@@ -178,8 +175,8 @@ class Node(BaseModel):
         func_def = REGISTRY.get(self.type)
         if func_def and func_def.output_schema is not None:
             return func_def.output_schema
-        if self.inputs:
-            fields: dict[str, Any] = {k: (Any, None) for k in self.inputs}
+        if self.inputs_dict:
+            fields: dict[str, Any] = {k: (Any, None) for k in self.inputs_dict}
             return create_model(f"DynamicOutput_{self.type}", **fields)
         return None
 

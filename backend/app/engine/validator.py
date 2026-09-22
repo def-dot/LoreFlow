@@ -85,7 +85,7 @@ def validate_ref(nodes: list["Node"]) -> list[str]:
     for node in nodes:
         upstream = _get_upstream_nodes(node, nodes_dict)
         # inputs $引用
-        for key, val in (node.inputs or {}).items():
+        for key, val in node.inputs_dict.items():
             if isinstance(val, str) and val.startswith("$"):
                 for msg in _iter_ref_errors(val, upstream, nodes_dict):
                     errors.append(f"节点 {node.name!r}: inputs {msg}")
