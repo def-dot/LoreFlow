@@ -133,7 +133,6 @@ class PipeLineExecutor:
         output 写入 self.ctx，NodeResult 写入 self._results。
         """
         result: NodeResult | None = None
-        node_inputs: dict[str, Any] | None = None
         try:
             # ---- 1. Wait for dependencies ----
             for dep in node.depends_on:
@@ -166,21 +165,9 @@ class PipeLineExecutor:
                 )
                 return
 
-            # ---- Record resolved inputs ----
-            node_inputs = wired_ctx(self.ctx, node.inputs or {})
-
             # ---- 3. Evaluate condition (branching) ----
             if node.condition is not None:
-                try:
-                    should_run = eval_condition(node.condition, wired_ctx(self.ctx, node.inputs or {}))
-                except Exception as exc:
-                    logger.error(
-                        "[%s] Condition raised %s: %s - skipping node",
-                        node.name,
-                        type(exc).__name__,
-                        exc,
-                    )
-                    should_run = False
+                should_run = eval_condition(node.condition, self.ctx)
 
                 if not should_run:
                     logger.info("[%s] Skipped - condition not met", node.name)
@@ -309,7 +296,6 @@ class PipeLineExecutor:
             )
         finally:
             if result is not None:
-                result.inputs = node_inputs
                 self._results[node.name] = result
                 await self._emit(result)
             events[node.name].set()

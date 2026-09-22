@@ -29,8 +29,6 @@ from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any, NamedTuple
 
-from .types import ConditionFunc
-
 #: 表达式 = [not] $键 [操作符 值]。键以 ``$`` 开头（引用上下文，与 inputs
 #: 接线同拼法），不含空白/比较符字符（支持中文与 ``.`` 字段路径）；值至少
 #: 一个非空字符（``$intent ==`` 缺值则整体不匹配）。
@@ -115,6 +113,7 @@ def _split_logic(expr: str, op: str) -> list[str]:
     return parts
 
 
+@lru_cache(maxsize=256)
 def parse_condition(expr: str) -> list[list[Atom]]:
     """复合表达式 → ``[[and 组1], [and 组2], ...]``；or 最低，and 居中。
 
@@ -162,23 +161,9 @@ def _eval_atom(ctx: dict[str, Any], atom: Atom) -> bool:
     return not result if atom.neg else result
 
 
-@lru_cache(maxsize=256)
-def _compile(expr: str) -> ConditionFunc:
-    """表达式字符串 → ``(视图) -> bool`` 谓词（缓存解析结果，循环内重复求值零开销）。"""
-    groups = parse_condition(expr)
-
-    def cond(ctx: dict[str, Any]) -> bool:
-        return any(all(_eval_atom(ctx, atom) for atom in and_group) for and_group in groups)
-
-    return cond
-
-
-# 对外 API 保持不变
-compile_condition = _compile
-
-
 def eval_condition(cond: str | bool, view: dict[str, Any]) -> bool:
-    """节点条件求值（原始声明 → bool）：布尔常量 / 表达式字符串（接线视图上）。"""
+    """节点条件求值（原始声明 → bool）：布尔常量 / 表达式字符串。"""
     if isinstance(cond, bool):
         return cond
-    return bool(_compile(cond)(view))
+    groups = parse_condition(cond)
+    return any(all(_eval_atom(view, atom) for atom in and_group) for and_group in groups)

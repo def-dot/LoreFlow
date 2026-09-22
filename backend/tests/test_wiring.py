@@ -54,7 +54,7 @@ async def test_wiring_does_not_leak_to_shared_ctx() -> None:
 
 
 async def test_wiring_feeds_condition_true() -> None:
-    """条件在接线视图上判定：wired 键有真值 → 节点执行。"""
+    """条件直接引用上游输出：$生产者 输出非空 dict → 条件真 → 节点执行。"""
     cfg = {
         "name": "wiring_condition_true",
         "nodes": {
@@ -62,8 +62,7 @@ async def test_wiring_feeds_condition_true() -> None:
             "走条件": {
                 "type": "wire_probe",
                 "depends_on": ["生产者"],
-                "condition": "flag",          # 裸键真值
-                "inputs": {"flag": "$生产者"},  # 生产者输出是非空 dict → True
+                "condition": "$生产者",          # 上游输出非空 dict → True
             },
         },
     }
@@ -72,7 +71,7 @@ async def test_wiring_feeds_condition_true() -> None:
 
 
 async def test_wiring_feeds_condition_false_skips() -> None:
-    """wired 键为空（inputs 默认空串）→ 条件 False → 节点跳过。"""
+    """$input.flag 引用流水线参数：空串 → 条件 False → 节点跳过。"""
     cfg = {
         "name": "wiring_condition_false",
         "inputs": {"flag": {"required": False, "default": ""}},
@@ -81,8 +80,7 @@ async def test_wiring_feeds_condition_false_skips() -> None:
             "跳过条件": {
                 "type": "wire_probe",
                 "depends_on": ["生产者"],
-                "condition": "flag",
-                "inputs": {"flag": "$flag"},  # 流水线 inputs flag = "" → False
+                "condition": "$input.flag",      # 流水线 inputs flag = "" → False
             },
         },
     }
