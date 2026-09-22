@@ -86,11 +86,10 @@ def validate_ref(nodes: list["Node"]) -> list[str]:
     errors: list[str] = []
     for node in nodes:
         upstream = _get_upstream_nodes(node, nodes_dict)
-        # inputs $引用
-        for key, val in (node.inputs or {}).items():
-            if isinstance(val, str) and val.startswith("$"):
-                for msg in _iter_ref_errors(val, upstream, nodes_dict):
-                    errors.append(f"节点 {node.name!r}: inputs {msg}")
+        # inputs $引用（递归遍历 dict / list）
+        for ref in _collect_refs(node.inputs):
+            for msg in _iter_ref_errors(ref, upstream, nodes_dict):
+                errors.append(f"节点 {node.name!r}: inputs {msg}")
         # condition $引用
         if node.condition is not None and not isinstance(node.condition, bool):
             groups = parse_condition(node.condition)
@@ -115,6 +114,19 @@ def _get_upstream_nodes(
                 getattr(nodes_dict.get(dep), "depends_on", None) or []
             )
     return seen
+
+
+def _collect_refs(value: Any) -> Iterator[str]:
+    """递归收集 value 中所有 $引用字符串。"""
+    if isinstance(value, str):
+        if value.startswith("$"):
+            yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _collect_refs(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _collect_refs(v)
 
 
 def _iter_ref_errors(

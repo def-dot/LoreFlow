@@ -42,8 +42,9 @@ nodes:
   inputs:
     script: "def main(city, activity):\n    return f\"{city}有什么好的{activity}地点推荐？\"\
       \n"
-    city: $__start__.city
-    activity: $suggest.content
+    params:
+      city: $__start__.city
+      activity: $suggest.content
   timeout: 5
 - name: search
   type: agent

@@ -16,6 +16,7 @@ class CodeOutput(BaseModel):
 
 class CodeParams(BaseModel):
     script: str = Field(description="要执行的 Python 脚本")
+    params: dict[str, Any] | None = None
 
 
 @func(
@@ -24,10 +25,10 @@ class CodeParams(BaseModel):
     metadata={"group": "基础", "order": 20},
 
 )
-async def code(params: CodeParams, **kwargs: Any) -> CodeOutput:
+async def code(params: CodeParams) -> CodeOutput:
     resp = await http_client().post(
         f"{settings.SANDBOX_URL}/exec",
-        json={"code": params.script, "params": kwargs},
+        json={"code": params.script, "params": params.params},
         timeout=60,
     )
     result = resp.json()

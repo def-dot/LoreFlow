@@ -51,8 +51,9 @@ nodes:
       \ |\\n\",\n             f\"## 明细\\n\"]\n    for i, item in enumerate(items,\
       \ 1):\n        lines.append(f\"{i}. **{item.get('name', '?')}** — {item.get('score',\
       \ 'N/A')}\")\n    return \"\\n\".join(lines)\n"
-    items: $parse.result
-    stats: $stats.result
+    params:
+      items: $parse.result
+      stats: $stats.result
   timeout: 10
 - name: __end__
   depends_on:

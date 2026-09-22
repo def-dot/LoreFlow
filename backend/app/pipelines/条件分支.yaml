@@ -45,7 +45,8 @@ nodes:
       \        return \"知识库中没有检索到相关内容。\"\n    lines = [f\"[{i}] {c.get('source', '')}\
       \ {c.get('text', '')}\" for i, c in enumerate(chunks, 1) if isinstance(c, dict)]\n\
       \    return \"\\n\\n\".join(lines)\n"
-    chunks: $rag_retrieve.result
+    params:
+      chunks: $rag_retrieve.result
 - name: rag_answer
   type: llm_chat
   label: LLM检索回答
