@@ -132,21 +132,10 @@ class Node(BaseModel):
 
     @model_validator(mode="after")
     def _validate_and_coerce_inputs(self) -> Node:
-        """inputs 校验 + start 节点反序列化。
-
-        - start 节点：raw dict → InputParamDef
-        - 非 start 节点：model_validate 校验必填 / 类型
-        """
-        if self.type == "start":
-            if self.inputs:
-                self.inputs = {
-                    k: v if isinstance(v, InputParamDef) else InputParamDef.model_validate(v)
-                    for k, v in self.inputs.items()
-                }
-        else:
-            func_def = REGISTRY.get(self.type)
-            if func_def is not None and func_def.input_schema is not None:
-                self.inputs = func_def.input_schema.model_validate(self.inputs or {})
+        """inputs 校验 + 反序列化为 Pydantic model（start / 非 start 统一路径）。"""
+        schema = self.resolve_input_schema()
+        if schema is not None:
+            self.inputs = schema.model_validate(self.inputs or {})
         return self
 
     @property
@@ -159,7 +148,18 @@ class Node(BaseModel):
         return self.inputs
 
     def resolve_input_schema(self) -> type[BaseModel] | None:
-        """返回本节点的输入 schema（来自 REGISTRY）。"""
+        """返回本节点的输入 schema。
+
+        - start 节点：根据 inputs key 动态生成（每个字段类型 InputParamDef）
+        - 其他节点：来自 REGISTRY
+        """
+        from pydantic import create_model
+
+        if self.type == "start" and isinstance(self.inputs, dict):
+            return create_model(
+                "StartInputs",
+                **{k: (InputParamDef, ...) for k in self.inputs},
+            )
         func_def = REGISTRY.get(self.type)
         return func_def.input_schema if func_def else None
 
@@ -239,11 +239,11 @@ class Pipeline(BaseModel):
 
     @property
     def inputs(self) -> dict[str, InputParamDef]:
-        """start 节点的参数声明（raw 值按需转 InputParamDef；构造期已校验）。"""
+        """start 节点的参数声明（构造期已校验为 InputParamDef）。"""
         start = self.start_node
         if start is None or not start.inputs:
             return {}
-        return {k: InputParamDef.model_validate(v) for k, v in start.inputs.items()}
+        return {k: getattr(start.inputs, k) for k in start.inputs.model_fields}
 
     @property
     def required_inputs(self) -> list[str]:
