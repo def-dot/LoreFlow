@@ -1,8 +1,8 @@
 """Pipeline — JSON dict → pydantic 对象 + 运行时执行。
 
 - ``nodes`` 是 ``list[Node]``（pydantic 校验，未知字段拒绝）
-- start 节点的 inputs 保持原值；``Pipeline.inputs`` 属性按需转成
-  InputParamDef，非法声明的报错由 ``validate_ref`` 统一输出
+- 所有节点的 inputs 统一保持 dict（start 节点也不转 Pydantic model）；
+  ``Pipeline.inputs`` 属性按需从 dict 解析为 InputParamDef
 - ``run()`` / ``validate()`` / ``to_mermaid()`` 直接查 REGISTRY 取函数 / output_schema
 - YAML 加载由调用方（services/pipelines.py）负责，Pipeline 只认 dict
 """
@@ -132,20 +132,37 @@ class Node(BaseModel):
 
     @model_validator(mode="after")
     def _validate_and_coerce_inputs(self) -> Node:
-        """inputs 校验 + 反序列化为 Pydantic model（start / 非 start 统一路径）。"""
-        schema = self.resolve_input_schema()
-        if schema is not None:
-            self.inputs = schema.model_validate(self.inputs or {})
-        return self
+        """inputs 校验（统一保持 dict，不转 Pydantic model）。
 
-    @property
-    def inputs_dict(self) -> dict[str, Any]:
-        """inputs 的 dict 形式（Pydantic model / dict / None 通吃）。"""
+        - start 节点：校验每个值是否合法 InputParamDef
+        - 非 start 节点：必填 + 未知参数检查（$引用不做类型校验）
+        """
         if self.inputs is None:
-            return {}
-        if isinstance(self.inputs, BaseModel):
-            return self.inputs.model_dump()
-        return self.inputs
+            return self
+
+        if self.type == "start":
+            for k, v in self.inputs.items():
+                try:
+                    InputParamDef.model_validate(v)
+                except Exception as exc:
+                    raise ValueError(f"inputs.{k} 不是合法的 InputParamDef: {exc}") from exc
+            return self
+
+        schema = self.resolve_input_schema()
+        if schema is None:
+            return self
+
+        fields = schema.model_fields
+        missing = [k for k, f in fields.items() if f.is_required() and k not in self.inputs]
+        unknown = set(self.inputs) - set(fields)
+        msgs = []
+        if missing:
+            msgs.append(f"缺少必填参数 {missing}")
+        if unknown:
+            msgs.append(f"包含未知参数 {unknown}")
+        if msgs:
+            raise ValueError("inputs " + ", ".join(msgs))
+        return self
 
     def resolve_input_schema(self) -> type[BaseModel] | None:
         """返回本节点的输入 schema。
@@ -155,7 +172,7 @@ class Node(BaseModel):
         """
         from pydantic import create_model
 
-        if self.type == "start" and isinstance(self.inputs, dict):
+        if self.type == "start" and self.inputs is not None:
             return create_model(
                 "StartInputs",
                 **{k: (InputParamDef, ...) for k in self.inputs},
@@ -175,8 +192,8 @@ class Node(BaseModel):
         func_def = REGISTRY.get(self.type)
         if func_def and func_def.output_schema is not None:
             return func_def.output_schema
-        if self.inputs_dict:
-            fields: dict[str, Any] = {k: (Any, None) for k in self.inputs_dict}
+        if self.inputs:
+            fields: dict[str, Any] = {k: (Any, None) for k in self.inputs}
             return create_model(f"DynamicOutput_{self.type}", **fields)
         return None
 
@@ -239,11 +256,12 @@ class Pipeline(BaseModel):
 
     @property
     def inputs(self) -> dict[str, InputParamDef]:
-        """start 节点的参数声明（构造期已校验为 InputParamDef）。"""
+        """start 节点的参数声明（运行时从 dict 解析为 InputParamDef）。"""
         start = self.start_node
         if start is None or not start.inputs:
             return {}
-        return {k: getattr(start.inputs, k) for k in start.inputs.model_fields}
+        return {k: InputParamDef(**v) if isinstance(v, dict) else v
+                for k, v in start.inputs.items()}
 
     @property
     def required_inputs(self) -> list[str]:

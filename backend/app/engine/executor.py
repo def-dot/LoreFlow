@@ -176,12 +176,12 @@ class PipeLineExecutor:
             if node.type == "start":
                 node_inputs = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
             else:
-                node_inputs = wired_ctx(self.ctx, node.inputs_dict)
+                node_inputs = wired_ctx(self.ctx, node.inputs or {})
 
             # ---- 3. Evaluate condition (branching) ----
             if node.condition is not None:
                 try:
-                    should_run = eval_condition(node.condition, wired_ctx(self.ctx, node.inputs_dict))
+                    should_run = eval_condition(node.condition, wired_ctx(self.ctx, node.inputs or {}))
                 except Exception as exc:
                     logger.error(
                         "[%s] Condition raised %s: %s - skipping node",
@@ -332,7 +332,7 @@ class PipeLineExecutor:
             # start 节点：inputs 是声明，实际输入在 ctx 中
             target = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
         else:
-            target = wired_ctx(self.ctx, node.inputs_dict)
+            target = wired_ctx(self.ctx, node.inputs or {})
         target["_node"] = node.name
 
         # 对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）

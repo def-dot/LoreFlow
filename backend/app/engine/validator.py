@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from .condition import parse_condition
 
@@ -80,14 +80,19 @@ def validate_dag(nodes: list["Node"]) -> list[str]:
 
 def validate_ref(nodes: list["Node"]) -> list[str]:
     """``list[Node]`` $引用校验入口（Pipeline 构造期调用）。"""
+    from app.registry import REGISTRY
+
     nodes_dict: dict[str, Node] = {n.name: n for n in nodes}
     errors: list[str] = []
     for node in nodes:
         upstream = _get_upstream_nodes(node, nodes_dict)
-        # inputs $引用
-        for key, val in node.inputs_dict.items():
+        # inputs $引用（含类型匹配检查）
+        func_def = REGISTRY.get(node.type)
+        input_fields = func_def.input_schema.model_fields if func_def and func_def.input_schema else {}
+        for key, val in (node.inputs or {}).items():
             if isinstance(val, str) and val.startswith("$"):
-                for msg in _iter_ref_errors(val, upstream, nodes_dict):
+                exp_type = input_fields[key].annotation if key in input_fields else None
+                for msg in _iter_ref_errors(val, upstream, nodes_dict, exp_type):
                     errors.append(f"节点 {node.name!r}: inputs {msg}")
         # condition $引用
         if node.condition is not None and not isinstance(node.condition, bool):
@@ -119,6 +124,7 @@ def _iter_ref_errors(
     ref: str,
     upstream: set[str],
     nodes_dict: dict[str, "Node"],
+    exp_type: type | None = None,
 ) -> Iterator[str]:
     """校验单个 $引用，yield 错误消息。"""
     raw_root, _, field = ref.partition(".")
@@ -135,3 +141,28 @@ def _iter_ref_errors(
         top_field = field.split(".")[0]
         if top_field not in out_schema.model_fields:
             yield f"引用的 {root!r} 输出中没有字段 {top_field!r}"
+            return
+        if exp_type is not None:
+            got_type = out_schema.model_fields[top_field].annotation
+            if not _type_compatible(got_type, exp_type):
+                yield f"引用 {root!r}.{top_field} 类型 {got_type!r} 与参数期望 {exp_type!r} 不匹配"
+
+
+def _type_compatible(got: Any, exp: Any) -> bool:
+    """判断输出类型是否与输入期望类型兼容。"""
+    if got == exp:
+        return True
+    if got is Any or exp is Any:
+        return True
+
+    # Optional[X] / Union / X | None：拆解后递归
+    import types
+    if get_origin(exp) is Union or isinstance(exp, types.UnionType):
+        return any(_type_compatible(got, a) for a in get_args(exp) if a is not type(None))
+
+    # 原始类型：issubclass
+    got_base = get_origin(got) or got
+    try:
+        return isinstance(got_base, type) and isinstance(exp, type) and issubclass(got_base, exp)
+    except TypeError:
+        return False
