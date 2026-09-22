@@ -249,11 +249,12 @@ class PipeLineExecutor:
                     return result
 
                 except SuspendExecution as exc:
-                    # 本节点审批挂起：REVIEWING + 审核视图（output）随 finally 的
+                    # 本节点审批挂起：REVIEWING + 审核视图（payload）随 finally 的
                     # emit 落快照；重新抛出让 run 走挂起收尾。
                     result = NodeResult(
                         node_name=node.name,
                         status=NodeStatus.REVIEWING,
+                        output=exc.results,
                         retry_history=retry_history or None,
                     )
                     raise
@@ -370,8 +371,12 @@ class PipeLineExecutor:
                     kwargs[pname]["_approver"] = remaining["_approver"]
                 remaining.clear()
             elif pname.startswith("_"):
-                # _ 前缀参数透传
-                kwargs[pname] = target.get(pname)
+                val = target.get(pname)
+                ann = param.annotation
+                if isinstance(val, dict) and isinstance(ann, type) and issubclass(ann, BaseModel):
+                    kwargs[pname] = ann(**val)
+                else:
+                    kwargs[pname] = val
             else:
                 ann = param.annotation
                 if isinstance(ann, type) and issubclass(ann, BaseModel):
