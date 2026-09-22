@@ -267,8 +267,9 @@ class Pipeline(BaseModel):
         executor = PipeLineExecutor(
             nodes=self.nodes, ctx={"input": merged},
             concurrency=concurrency, on_event=on_event,
+            resume=resume,
         )
-        results = await executor.execute(resume=resume)
+        results = await executor.execute()
 
         output = None
         if self.end_node and results.get(self.end_node.name):

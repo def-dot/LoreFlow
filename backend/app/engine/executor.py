@@ -39,9 +39,9 @@ class PipeLineExecutor:
     """Executes a DAG concurrently, respecting node dependencies.
 
     字段 = 构造输入与配置（nodes/ctx/semaphore/on_event，回答"执行什么"）；
-    events/tasks 是 execute 的过程状态（回答"这次怎么走"），留在方法帧里。
-    ctx 为共享可变状态——同一实例并发调用 execute 不安全，顺序复用安全
-    （execute 不改 nodes，ctx 语义上属于单次运行）。
+    events / _results 是 execute 的过程状态（回答"这次怎么走"），留在方法帧里。
+    ctx 为数据流（节点 output + 初始上下文），_results 为执行状态（NodeResult）。
+    同一实例并发调用 execute 不安全，顺序复用安全（execute 不改 nodes，ctx 语义上属于单次运行）。
 
     Attributes:
         concurrency: Maximum number of nodes to run simultaneously.
@@ -54,6 +54,7 @@ class PipeLineExecutor:
         ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
         on_event: NodeEventFunc | None = None,
+        resume: dict[str, dict[str, Any]] | None = None,
     ):
         # 执行对象（nodes）与共享上下文（ctx）都从构造器进：
         # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
@@ -62,7 +63,7 @@ class PipeLineExecutor:
         self.ctx: dict[str, Any] = ctx if ctx is not None else {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
-        self._resume: dict[str, dict[str, Any]] = {}
+        self._resume: dict[str, dict[str, Any]] = resume or {}
 
     async def _emit(self, result: NodeResult) -> None:
         """Push a node state change to the ``on_event`` callback (if set)."""
@@ -73,14 +74,8 @@ class PipeLineExecutor:
     # Public API
     # ------------------------------------------------------------------
 
-    async def execute(
-        self,
-        resume: dict[str, dict[str, Any]] | None = None,
-    ) -> dict[str, NodeResult]:
+    async def execute(self) -> dict[str, NodeResult]:
         """Execute ``self.nodes`` and return a mapping of node name → NodeResult.
-
-        Args:
-            resume: 重启恢复用的节点快照 ``{name: {status, output, ...}}``；
 
         Returns:
             Dict mapping each node name to its :class:`NodeResult`.
@@ -88,33 +83,30 @@ class PipeLineExecutor:
         Raises:
             DAGExecutionError: If one or more nodes ultimately failed.
         """
-        # ----- control-flow bookkeeping（图与数据在 self.nodes/self.ctx）-----
+        # ----- control-flow bookkeeping -----
         events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in self.nodes}
-        tasks: dict[str, asyncio.Future[NodeResult]] = {}
-        self._resume = resume or {}
-        loop = asyncio.get_running_loop()
+        self._results: dict[str, NodeResult] = {}
+        tasks: list[asyncio.Task[None]] = []
 
         for node in self.nodes.values():
             saved = self._resume.get(node.name)
             if saved is not None and saved.get("status") in ("completed", "skipped", "upstream_skipped"):
                 events[node.name].set()
-                restored = NodeResult(
+                self.ctx[node.name] = saved.get("output")
+                self._results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus(saved.get("status")),
                     output=saved.get("output"),
                     attempts=saved.get("attempts"),
                     duration_ms=saved.get("duration_ms") or 0.0,
                 )
-                tasks[node.name] = loop.create_future()
-                tasks[node.name].set_result(restored)
-                self.ctx[node.name] = saved.get("output")
             else:
-                tasks[node.name] = asyncio.create_task(self._run_node(node, tasks, events))
+                tasks.append(asyncio.create_task(self._run_node(node, events)))
 
         # ----- wait for completion -----
-        await asyncio.gather(*tasks.values(), return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-        results = {name: task.result() for name, task in tasks.items()}
+        results = dict(self._results)
         # ----- surface failures as DAGExecutionError -----
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
@@ -134,10 +126,11 @@ class PipeLineExecutor:
     async def _run_node(
         self,
         node: Node,
-        tasks: dict[str, asyncio.Future[NodeResult]],
         events: dict[str, asyncio.Event],
-    ) -> NodeResult:
+    ) -> None:
         """Lifecycle of a single node: 等依赖 → 失败/跳过级联 → 条件判断 → 带重试执行 → 收尾。
+
+        output 写入 self.ctx，NodeResult 写入 self._results。
         """
         result: NodeResult | None = None
         node_inputs: dict[str, Any] | None = None
@@ -147,7 +140,7 @@ class PipeLineExecutor:
                 await events[dep].wait()
 
             # ---- 2. Cascading failure / cascading skip ----
-            dep_status = {dep: tasks[dep].result().status for dep in node.depends_on}
+            dep_status = {dep: self._results[dep].status for dep in node.depends_on}
             # 失败优先级最高，压过一切跳过规则
             blocked = [
                 dep
@@ -160,8 +153,8 @@ class PipeLineExecutor:
                     node_name=node.name,
                     status=NodeStatus.UPSTREAM_FAILED,
                 )
-                return result
-            
+                return
+
             # 汇合语义（any-success）：全部依赖被跳过才跟着跳过（级联）；
             if node.depends_on and all(
                 s in (NodeStatus.SKIPPED, NodeStatus.UPSTREAM_SKIPPED) for s in dep_status.values()
@@ -171,7 +164,7 @@ class PipeLineExecutor:
                     node_name=node.name,
                     status=NodeStatus.UPSTREAM_SKIPPED,
                 )
-                return result
+                return
 
             # ---- Record resolved inputs ----
             node_inputs = wired_ctx(self.ctx, node.inputs or {})
@@ -195,7 +188,7 @@ class PipeLineExecutor:
                         node_name=node.name,
                         status=NodeStatus.SKIPPED,
                     )
-                    return result
+                    return
 
             # ---- 4. Execute with retry ----
             await self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
@@ -232,7 +225,7 @@ class PipeLineExecutor:
                         duration_ms=duration_ms,
                         retry_history=retry_history or None,
                     )
-                    return result
+                    return
 
                 except HumanRejected as exc:
                     # 人工拒绝是终局决策：不进重试循环，FAILED 结果携带拒绝详情
@@ -244,7 +237,7 @@ class PipeLineExecutor:
                         attempts=attempt + 1,
                         retry_history=retry_history or None,
                     )
-                    return result
+                    return
 
                 except SuspendExecution as exc:
                     # 本节点审批挂起：REVIEWING + 审核视图（payload）随 finally 的
@@ -315,11 +308,11 @@ class PipeLineExecutor:
                 error=exc,
             )
         finally:
-            await self._emit(result)
+            if result is not None:
+                result.inputs = node_inputs
+                self._results[node.name] = result
+                await self._emit(result)
             events[node.name].set()
-        if result is not None:
-            result.inputs = node_inputs
-        return result
 
     # ------------------------------------------------------------------
     # Helpers
