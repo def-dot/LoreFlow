@@ -7,11 +7,7 @@ nodes:
 - name: __start__
   type: start
   inputs:
-    data:
-      required: true
-      label: 数据
-      description: JSON 数组，如 [{"name":"A","score":85},{"name":"B","score":92}]
-      type: paragraph
+    data: $input.data
 - name: parse
   type: code
   label: 解析数据
@@ -19,7 +15,7 @@ nodes:
     script: "def main(raw):\n    import json\n    items = json.loads(raw)\n    if\
       \ not isinstance(items, list):\n        raise ValueError(\"输入必须是 JSON 数组\")\n\
       \    return items\n"
-    raw: $__start__.data
+    raw: $input.data
   depends_on:
   - __start__
   timeout: 10
@@ -61,3 +57,9 @@ nodes:
   type: end
   inputs:
     report: $report.result
+params:
+  data:
+    required: true
+    label: 数据
+    description: JSON 数组，如 [{"name":"A","score":85},{"name":"B","score":92}]
+    type: paragraph

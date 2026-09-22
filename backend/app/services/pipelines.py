@@ -143,6 +143,7 @@ def detail_from_config(
     return {
         "name": cfg.name or "",
         "description": cfg.description or "",
+        "params": cfg.params,
         "node_count": len(cfg.nodes),
         "mermaid": _to_mermaid(cfg),
         "source": raw,

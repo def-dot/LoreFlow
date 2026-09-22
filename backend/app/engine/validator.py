@@ -78,7 +78,7 @@ def validate_dag(nodes: list["Node"]) -> list[str]:
 # $参数引用校验
 # ------------------------------------------------------------------
 
-def validate_ref(nodes: list["Node"]) -> list[str]:
+def validate_ref(nodes: list["Node"], param_keys: set[str] | None = None) -> list[str]:
     """``list[Node]`` $引用校验入口（Pipeline 构造期调用）。"""
     from app.registry import REGISTRY
 
@@ -88,14 +88,14 @@ def validate_ref(nodes: list["Node"]) -> list[str]:
         upstream = _get_upstream_nodes(node, nodes_dict)
         # inputs $引用（递归遍历 dict / list）
         for ref in _collect_refs(node.inputs):
-            for msg in _iter_ref_errors(ref, upstream, nodes_dict):
+            for msg in _iter_ref_errors(ref, upstream, nodes_dict, param_keys):
                 errors.append(f"节点 {node.name!r}: inputs {msg}")
         # condition $引用
         if node.condition is not None and not isinstance(node.condition, bool):
             groups = parse_condition(node.condition)
             for and_group in groups:
                 for _, key, _, _ in and_group:
-                    for msg in _iter_ref_errors(f"${key}", upstream, nodes_dict):
+                    for msg in _iter_ref_errors(f"${key}", upstream, nodes_dict, param_keys):
                         errors.append(f"节点 {node.name!r}: condition {msg}")
     return errors
 
@@ -133,10 +133,17 @@ def _iter_ref_errors(
     ref: str,
     upstream: set[str],
     nodes_dict: dict[str, "Node"],
+    param_keys: set[str] | None = None,
 ) -> Iterator[str]:
     """校验单个 $引用，yield 错误消息。"""
     raw_root, _, field = ref.partition(".")
     root = raw_root.lstrip("$")
+    # 虚拟上游：input（Pipeline params）、iteration（loop 运行期注入）
+    if root == "input" or root == "iteration":
+        return
+    # 参数键（旧格式兼容：裸 $param_key 引用）
+    if param_keys and root in param_keys:
+        return
     if root not in upstream:
         yield f"引用的 {root!r} 不是上游依赖节点"
         return

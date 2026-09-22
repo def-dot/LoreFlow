@@ -7,16 +7,13 @@ nodes:
 - name: __start__
   type: start
   inputs:
-    city:
-      required: true
-      label: 城市
-      description: 例如「北京」
+    city: $input.city
 - name: weather
   type: agent
   label: 查天气
   inputs:
     system: 搜索城市当前天气，简洁报告温度、天气状况和风力。
-    prompt: $__start__.city
+    prompt: $input.city
     tools:
     - web_search
     max_iterations: 3
@@ -43,7 +40,7 @@ nodes:
     script: "def main(city, activity):\n    return f\"{city}有什么好的{activity}地点推荐？\"\
       \n"
     params:
-      city: $__start__.city
+      city: $input.city
       activity: $suggest.content
   timeout: 5
 - name: search
@@ -68,3 +65,8 @@ nodes:
     weather: $weather.content
     suggestion: $suggest.content
     guide: $search.content
+params:
+  city:
+    required: true
+    label: 城市
+    description: 例如「北京」

@@ -4,16 +4,12 @@ nodes:
 - name: __start__
   type: start
   inputs:
-    document:
-      required: true
-      type: file
-      label: 上传文档
-      description: 上传 txt/md 等文本文件入库
+    document: $input.document
 - name: load
   type: rag_load
   label: 文档解析
   inputs:
-    document: $__start__.document
+    document: $input.document
   depends_on:
   - __start__
 - name: chunk
@@ -41,3 +37,9 @@ nodes:
   inputs:
     doc_name: $load.doc_name
     embeds: $embed.result
+params:
+  document:
+    required: true
+    type: file
+    label: 上传文档
+    description: 上传 txt/md 等文本文件入库

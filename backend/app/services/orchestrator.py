@@ -118,10 +118,10 @@ async def create_run(
     )
     record.definition = text
 
-    # 声明参数来自 __start__ 节点（唯一来源）
+    # 声明参数来自 Pipeline.params（唯一来源）
     inputs = inputs or {}
 
-    if dag.inputs:
+    if dag.params:
         if missing := set(dag.required_inputs) - set(inputs):
             raise ValueError(f"必填参数缺失: {missing}")
         if extra := set(inputs) - set(dag.inputs):

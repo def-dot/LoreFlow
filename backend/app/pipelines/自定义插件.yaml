@@ -4,27 +4,20 @@ nodes:
 - name: __start__
   type: start
   inputs:
-    title:
-      required: true
-      label: 标题
-      description: 待审核文章标题
-    content:
-      required: true
-      label: 正文
-      description: 待审核文章正文
-      type: paragraph
+    title: $input.title
+    content: $input.content
 - name: review
   type: human
   label: 内容审核
   description: 请审核文章内容是否可以发布
   inputs:
     payload:
-      - key: title
-        label: 标题
-        value: $__start__.title
-      - key: content
-        label: 正文
-        value: $__start__.content
+    - key: title
+      label: 标题
+      value: $input.title
+    - key: content
+      label: 正文
+      value: $input.content
 - name: publish
   type: publish
   label: 内容发布
@@ -43,3 +36,13 @@ nodes:
     subject: $review.result.title
     body: $review.result.content
     to: defdot36@gmail.com
+params:
+  title:
+    required: true
+    label: 标题
+    description: 待审核文章标题
+  content:
+    required: true
+    label: 正文
+    description: 待审核文章正文
+    type: paragraph

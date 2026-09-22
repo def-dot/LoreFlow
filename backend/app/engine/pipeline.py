@@ -1,8 +1,9 @@
 """Pipeline — JSON dict → pydantic 对象 + 运行时执行。
 
 - ``nodes`` 是 ``list[Node]``（pydantic 校验，未知字段拒绝）
-- 所有节点的 inputs 统一保持 dict（start 节点也不转 Pydantic model）；
-  ``Pipeline.inputs`` 属性按需从 dict 解析为 InputParamDef
+- ``params`` 是 Pipeline 级输入参数声明（InputParamDef），与节点 inputs（数据接线）分离
+- 所有节点的 inputs 统一保持 dict（数据接线）；
+  ``Pipeline.inputs`` 属性按需从 ``params`` 解析为 InputParamDef
 - ``run()`` / ``validate()`` / ``to_mermaid()`` 直接查 REGISTRY 取函数 / output_schema
 - YAML 加载由调用方（services/pipelines.py）负责，Pipeline 只认 dict
 """
@@ -39,7 +40,7 @@ class ParamType(str, enum.Enum):
 
 
 class InputParamDef(BaseModel):
-    """``__start__`` 节点里单个输入参数的声明（required / label / …）。"""
+    """Pipeline 级单个输入参数的声明（required / label / …）。"""
 
     model_config = {"extra": "forbid"}
 
@@ -132,20 +133,8 @@ class Node(BaseModel):
 
     @model_validator(mode="after")
     def _validate_and_coerce_inputs(self) -> Node:
-        """inputs 校验（统一保持 dict，不转 Pydantic model）。
-
-        - start 节点：校验每个值是否合法 InputParamDef
-        - 非 start 节点：必填 + 未知参数检查（$引用不做类型校验）
-        """
+        """inputs 校验（必填 + 未知参数检查，$引用不做类型校验）。"""
         if self.inputs is None:
-            return self
-
-        if self.type == "start":
-            for k, v in self.inputs.items():
-                try:
-                    InputParamDef.model_validate(v)
-                except Exception as exc:
-                    raise ValueError(f"inputs.{k} 不是合法的 InputParamDef: {exc}") from exc
             return self
 
         schema = self.resolve_input_schema()
@@ -165,18 +154,7 @@ class Node(BaseModel):
         return self
 
     def resolve_input_schema(self) -> type[BaseModel] | None:
-        """返回本节点的输入 schema。
-
-        - start 节点：根据 inputs key 动态生成（每个字段类型 InputParamDef）
-        - 其他节点：来自 REGISTRY
-        """
-        from pydantic import create_model
-
-        if self.type == "start" and self.inputs is not None:
-            return create_model(
-                "StartInputs",
-                **{k: (InputParamDef, ...) for k in self.inputs},
-            )
+        """返回本节点的输入 schema（来自 REGISTRY）。"""
         func_def = REGISTRY.get(self.type)
         return func_def.input_schema if func_def else None
 
@@ -184,7 +162,7 @@ class Node(BaseModel):
         """返回本节点的输出 schema。
 
         优先用 REGISTRY 中的 ``output_schema``；
-        没有则从 ``self.inputs`` 的 key 动态生成（start 等声明式节点）；
+        没有则从 ``self.inputs`` 的 key 动态生成；
         都没有返回 ``None``（不校验字段）。
         """
         from pydantic import create_model
@@ -220,21 +198,23 @@ class Pipeline(BaseModel):
         p = Pipeline(**data)
         results, _ = await p.run(inputs={"q": "hello"})
 
-    ``inputs`` 属性把 ``__start__`` 节点的声明按需转成 ``dict[str, InputParamDef]``。
+    ``params`` 是 Pipeline 级输入参数声明（InputParamDef）；
+    ``inputs`` 属性按需从 ``params`` 解析。
     YAML 加载由 ``services/pipelines.py`` 负责，本类只认 dict。
     """
 
     name: str
     description: str | None = None
+    params: dict[str, InputParamDef] | None = None
     nodes: list[Node]
 
     model_config = {"extra": "forbid"}
 
     @model_validator(mode="after")
     def _validate_pipeline(self) -> Pipeline:
-        """构造期校验（结构错误聚合报告；字段错误由 pydantic 先行拦截，两阶段不同时报告）。"""
+        """构造期校验（图结构 + $引用）。"""
         errors = validate_dag(self.nodes)
-        errors.extend(validate_ref(self.nodes))
+        errors.extend(validate_ref(self.nodes, param_keys=set(self.params) if self.params else None))
         if errors:
             raise ValueError("\n".join(errors))
         return self
@@ -256,12 +236,8 @@ class Pipeline(BaseModel):
 
     @property
     def inputs(self) -> dict[str, InputParamDef]:
-        """start 节点的参数声明（运行时从 dict 解析为 InputParamDef）。"""
-        start = self.start_node
-        if start is None or not start.inputs:
-            return {}
-        return {k: InputParamDef(**v) if isinstance(v, dict) else v
-                for k, v in start.inputs.items()}
+        """Pipeline 级参数声明。"""
+        return self.params or {}
 
     @property
     def required_inputs(self) -> list[str]:
@@ -288,16 +264,16 @@ class Pipeline(BaseModel):
         """
         from .executor import PipeLineExecutor
 
-        # ---- start 节点：按 InputParamDef 合并默认值 + 校验必填 ----
+        # ---- 按 params 合并默认值 + 校验必填 ----
         inputs = inputs or {}
         if missing := set(self.required_inputs) - set(inputs):
             raise ValueError(f"必填参数缺失: {missing}")
         if extra := set(inputs) - set(self.inputs):
             raise ValueError(f"多余的参数: {extra}")
-        inputs = {**self.default_inputs, **inputs}
+        merged = {**self.default_inputs, **inputs}
 
         executor = PipeLineExecutor(
-            nodes=self.nodes, ctx=inputs,
+            nodes=self.nodes, ctx={"input": merged},
             concurrency=concurrency, on_event=on_event,
         )
         results = await executor.execute(resume=resume)

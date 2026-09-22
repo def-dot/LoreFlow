@@ -270,7 +270,7 @@ async def test_inputs_rich_form_runs(registered: Any) -> None:
     assert results["search"].output == {"query": "洛伦佐", "topic": "默认主题"}
 
 def test_inputs_unknown_field_rejected() -> None:
-    errors = validate_config({'nodes': {'__start__': {'type': 'start', 'inputs': {'q': {'bogus': 1}}}})
+    errors = validate_config({'nodes': {'__start__': {'type': 'start', 'inputs': {'q': {'bogus': 1}}}}})
     assert errors == ["参数 'q': 不支持的字段 ['bogus']"]
 
 def test_inputs_collects_all_errors() -> None:

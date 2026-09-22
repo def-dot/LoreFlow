@@ -4,15 +4,8 @@ nodes:
 - name: __start__
   type: start
   inputs:
-    title:
-      required: true
-      label: 标题
-      description: 待审文章标题
-    content:
-      required: true
-      label: 正文
-      description: 待审文章正文
-      type: paragraph
+    title: $input.title
+    content: $input.content
 - name: first_review
   type: human
   label: 编辑初审
@@ -20,12 +13,12 @@ nodes:
   depends_on: __start__
   inputs:
     payload:
-      - key: title
-        label: 标题
-        value: $__start__.title
-      - key: content
-        label: 正文
-        value: $__start__.content
+    - key: title
+      label: 标题
+      value: $input.title
+    - key: content
+      label: 正文
+      value: $input.content
 - name: final_review
   type: human
   label: 主编终审
@@ -33,12 +26,12 @@ nodes:
   description: 终审把关：确认可对外发布再通过。
   inputs:
     payload:
-      - key: title
-        label: 标题
-        value: $first_review.result.title
-      - key: content
-        label: 正文
-        value: $first_review.result.content
+    - key: title
+      label: 标题
+      value: $first_review.result.title
+    - key: content
+      label: 正文
+      value: $first_review.result.content
 - name: publish
   type: publish
   label: 发布
@@ -46,3 +39,13 @@ nodes:
   inputs:
     title: $final_review.result.title
     content: $final_review.result.content
+params:
+  title:
+    required: true
+    label: 标题
+    description: 待审文章标题
+  content:
+    required: true
+    label: 正文
+    description: 待审文章正文
+    type: paragraph

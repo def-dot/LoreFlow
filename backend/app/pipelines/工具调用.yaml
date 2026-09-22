@@ -6,11 +6,7 @@ nodes:
 - name: __start__
   type: start
   inputs:
-    prompt:
-      required: true
-      type: paragraph
-      label: 用户问题
-      description: 例如「北京今天天气怎么样」「帮我算一下 123 * 456」
+    prompt: $input.prompt
 - name: agent
   type: agent
   label: 生活管家小助手
@@ -18,7 +14,7 @@ nodes:
   - __start__
   description: LLM 自动调用工具回答问题
   inputs:
-    prompt: $__start__.prompt
+    prompt: $input.prompt
     system: 你是一个智能助手。你可以使用提供的工具来回答问题。 如果问题不需要工具就能回答，直接回复即可。
     tools:
     - web_search
@@ -30,3 +26,9 @@ nodes:
   type: end
   inputs:
     answer: $agent.content
+params:
+  prompt:
+    required: true
+    type: paragraph
+    label: 用户问题
+    description: 例如「北京今天天气怎么样」「帮我算一下 123 * 456」

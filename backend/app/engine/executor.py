@@ -174,10 +174,7 @@ class PipeLineExecutor:
                 return result
 
             # ---- Record resolved inputs ----
-            if node.type == "start":
-                node_inputs = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
-            else:
-                node_inputs = wired_ctx(self.ctx, node.inputs or {})
+            node_inputs = wired_ctx(self.ctx, node.inputs or {})
 
             # ---- 3. Evaluate condition (branching) ----
             if node.condition is not None:
@@ -330,11 +327,7 @@ class PipeLineExecutor:
 
     async def _call(self, node: Node) -> Any:
         """Invoke the node function (from REGISTRY) with timeout, output validation and deep $-resolution."""
-        if node.type == "start":
-            # start 节点：inputs 是声明，实际输入在 ctx 中
-            target = {k: v for k, v in self.ctx.items() if not k.startswith("_")}
-        else:
-            target = wired_ctx(self.ctx, node.inputs or {})
+        target = wired_ctx(self.ctx, node.inputs or {})
 
         # 对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）
         def resolve_deep(obj: Any) -> Any:
