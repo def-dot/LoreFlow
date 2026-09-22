@@ -2,7 +2,7 @@
 
 - ``nodes`` 是 ``list[Node]``（pydantic 校验，未知字段拒绝）
 - start 节点的 inputs 保持原值；``Pipeline.inputs`` 属性按需转成
-  InputParamDef，非法声明的报错由 ``PipeLineValidator`` 统一输出
+  InputParamDef，非法声明的报错由 ``validate_ref`` 统一输出
 - ``run()`` / ``validate()`` / ``to_mermaid()`` 直接查 REGISTRY 取函数 / output_schema
 - YAML 加载由调用方（services/pipelines.py）负责，Pipeline 只认 dict
 """
@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.registry import REGISTRY
 from .types import ApproverFunc
 from .types import NodeResult
-from .validator import PipeLineValidator
+from .validator import validate_dag, validate_ref
 
 logger = logging.getLogger(__name__)
 
@@ -122,19 +122,43 @@ class Node(BaseModel):
     @field_validator("condition")
     @classmethod
     def _validate_condition(cls, v: str | bool | None) -> str | bool | None:
-        """condition 字符串不能为空白（类型约束由注解 ``str | bool | None`` 保证）。"""
-        if isinstance(v, str) and not v.strip():
-            raise ValueError("condition 不能为空字符串")
+        """condition 字符串非空白 + 语法合法（类型约束由注解 ``str | bool | None`` 保证）。"""
+        if isinstance(v, str):
+            if not v.strip():
+                raise ValueError("condition 不能为空字符串")
+            from .condition import parse_condition
+            parse_condition(v)  # 语法错误会抛 ValueError
         return v
 
     @model_validator(mode="after")
-    def _coerce_start_inputs(self) -> Node:
-        """start 节点的 inputs 值从 raw dict 反序列化为 InputParamDef（非法值由 pydantic 收集报错）。"""
-        if self.type == "start" and self.inputs:
-            self.inputs = {
-                k: v if isinstance(v, InputParamDef) else InputParamDef.model_validate(v)
-                for k, v in self.inputs.items()
-            }
+    def _validate_and_coerce_inputs(self) -> Node:
+        """inputs 校验 + start 节点反序列化。
+
+        - 非 start 节点：对照 REGISTRY input_schema 校验必填 / 未知参数
+        - start 节点：raw dict → InputParamDef
+        """
+        errors: list[str] = []
+
+        if self.type == "start":
+            if self.inputs:
+                self.inputs = {
+                    k: v if isinstance(v, InputParamDef) else InputParamDef.model_validate(v)
+                    for k, v in self.inputs.items()
+                }
+        else:
+            func_def = REGISTRY.get(self.type)
+            if func_def is not None:
+                schema = func_def.input_schema
+                fields = schema.model_fields if schema else {}
+                inputs = self.inputs or {}
+                for key in fields:
+                    if fields[key].is_required() and key not in inputs:
+                        errors.append(f"inputs 缺少必填参数 {key!r}")
+                if schema is not None and (unexpected := set(inputs) - set(fields)):
+                    errors.append(f"inputs 包含未知参数 {unexpected!r}")
+
+        if errors:
+            raise ValueError("; ".join(errors))
         return self
 
     def resolve_input_schema(self) -> type[BaseModel] | None:
@@ -195,7 +219,8 @@ class Pipeline(BaseModel):
     @model_validator(mode="after")
     def _validate_pipeline(self) -> Pipeline:
         """构造期校验（结构错误聚合报告；字段错误由 pydantic 先行拦截，两阶段不同时报告）。"""
-        errors = PipeLineValidator.validate(self.nodes)
+        errors = validate_dag(self.nodes)
+        errors.extend(validate_ref(self.nodes))
         if errors:
             raise ValueError("\n".join(errors))
         return self

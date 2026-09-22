@@ -1,8 +1,11 @@
-"""校验层 — Pipeline 结构校验（构造期，pydantic 字段校验之后）。
+"""校验层（构造期，pydantic 校验之后）。
 
-``PipeLineValidator.validate(nodes)`` — 跨字段 / 图结构校验；
-字段级校验（type 注册、timeout>0、condition 非空白、max_retries≥0）
-由 pydantic 在 Node 字段校验期完成并聚合报错。
+- ``validate_dag(nodes)`` — 图结构：节点名去重、依赖存在性、环检测。
+- ``validate_ref(nodes)`` — inputs / condition 中 $引用的来源合法性。
+
+字段级校验（type 注册、timeout>0、condition 非空白与语法、inputs schema）
+由 pydantic 在 Node 字段 / model 校验期完成。
+图结构校验（节点名去重、依赖存在性、环检测）由 Pipeline.model_validator 完成。
 """
 
 from __future__ import annotations
@@ -11,219 +14,150 @@ from collections import Counter
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
-
 from .condition import parse_condition
 
 if TYPE_CHECKING:
     from .pipeline import Node
 
 
-class PipeLineValidator:
-    """Pipeline 声明式结构校验（构造期）。
+# ------------------------------------------------------------------
+# 图结构校验
+# ------------------------------------------------------------------
 
-    用法::
+def validate_dag(nodes: list["Node"]) -> list[str]:
+    """图结构校验：节点名去重、依赖存在性、DFS 环检测。"""
+    errors: list[str] = []
+    names = [n.name for n in nodes]
 
-        errors = PipeLineValidator.validate(nodes)
-        if errors:
-            raise ValueError("\\n".join(errors))
+    # 节点名去重
+    dupes = sorted(name for name, cnt in Counter(names).items() if cnt > 1)
+    if dupes:
+        errors.append(f"节点名重复: {', '.join(dupes)}")
 
-    全部 ``@staticmethod`` — 校验是无状态操作，类仅作命名空间。
-    内部分两层：
+    name_set = set(names)
 
-    1. 单节点校验（``_validate_node``）— inputs schema 与 $引用、
-       condition 语法与引用。
-    2. 图结构校验（``_validate_graph``）— 节点名去重、依赖存在性、环检测。
-    """
+    # 依赖存在性
+    for node in nodes:
+        for dep in node.depends_on:
+            if dep not in name_set:
+                errors.append(f"节点 {node.name!r} 依赖的 {dep!r} 不在 DAG 中")
 
-    # ------------------------------------------------------------------
-    # 公开入口
-    # ------------------------------------------------------------------
+    # DFS 环检测
+    deps: dict[str, list[str]] = {n.name: n.depends_on for n in nodes}
+    WHITE, GRAY, BLACK = 0, 1, 2
+    colour: dict[str, int] = {n: WHITE for n in deps}
+    path_stack: list[str] = []
 
-    @staticmethod
-    def validate(nodes: list["Node"]) -> list[str]:
-        """``list[Node]`` 校验入口（Pipeline 构造期调用）。"""
-        nodes_dict: dict[str, Node] = {n.name: n for n in nodes}
-        errors: list[str] = []
-        for node in nodes:
-            errors.extend(PipeLineValidator._validate_node(node, nodes_dict))
-        errors.extend(PipeLineValidator._validate_graph(nodes))
-        return errors
-
-    # ------------------------------------------------------------------
-    # 单节点校验
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _validate_node(
-        node: "Node",
-        nodes_dict: dict[str, "Node"],
-    ) -> list[str]:
-        """单节点跨字段校验（inputs / condition 的 schema 与引用）。"""
-        errors: list[str] = []
-
-        upstream = PipeLineValidator._get_upstream_nodes(node, nodes_dict)
-        errors.extend(PipeLineValidator._validate_node_inputs(node, nodes_dict, upstream))
-        errors.extend(PipeLineValidator._validate_node_condition(node, nodes_dict, upstream))
-
-        return errors
-
-    # ------------------------------------------------------------------
-    # condition 校验
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _validate_node_condition(
-        node: "Node",
-        nodes_dict: dict[str, "Node"],
-        upstream: set[str],
-    ) -> list[str]:
-        """校验节点 ``condition`` 属性：表达式语法、引用来源
-        （类型与非空白由 pydantic 字段校验保证）。"""
-        if node.condition is None or isinstance(node.condition, bool):
-            return []
-
-        condition = node.condition.strip()
-
-        try:
-            groups = parse_condition(condition)
-        except ValueError as exc:
-            return [f"节点 {node.name!r}: {exc}"]
-
-        errors: list[str] = []
-        for and_group in groups:
-            for _, key, _, _ in and_group:
-                for msg in PipeLineValidator._iter_ref_errors(f"${key}", upstream, nodes_dict):
-                    errors.append(f"节点 {node.name!r}: condition {msg}")
-        return errors
-
-    # ------------------------------------------------------------------
-    # inputs 校验
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _validate_node_inputs(
-        node: "Node",
-        nodes_dict: dict[str, "Node"],
-        upstream: set[str],
-    ) -> list[str]:
-        """节点 inputs 校验（start 参数声明 + 其他类型 input_schema + $引用）。"""
-        from app.registry import REGISTRY
-
-        errors: list[str] = []
-        inputs = node.inputs or {}
-
-        # ---- 参数声明 / schema 校验 ----
-        # start 节点的 InputParamDef 校验由 pydantic 字段校验完成
-        if node.type != "start":
-            schema = REGISTRY[node.type].input_schema
-            fields = schema.model_fields if schema else {}
-            for key in fields:
-                if fields[key].is_required() and key not in inputs:
-                    errors.append(f"节点 {node.name!r}: inputs 缺少必填参数 {key!r}")
-            # schema=None 表示输入动态，不做未知参数检查
-            if schema is not None and (unexpected := set(inputs) - set(fields)):
-                errors.append(f"节点 {node.name!r}: inputs 包含未知参数 {unexpected!r}")
-
-        # ---- $引用校验 ----
-        for key, val in inputs.items():
-            if isinstance(val, str) and val.startswith("$"):
-                for msg in PipeLineValidator._iter_ref_errors(val, upstream, nodes_dict):
-                    errors.append(f"节点 {node.name!r}: inputs {msg}")
-
-        return errors
-
-    # ------------------------------------------------------------------
-    # 图结构校验
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _validate_graph(nodes: list["Node"]) -> list[str]:
-        """依赖存在性 + 环检测。"""
-        errors: list[str] = []
-        deps: dict[str, list[str]] = {n.name: n.depends_on for n in nodes}
-        names = set(deps)
-
-        # ---- 节点名重复 ----
-        dupes = sorted(
-            name for name, cnt in Counter(n.name for n in nodes).items() if cnt > 1
-        )
-        if dupes:
-            errors.append(f"节点名重复: {', '.join(dupes)}")
-
-        # ---- 依赖存在性 ----
-        for node in nodes:
-            for dep in node.depends_on:
-                if dep not in names:
-                    errors.append(f"节点 {node.name!r} 依赖的 {dep!r} 不在 DAG 中")
-
-        # ---- DFS 环检测 ----
-        WHITE, GRAY, BLACK = 0, 1, 2
-        colour: dict[str, int] = {n: WHITE for n in deps}
-        path_stack: list[str] = []
-
-        def dfs(name: str) -> list[str] | None:
-            colour[name] = GRAY
-            path_stack.append(name)
-            for dep in deps[name]:
-                if dep not in colour:
-                    continue
-                if colour[dep] == GRAY:
-                    return path_stack[path_stack.index(dep) :]
-                if colour[dep] == WHITE:
-                    cycle = dfs(dep)
-                    if cycle:
-                        return cycle
-            colour[name] = BLACK
-            path_stack.pop()
-            return None
-
-        for name in deps:
-            if colour[name] == WHITE:
-                cycle = dfs(name)
+    def dfs(name: str) -> list[str] | None:
+        colour[name] = GRAY
+        path_stack.append(name)
+        for dep in deps[name]:
+            if dep not in colour:
+                continue
+            if colour[dep] == GRAY:
+                return path_stack[path_stack.index(dep) :]
+            if colour[dep] == WHITE:
+                cycle = dfs(dep)
                 if cycle:
-                    errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
-                    break
+                    return cycle
+        colour[name] = BLACK
+        path_stack.pop()
+        return None
 
-        return errors
+    for name in deps:
+        if colour[name] == WHITE:
+            cycle = dfs(name)
+            if cycle:
+                errors.append(f"检测到循环依赖: {' → '.join(cycle)}")
+                break
 
-    # ------------------------------------------------------------------
-    # $引用校验
-    # ------------------------------------------------------------------
+    return errors
 
-    @staticmethod
-    def _get_upstream_nodes(
-        node: "Node", nodes_dict: dict[str, "Node"]
-    ) -> set[str]:
-        """返回 node 的所有上游节点（传递闭包）。"""
-        seen: set[str] = set()
-        stack = list(node.depends_on or [])
-        while stack:
-            dep = stack.pop()
-            if dep not in seen:
-                seen.add(dep)
-                stack.extend(
-                    getattr(nodes_dict.get(dep), "depends_on", None) or []
-                )
-        return seen
 
-    @staticmethod
-    def _iter_ref_errors(
-        ref: str,
-        upstream: set[str],
-        nodes_dict: dict[str, "Node"],
-    ) -> Iterator[str]:
-        """校验单个 $引用，yield 错误消息。"""
-        raw_root, _, field = ref.partition(".")
-        root = raw_root.lstrip("$")
-        if root not in upstream:
-            yield f"引用的 {root!r} 不是上游依赖节点"
-            return
-        if not field:
-            yield f"引用 {root!r} 缺少字段名"
-            return
-        up_node = nodes_dict.get(root)
-        out_schema = up_node.resolve_output_schema()
-        if out_schema is not None:
-            top_field = field.split(".")[0]
-            if top_field not in out_schema.model_fields:
-                yield f"引用的 {root!r} 输出中没有字段 {top_field!r}"
+# ------------------------------------------------------------------
+# $参数引用校验
+# ------------------------------------------------------------------
+
+def validate_ref(nodes: list["Node"]) -> list[str]:
+    """``list[Node]`` $引用校验入口（Pipeline 构造期调用）。"""
+    nodes_dict: dict[str, Node] = {n.name: n for n in nodes}
+    errors: list[str] = []
+    for node in nodes:
+        upstream = _get_upstream_nodes(node, nodes_dict)
+        errors.extend(_validate_inputs_ref(node, nodes_dict, upstream))
+        errors.extend(_validate_condition_ref(node, nodes_dict, upstream))
+    return errors
+
+
+def _validate_condition_ref(
+    node: "Node",
+    nodes_dict: dict[str, "Node"],
+    upstream: set[str],
+) -> list[str]:
+    """校验节点 ``condition`` 中的 $引用来源
+    （类型、非空白、语法由 pydantic 字段校验保证）。"""
+    if node.condition is None or isinstance(node.condition, bool):
+        return []
+
+    groups = parse_condition(node.condition)
+    errors: list[str] = []
+    for and_group in groups:
+        for _, key, _, _ in and_group:
+            for msg in _iter_ref_errors(f"${key}", upstream, nodes_dict):
+                errors.append(f"节点 {node.name!r}: condition {msg}")
+    return errors
+
+
+def _validate_inputs_ref(
+    node: "Node",
+    nodes_dict: dict[str, "Node"],
+    upstream: set[str],
+) -> list[str]:
+    """节点 inputs $引用校验（schema 校验由 pydantic model_validator 完成）。"""
+    errors: list[str] = []
+    inputs = node.inputs or {}
+
+    for key, val in inputs.items():
+        if isinstance(val, str) and val.startswith("$"):
+            for msg in _iter_ref_errors(val, upstream, nodes_dict):
+                errors.append(f"节点 {node.name!r}: inputs {msg}")
+
+    return errors
+
+
+def _get_upstream_nodes(
+    node: "Node", nodes_dict: dict[str, "Node"]
+) -> set[str]:
+    """返回 node 的所有上游节点（传递闭包）。"""
+    seen: set[str] = set()
+    stack = list(node.depends_on or [])
+    while stack:
+        dep = stack.pop()
+        if dep not in seen:
+            seen.add(dep)
+            stack.extend(
+                getattr(nodes_dict.get(dep), "depends_on", None) or []
+            )
+    return seen
+
+
+def _iter_ref_errors(
+    ref: str,
+    upstream: set[str],
+    nodes_dict: dict[str, "Node"],
+) -> Iterator[str]:
+    """校验单个 $引用，yield 错误消息。"""
+    raw_root, _, field = ref.partition(".")
+    root = raw_root.lstrip("$")
+    if root not in upstream:
+        yield f"引用的 {root!r} 不是上游依赖节点"
+        return
+    if not field:
+        yield f"引用 {root!r} 缺少字段名"
+        return
+    up_node = nodes_dict.get(root)
+    out_schema = up_node.resolve_output_schema()
+    if out_schema is not None:
+        top_field = field.split(".")[0]
+        if top_field not in out_schema.model_fields:
+            yield f"引用的 {root!r} 输出中没有字段 {top_field!r}"

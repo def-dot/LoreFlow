@@ -19,7 +19,7 @@ Quick start::
 from app.registry.funcs.human import human
 
 from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
-from .validator import PipeLineValidator
+from .validator import validate_dag, validate_ref
 from .types import (
     PipeLineExecutionError,
     HumanRejected,
@@ -40,6 +40,7 @@ __all__ = [
     "SuspendExecution",
     "human",
     "terminal_approver",
-    "PipeLineValidator",
+    "validate_dag",
+    "validate_ref",
     "wired_ctx",
 ]
