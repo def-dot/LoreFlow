@@ -84,44 +84,18 @@ def validate_ref(nodes: list["Node"]) -> list[str]:
     errors: list[str] = []
     for node in nodes:
         upstream = _get_upstream_nodes(node, nodes_dict)
-        errors.extend(_validate_inputs_ref(node, nodes_dict, upstream))
-        errors.extend(_validate_condition_ref(node, nodes_dict, upstream))
-    return errors
-
-
-def _validate_condition_ref(
-    node: "Node",
-    nodes_dict: dict[str, "Node"],
-    upstream: set[str],
-) -> list[str]:
-    """校验节点 ``condition`` 中的 $引用来源
-    （类型、非空白、语法由 pydantic 字段校验保证）。"""
-    if node.condition is None or isinstance(node.condition, bool):
-        return []
-
-    groups = parse_condition(node.condition)
-    errors: list[str] = []
-    for and_group in groups:
-        for _, key, _, _ in and_group:
-            for msg in _iter_ref_errors(f"${key}", upstream, nodes_dict):
-                errors.append(f"节点 {node.name!r}: condition {msg}")
-    return errors
-
-
-def _validate_inputs_ref(
-    node: "Node",
-    nodes_dict: dict[str, "Node"],
-    upstream: set[str],
-) -> list[str]:
-    """节点 inputs $引用校验（schema 校验由 pydantic model_validator 完成）。"""
-    errors: list[str] = []
-    inputs = node.inputs or {}
-
-    for key, val in inputs.items():
-        if isinstance(val, str) and val.startswith("$"):
-            for msg in _iter_ref_errors(val, upstream, nodes_dict):
-                errors.append(f"节点 {node.name!r}: inputs {msg}")
-
+        # inputs $引用
+        for key, val in (node.inputs or {}).items():
+            if isinstance(val, str) and val.startswith("$"):
+                for msg in _iter_ref_errors(val, upstream, nodes_dict):
+                    errors.append(f"节点 {node.name!r}: inputs {msg}")
+        # condition $引用
+        if node.condition is not None and not isinstance(node.condition, bool):
+            groups = parse_condition(node.condition)
+            for and_group in groups:
+                for _, key, _, _ in and_group:
+                    for msg in _iter_ref_errors(f"${key}", upstream, nodes_dict):
+                        errors.append(f"节点 {node.name!r}: condition {msg}")
     return errors
 
 
