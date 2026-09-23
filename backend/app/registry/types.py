@@ -54,17 +54,13 @@ TOOL_REGISTRY: dict[str, FuncDef] = {}
 # ---------------------------------------------------------------------------
 
 def _infer_func_schema(func: Callable[..., Any]) -> tuple[type[BaseModel] | None, type[BaseModel] | None]:
-    """从函数签名推导 (input_schema, output_schema)。
-
-    使用 typing.get_type_hints() 解析前向引用（from __future__ import annotations）。
-    """
+    """从函数签名推导 (input_schema, output_schema)。"""
     _is_model = lambda ann: isinstance(ann, type) and issubclass(ann, BaseModel)
     try:
         hints = typing.get_type_hints(func)
     except Exception:
         hints = {}
 
-    # input_schema: 第一个 BaseModel 参数
     sig = inspect.signature(func)
     input_schema = None
     for pname in sig.parameters:
@@ -73,7 +69,6 @@ def _infer_func_schema(func: Callable[..., Any]) -> tuple[type[BaseModel] | None
             input_schema = ann
             break
 
-    # output_schema: 返回值
     ret = hints.get("return")
     output_schema = ret if ret is not None and _is_model(ret) else None
     return input_schema, output_schema

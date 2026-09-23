@@ -2,6 +2,7 @@
 Core types for the DAG Flow orchestration engine.
 """
 
+import contextvars
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -109,7 +110,7 @@ ApproverFunc = Callable[[str, dict[str, Any], dict[str, str]], Awaitable[dict[st
 
 
 def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[str, Any]:
-    """接线 → 节点上下文 ``{**ctx, **{本地键: 解析值}}``，递归解析嵌套 $ 引用。"""
+    """接线 → 解析后的 inputs：递归解析 wiring 中的 $ 引用，仅返回 wiring 本身。"""
 
     def _deref(ref: str) -> Any:
         val: Any = ctx
@@ -129,8 +130,8 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
         return obj
 
     if not wiring:
-        return dict(ctx)
-    return {**ctx, **{k: _resolve(v) for k, v in wiring.items()}}
+        return {}
+    return {k: _resolve(v) for k, v in wiring.items()}
 
 
 class NodeContext:
@@ -141,6 +142,10 @@ class NodeContext:
     def __init__(self, node_name: str, stored_decision: dict[str, Any] | None = None):
         self.node_name = node_name
         self.stored_decision = stored_decision
+
+
+#: NodeContext 注入：executor 在调用节点函数前设置，函数内通过 .get() 读取。
+current_node_ctx: contextvars.ContextVar[NodeContext] = contextvars.ContextVar("current_node_ctx")
 
 
 class HumanRejected(Exception):

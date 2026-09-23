@@ -11,17 +11,14 @@ This naturally respects the DAG topology without a centralized scheduler.
 """
 
 import asyncio
-import inspect
 import logging
 import time
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
-
 from app.registry import REGISTRY
 from .condition import eval_condition
-from .types import HumanRejected, NodeContext, wired_ctx
+from .types import HumanRejected, NodeContext, current_node_ctx, wired_ctx
 from .pipeline import Node, RetryPolicy
 from .types import (
     PipeLineExecutionError,
@@ -309,34 +306,17 @@ class PipeLineExecutor:
 
     async def _call(self, node: Node) -> Any:
         """Invoke the node function (from REGISTRY) with timeout and output validation."""
-        target = wired_ctx(self.ctx, node.inputs or {})
+        func_def = REGISTRY[node.type]
+        resolved = wired_ctx(self.ctx, node.inputs or {})
 
-        func = REGISTRY[node.type].func
-        sig = inspect.signature(func)
+        # 注入 NodeContext（所有节点都设置，需要的函数通过 current_node_ctx.get() 读取）
+        saved = self._resume.get(node.name)
+        stored_decision = None
+        if saved and saved.get("output"):
+            stored_decision = saved["output"].get("decision")
+        current_node_ctx.set(NodeContext(node_name=node.name, stored_decision=stored_decision))
 
-        # 构造 kwargs
-        kwargs: dict[str, Any] = {}
-        remaining = dict(target)
-
-        for pname, param in sig.parameters.items():
-            ann = param.annotation
-            if param.kind == inspect.Parameter.VAR_KEYWORD:
-                kwargs[pname] = remaining
-                remaining.clear()
-            elif isinstance(ann, type) and issubclass(ann, NodeContext):
-                # 从 resume 数据中提取 stored_decision（如有）
-                saved = self._resume.get(node.name)
-                stored_decision = None
-                if saved and saved.get("output"):
-                    stored_decision = saved["output"].get("decision")
-                kwargs[pname] = NodeContext(node_name=node.name, stored_decision=stored_decision)
-            elif isinstance(ann, type) and issubclass(ann, BaseModel):
-                fields = set(ann.model_fields)
-                kwargs[pname] = ann(**{k: remaining.pop(k) for k in fields if k in remaining})
-            elif pname in target:
-                kwargs[pname] = target[pname]
-
-        coro = func(**kwargs)
+        coro = func_def.func(func_def.input_schema(**resolved)) if func_def.input_schema else func_def.func()
 
         output = await asyncio.wait_for(coro, timeout=node.timeout) if node.timeout is not None else await coro
         return self._validate_output(node, output)

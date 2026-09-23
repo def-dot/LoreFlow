@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.engine.types import NodeContext
+from app.engine.types import HumanRejected, NodeContext, SuspendExecution, current_node_ctx
 from app.registry.types import func
 
 
@@ -33,13 +33,9 @@ logger = logging.getLogger(__name__)
     description="人工审核节点，暂停等待审批",
     metadata={"group": "基础", "order": 10},
 )
-async def human(
-    ctx: NodeContext,
-    params: HumanParams,
-) -> HumanOutput:
-    """审核协议：有已存储决策则处理，否则挂起等待审批。
-    """
-    from app.engine.types import HumanRejected, SuspendExecution
+async def human(params: HumanParams) -> HumanOutput:
+    """审核协议：有已存储决策则处理，否则挂起等待审批。"""
+    ctx: NodeContext = current_node_ctx.get()
 
     # 展平 payload 列表为 dict
     payload_dict = {item.key: item.value for item in params.payload}

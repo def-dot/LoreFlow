@@ -25,6 +25,7 @@ from .types import (
     NodeResult,
     NodeStatus,
     SuspendExecution,
+    current_node_ctx,
     wired_ctx,
 )
 
@@ -38,6 +39,7 @@ __all__ = [
     "Pipeline",
     "RetryPolicy",
     "SuspendExecution",
+    "current_node_ctx",
     "terminal_approver",
     "validate_dag",
     "validate_ref",

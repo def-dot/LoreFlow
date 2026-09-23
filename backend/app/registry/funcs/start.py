@@ -5,12 +5,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from pydantic import BaseModel, ConfigDict
 
 from ..types import func
 
 
+class StartParams(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
 @func(node=True, tool=False, label="输入")
-async def start(**kwargs: Any):
+async def start(params: StartParams):
     """透传外部输入，供下游节点通过 $ 引用取值。"""
-    return kwargs
+    return params.model_dump()
