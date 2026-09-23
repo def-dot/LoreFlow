@@ -291,10 +291,18 @@ class Pipeline(BaseModel):
 
     # ---- Mermaid 可视化 ----
 
+    # Mermaid 保留字，用作节点 ID 时加 _ 前缀避免解析错误
+    _MERMAID_RESERVED = frozenset({
+        "end", "subgraph", "graph", "flowchart", "class", "click", "link",
+        "style", "default", "direction", "interpolate", "fill", "stroke",
+    })
+
     def to_mermaid(self) -> str:
         lines = ["graph TD"]
         for node in self.nodes:
             nid = re.sub(r"[ \-]", "_", node.name)
+            if nid in self._MERMAID_RESERVED:
+                nid = f"_{nid}"
             func_def = REGISTRY.get(node.type)
             main_text = node.label or node.name
             small: list[str] = []
@@ -311,6 +319,8 @@ class Pipeline(BaseModel):
             lines.append(f'    {nid}["{text}"]')
             for dep in node.depends_on:
                 did = re.sub(r"[ \-]", "_", dep)
+                if did in self._MERMAID_RESERVED:
+                    did = f"_{did}"
                 lines.append(f"    {did} --> {nid}")
         return "\n".join(lines)
 

@@ -10,6 +10,9 @@ const store = usePipelinesStore()
 const loading = ref(false)
 const loadError = ref(false)
 
+// 编写说明展开状态
+const helpExpanded = ref(false)
+
 // 筛选
 const filterText = ref('')
 const filteredPipelines = computed(() => {
@@ -129,18 +132,27 @@ async function handleDelete() {
 const defaultYaml = `name: 我的工作流
 description: 一句话描述
 
-inputs:
+params:
   prompt:
     required: true
     label: 提示词
     description: 用户输入的问题
 
 nodes:
-  reply:
-    type: llm_chat
-    label: LLM 回复
-    description: 调用 LLM 直接回答
-    timeout: 300
+- name: reply
+  type: llm_chat
+  label: LLM 回复
+  description: 调用 LLM 直接回答
+  inputs:
+    prompt: $input.prompt
+  timeout: 300
+- name: end
+  type: end
+  label: 最终输出
+  depends_on:
+  - reply
+  inputs:
+    reply: $reply.content
 `
 
 onMounted(async () => {
@@ -162,6 +174,78 @@ onMounted(async () => {
       <el-button plain :loading="loading" @click="fetchAll">↻ 刷新</el-button>
       <el-button type="primary" @click="openCreate">＋ 新建</el-button>
     </header>
+
+    <!-- 工作流编写说明 -->
+    <div class="help-section">
+      <div class="help-toggle" @click="helpExpanded = !helpExpanded">
+        <span class="help-icon">{{ helpExpanded ? '▼' : '▶' }}</span>
+        <span class="help-title">工作流编写说明</span>
+      </div>
+      <el-collapse-transition>
+        <div v-show="helpExpanded" class="help-content">
+          <div class="help-grid">
+            <div class="help-card">
+              <h3>基本结构</h3>
+              <pre class="help-code">name: 我的工作流
+description: 一句话描述
+
+params:
+  prompt:
+    required: true
+    label: 提示词
+    description: 用户输入的问题
+
+nodes:
+- name: reply
+  type: llm_chat
+  label: LLM 回复
+  inputs:
+    prompt: $input.prompt
+  timeout: 300
+- name: end
+  type: end
+  label: 最终输出
+  depends_on:
+  - reply
+  inputs:
+    reply: $reply.content</pre>
+            </div>
+            <div class="help-card">
+              <h3>参数类型 (params)</h3>
+              <ul class="help-list">
+                <li><code>text</code> - 单行文本</li>
+                <li><code>paragraph</code> - 多行文本</li>
+                <li><code>number</code> - 数字</li>
+                <li><code>select</code> - 下拉选项（需配合 options）</li>
+                <li><code>checkbox</code> - 复选框</li>
+                <li><code>file</code> - 单文件上传</li>
+                <li><code>file_list</code> - 多文件上传</li>
+              </ul>
+            </div>
+            <div class="help-card">
+              <h3>节点类型 (type)</h3>
+              <ul class="help-list">
+                <li><code>llm_chat</code> - LLM 对话</li>
+                <li><code>llm_classify</code> - 意图识别</li>
+                <li><code>rag_load</code> - 加载文档</li>
+                <li><code>rag_retrieve</code> - 知识库检索</li>
+                <li><code>human</code> - 人工审核</li>
+                <li><code>end</code> - 结束节点（必须）</li>
+              </ul>
+            </div>
+            <div class="help-card">
+              <h3>数据引用</h3>
+              <ul class="help-list">
+                <li><code>$input.xxx</code> - 引用输入参数</li>
+                <li><code>$节点名.xxx</code> - 引用上游节点输出</li>
+                <li><code>depends_on</code> - 声明依赖关系</li>
+                <li><code>condition</code> - 条件执行（可选）</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </el-collapse-transition>
+    </div>
 
     <main class="layout">
       <!-- 左侧：流水线列表 -->
@@ -240,6 +324,12 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
 .page-head {
   padding: 10px 20px;
   border-bottom: 1px solid var(--line);
@@ -263,12 +353,88 @@ onMounted(async () => {
   color: #f87171;
   font-size: 12px;
 }
+/* 工作流编写说明 */
+.help-section {
+  border-bottom: 1px solid var(--line);
+  background: rgba(16, 21, 42, 0.3);
+}
+.help-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+.help-toggle:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.help-icon {
+  font-size: 10px;
+  color: var(--ink-3);
+  transition: transform 0.2s;
+}
+.help-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.help-content {
+  padding: 0 20px 16px;
+}
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+.help-card {
+  background: rgba(16, 21, 42, 0.5);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+}
+.help-card h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 10px;
+}
+.help-code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}
+.help-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--ink-2);
+}
+.help-list code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(77, 196, 178, 0.15);
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--accent);
+}
 /* 主布局：左侧列表 + 右侧详情 */
 .layout {
   display: grid;
   grid-template-columns: 260px 1fr;
   gap: 0;
-  height: calc(100vh - 52px);
+  flex: 1;
+  min-height: 0;
 }
 @media (max-width: 900px) {
   .layout {

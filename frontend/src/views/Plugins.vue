@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
-import { listPlugins, uploadPlugin, type PluginInfo } from '@/api/plugins'
+import { listPlugins, uploadPlugin, deletePlugin, type PluginInfo } from '@/api/plugins'
 import NodeTypeCard from '@/components/NodeTypeCard.vue'
 
 const plugins = ref<PluginInfo[]>([])
@@ -44,10 +44,6 @@ async function fetchAll() {
   }
 }
 
-function fmtTime(iso: string) {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
-}
 
 async function handleUpload(file: File) {
   uploading.value = true
@@ -67,6 +63,17 @@ function onFileChange(e: Event) {
   const file = input.files?.[0]
   if (file) handleUpload(file)
   input.value = ''
+}
+
+async function handleDelete(p: PluginInfo) {
+  try {
+    await ElMessageBox.confirm(`确定删除插件 ${p.filename}？`, '删除插件', { type: 'warning' })
+    await deletePlugin(p.filename)
+    ElMessage.success(`插件 ${p.filename} 已删除`)
+    await fetchAll()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || e?.message || '删除失败')
+  }
 }
 
 onMounted(fetchAll)
@@ -114,10 +121,10 @@ onMounted(fetchAll)
             <div class="plugin-info">
               <span class="plugin-filename">{{ p.filename }}</span>
               <span class="plugin-module muted">{{ p.module }}</span>
-              <span class="plugin-time muted">{{ fmtTime(p.loaded_at) }}</span>
             </div>
             <el-tag v-if="p.error" type="danger" size="small" disable-transitions>{{ p.error }}</el-tag>
             <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
+            <el-button type="danger" text size="small" @click="handleDelete(p)">删除</el-button>
           </div>
           <div v-if="p.node_names.length" class="plugin-nodes">
             <template v-for="name in p.node_names" :key="name">
@@ -296,9 +303,6 @@ async def send_notify(params: NotifyInput) -> NotifyOutput:
 .plugin-module {
   font-family: var(--font-mono);
   font-size: 11.5px;
-}
-.plugin-time {
-  font-size: 11px;
 }
 .plugin-nodes {
   display: grid;

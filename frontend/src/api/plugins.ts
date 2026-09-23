@@ -17,3 +17,7 @@ export function uploadPlugin(file: File): Promise<PluginInfo> {
   form.append('file', file)
   return api.post('/plugins', form)
 }
+
+export function deletePlugin(filename: string): Promise<void> {
+  return api.delete(`/plugins/${filename}`)
+}

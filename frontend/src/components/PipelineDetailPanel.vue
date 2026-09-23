@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import type { PipelineDetail } from '@/api/pipelines'
 import type { JsonSchema } from '@/api/nodeTypes'
 import MermaidDiagram from './MermaidDiagram.vue'
@@ -113,6 +114,11 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
     })
     .join('\n')
 }
+
+async function copySource() {
+  await navigator.clipboard.writeText(props.detail.source)
+  ElMessage.success('已复制')
+}
 </script>
 
 <template>
@@ -205,7 +211,10 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
       </section>
     </div>
     <section class="panel source-panel">
-      <h2>YAML 源码</h2>
+      <div class="source-head">
+        <h2>YAML 源码</h2>
+        <el-button size="small" text @click="copySource">复制</el-button>
+      </div>
       <pre class="source">{{ detail.source }}</pre>
     </section>
   </div>
@@ -274,6 +283,11 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
 }
 .source-panel {
   margin-top: 18px;
+}
+.source-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .source {
   margin: 0;

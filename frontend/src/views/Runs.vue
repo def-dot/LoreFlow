@@ -607,6 +607,7 @@ onUnmounted(() => {
             <el-select
               v-model="configName"
               :disabled="!pipelinesStore.pipelines.length"
+              filterable
               placeholder="选择流水线"
               style="flex: 1"
             >
@@ -631,10 +632,9 @@ onUnmounted(() => {
           />
         </div>
         <div v-if="paramSpecs.length" class="create-field">
-          <label class="create-label">运行时参数</label>
           <div class="inputs-pop">
             <div class="inputs-pop-head">
-              <span class="inputs-pop-title">参数配置</span>
+              <span class="inputs-pop-title">运行时参数配置</span>
               <el-button
                 v-if="paramSpecs.length"
                 size="small"

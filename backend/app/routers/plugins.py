@@ -3,7 +3,7 @@
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.core.config import settings
 from app.core.response import UnifiedResponseRoute
@@ -60,3 +60,13 @@ async def upload_plugin(
 
     # 不应走到这里，但兜底
     raise RuntimeError(f"插件 {filename} 上传成功但未被加载")
+
+
+@router.delete("/{filename}")
+async def delete_plugin(filename: str) -> dict:
+    target = PLUGINS_DIR / filename
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"插件文件 {filename} 不存在")
+    target.unlink()
+    plugin_loader.load_plugins()
+    return {"detail": f"插件 {filename} 已删除"}
