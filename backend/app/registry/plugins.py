@@ -69,25 +69,20 @@ def _load(path: Path) -> None:
         spec.loader.exec_module(module)
 
         new_nodes = {
-            fd.name
-            for value in vars(module).values()
-            if (fd := getattr(value, "__func_def__", None)) is not None
-            and getattr(value, "__module__", None) == module.__name__
+            k for k, v in REGISTRY.items()
+            if existed_nodes.get(k) is not v
         }
         conflicts = set(new_nodes) & set(existed_nodes)
         if conflicts:
             logger.error("Plugin %s conflicts on nodes: %s", path.name, ", ".join(sorted(conflicts)))
             error = f"节点冲突：{', '.join(sorted(conflicts))} 已被内置节点或其他插件占用"
+            REGISTRY.clear()
+            REGISTRY.update(existed_nodes)
+        else:
+            logger.info("Loaded plugin %s (registered %d: %s)", path.name, len(new_nodes), ", ".join(sorted(new_nodes)))
     except Exception as exc:
         logger.error("Plugin %s error: %s", path.name, exc)
         error = str(exc)
-
-    if error:
-        REGISTRY.clear()
-        REGISTRY.update(existed_nodes)
-        new_nodes = set()
-    else:
-        logger.info("Loaded plugin %s (registered %d: %s)", path.name, len(new_nodes), ", ".join(sorted(new_nodes)))
 
     _LOADED[module_name] = PluginInfo(
         filename=path.name,
