@@ -19,6 +19,7 @@ nodes:
     max_iterations: 10
   timeout: 300
 - name: __end__
+  label: 最终输出
   depends_on:
   - agent
   type: end

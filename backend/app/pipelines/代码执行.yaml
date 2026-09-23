@@ -48,6 +48,7 @@ nodes:
       stats: $stats.result
   timeout: 10
 - name: __end__
+  label: 最终输出
   depends_on:
   - report
   type: end

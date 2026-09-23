@@ -2,8 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
-import type { PipelineDetail, PipelineListItem } from '@/api/pipelines'
-import { createPipeline, deletePipeline, getPipeline, updatePipeline } from '@/api/pipelines'
+import { createPipeline, deletePipeline, updatePipeline } from '@/api/pipelines'
 import { usePipelinesStore } from '@/stores/pipelines'
 
 const store = usePipelinesStore()
@@ -22,12 +21,6 @@ const filteredPipelines = computed(() => {
       || p.description.toLowerCase().includes(q),
   )
 })
-
-// 选中的流水线详情
-const detail = ref<PipelineDetail | null>(null)
-const detailLoading = ref(false)
-const detailError = ref<string | null>(null)
-const selectedName = ref<string | null>(null)
 
 // 新建/编辑 drawer
 const editorOpen = ref(false)
@@ -48,26 +41,24 @@ async function fetchAll() {
   }
 }
 
-// 选中流水线并加载详情（SWR）
+// 选中流水线并加载详情
+const detailLoading = ref(false)
+const detailError = ref<string | null>(null)
+
 async function selectPipeline(name: string) {
-  selectedName.value = name
   detailError.value = null
-  const cached = store.detailCache[name]
-  if (cached) detail.value = cached
-  detailLoading.value = !cached
+  detailLoading.value = true
   try {
-    const d = await getPipeline(name)
-    store.detailCache[name] = d
-    if (selectedName.value === name) detail.value = d
+    await store.select(name)
   } catch {
-    if (!detail.value) detailError.value = '加载失败'
+    detailError.value = '加载失败'
   } finally {
     detailLoading.value = false
   }
 }
 
 const selectedItem = computed(() =>
-  store.pipelines.find((p) => p.name === selectedName.value),
+  store.pipelines.find((p) => p.name === store.selectedName),
 )
 
 // 打开新建 drawer
@@ -80,9 +71,9 @@ function openCreate() {
 
 // 打开编辑 drawer
 async function openEdit() {
-  if (!selectedName.value || !detail.value) return
-  editingName.value = selectedName.value
-  editorDefinition.value = detail.value.source
+  if (!store.selectedName || !store.detail) return
+  editingName.value = store.selectedName
+  editorDefinition.value = store.detail.source
   saveError.value = null
   editorOpen.value = true
 }
@@ -98,7 +89,6 @@ async function handleSave() {
   try {
     if (editingName.value) {
       const { name: newName } = await updatePipeline(editingName.value, { definition: editorDefinition.value })
-      delete store.detailCache[editingName.value]
       await fetchAll()
       ElMessage.success('流水线已更新')
       await selectPipeline(newName)
@@ -119,7 +109,7 @@ async function handleSave() {
 
 // 删除
 async function handleDelete() {
-  if (!selectedName.value || !selectedItem.value) return
+  if (!store.selectedName || !selectedItem.value) return
   try {
     await ElMessageBox.confirm(
       `删除流水线「${selectedItem.value.name}」？删除后不可恢复。`,
@@ -129,10 +119,10 @@ async function handleDelete() {
   } catch {
     return
   }
-  await deletePipeline(selectedName.value)
+  await deletePipeline(store.selectedName)
   ElMessage.success(`已删除流水线「${selectedItem.value.name}」`)
-  selectedName.value = null
-  detail.value = null
+  store.selectedName = ''
+  store.detail = null
   await fetchAll()
 }
 
@@ -183,7 +173,7 @@ onMounted(async () => {
           v-for="p in filteredPipelines"
           :key="p.name"
           class="sidebar-item"
-          :class="{ active: p.name === selectedName }"
+          :class="{ active: p.name === store.selectedName }"
           @click="selectPipeline(p.name)"
         >
           <span class="sidebar-name">{{ p.name }}</span>
@@ -195,10 +185,10 @@ onMounted(async () => {
 
       <!-- 右侧：详情 -->
       <div class="detail">
-        <template v-if="detail">
+        <template v-if="store.detail">
           <div class="detail-head">
             <div class="detail-title">
-              <h2>{{ detail.name }}</h2>
+              <h2>{{ store.detail.name }}</h2>
             </div>
             <div class="detail-actions">
               <el-button size="small" plain @click="openEdit()">
@@ -209,8 +199,8 @@ onMounted(async () => {
               </el-button>
             </div>
           </div>
-          <div v-loading="detailLoading" class="detail-body">
-            <PipelineDetailPanel :detail="detail" />
+          <div class="detail-body">
+            <PipelineDetailPanel :key="store.detail.name" :detail="store.detail" />
           </div>
         </template>
         <div v-else-if="detailLoading" v-loading="true" class="detail-empty" />

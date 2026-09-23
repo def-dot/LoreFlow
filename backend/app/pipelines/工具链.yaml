@@ -50,6 +50,7 @@ nodes:
     max_iterations: 3
   timeout: 60
 - name: __end__
+  label: 最终输出
   depends_on:
   - search
   - suggest

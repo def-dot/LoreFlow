@@ -12,7 +12,7 @@ class EndParams(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-@func(node=True, tool=False, label="输出")
+@func(node=True, tool=False, label="结束")
 async def end(params: EndParams):
     """返回 params 中所有键。"""
     return params.model_dump()

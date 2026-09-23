@@ -61,7 +61,6 @@ class StringResultOutput(BaseModel):
 
 class DocumentRef(BaseModel):
     id: str = Field(description="文件 ID", min_length=1)
-    filename: str = Field(default="上传文档", description="文件名")
 
 
 class RagLoadParams(BaseModel):
@@ -112,7 +111,11 @@ async def rag_load(params: RagLoadParams) -> RagLoadOutput:
     text = files.read_upload(params.document.id)
     if not text.strip():
         raise ValueError("上传文档正文为空：文件内容为空白文本")
-    stem = Path(params.document.filename).stem or "document"
+    # 从数据库获取原始文件名
+    from app.services import uploads as uploads_service
+    record = await uploads_service.get_upload(params.document.id)
+    filename = record.filename if record else params.document.id
+    stem = Path(filename).stem or "document"
     return RagLoadOutput(doc_name=stem, text=text)
 
 

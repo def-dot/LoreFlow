@@ -10,5 +10,3 @@ nodes:
     backoff_factor: 2
     backoff_max: 0.5
     jitter: false
-    retry_on:
-    - TimeoutError

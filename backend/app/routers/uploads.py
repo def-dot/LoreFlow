@@ -6,7 +6,9 @@ from fastapi import APIRouter, File, UploadFile
 
 from app.core.config import settings
 from app.core.response import UnifiedResponseRoute
+from app.models.upload import UploadRecord
 from app.schemas.uploads import UploadOut
+from app.services import uploads as uploads_service
 from app.utils import files
 
 router = APIRouter(prefix="/uploads", route_class=UnifiedResponseRoute, tags=["uploads"])
@@ -26,4 +28,7 @@ async def upload_file(
     if len(data) > settings.UPLOAD_MAX_MB * 1024 * 1024:
         raise ValueError(f"文件超过大小上限（{settings.UPLOAD_MAX_MB}MB）")
     stored = files.save_upload(data, suffix)
+    # 元数据存DB
+    record = UploadRecord(id=stored, filename=filename, size=len(data))
+    await uploads_service.create(record)
     return UploadOut(id=stored, filename=filename, size=len(data))

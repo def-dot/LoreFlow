@@ -18,7 +18,6 @@ const props = defineProps<{
 }>()
 
 const graphEl = ref<HTMLElement>()
-
 mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
@@ -94,24 +93,35 @@ function decorate(source: string, statuses?: Record<string, string>): string {
   return lines.join('\n')
 }
 
+let pendingId = 0
+
 async function render() {
   if (!graphEl.value) return
   const source = decorate(props.source || 'graph TD\n  none[暂无流水线]', props.statuses)
   renderSeq += 1
+  const seq = renderSeq
+  const myId = pendingId
   try {
-    const { svg } = await mermaid.render(`mermaid-${renderSeq}`, source)
+    const { svg } = await mermaid.render(`mermaid-${seq}`, source)
+    if (myId !== pendingId) return // 新的渲染已经启动，丢弃旧结果
     graphEl.value.innerHTML = svg
   } catch (e) {
+    if (myId !== pendingId) return
     if (graphEl.value) graphEl.value.textContent = String(e)
   }
 }
 
-onMounted(render)
+function scheduleRender() {
+  pendingId++
+  render()
+}
+
+onMounted(scheduleRender)
 watch(
   [() => props.source, () => props.statuses],
   async () => {
     await nextTick()
-    await render()
+    scheduleRender()
   },
 )
 </script>

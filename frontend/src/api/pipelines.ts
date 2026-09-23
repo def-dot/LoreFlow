@@ -16,6 +16,9 @@ export interface PipelineNodeInfo {
   condition: string | null
 }
 
+/** 参数类型枚举（与后端 ParamType 对齐） */
+export type ParamType = 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'file_list'
+
 /** 一个运行时输入参数的声明（后端直接返回 YAML 原始结构） */
 export interface ParamSpec {
   name: string            // ctx 里的键（从 dict key 派生）
@@ -23,8 +26,10 @@ export interface ParamSpec {
   description?: string
   default?: unknown
   required?: boolean
-  multiline?: boolean     // 多行文本（渲染 textarea，如文章正文）
-  file?: boolean          // 文件上传（渲染上传控件，提交上传接口返回的 {id, filename} 引用）
+  type?: ParamType        // 参数类型（未声明时退化为 text）
+  options?: string[]      // type=select 时的选项列表
+  multiline?: boolean     // 多行文本（渲染 textarea，如文章正文）— 旧版兼容
+  file?: boolean          // 文件上传（渲染上传控件）— 旧版兼容
 }
 
 export interface PipelineListItem {
@@ -42,6 +47,14 @@ export interface PipelineDetail extends PipelineListItem {
 /** 将 YAML inputs 原始结构转为 ParamSpec 数组（name 从 key 派生） */
 export function toParamSpecs(params: Record<string, Omit<ParamSpec, 'name'>>): ParamSpec[] {
   return Object.entries(params).map(([name, spec]) => ({ name, ...spec }))
+}
+
+/** 解析参数的实际类型：优先 type 字段，兼容旧版 multiline/file 布尔标记 */
+export function resolveParamType(spec: ParamSpec): ParamType {
+  if (spec.type) return spec.type
+  if (spec.file) return 'file'
+  if (spec.multiline) return 'paragraph'
+  return 'text'
 }
 
 export function listPipelines(): Promise<PipelineListItem[]> {

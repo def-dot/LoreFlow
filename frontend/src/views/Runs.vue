@@ -4,8 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
-import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
-import { toParamSpecs } from '@/api/pipelines'
+import type { ParamSpec, PipelineDetail, ParamType } from '@/api/pipelines'
+import { getPipeline, toParamSpecs, resolveParamType } from '@/api/pipelines'
 import { listSkills, listTools } from '@/api/registry'
 import { uploadFile, type UploadOut } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
@@ -34,8 +34,15 @@ const paramValues = ref<Record<string, string>>({})
 // file 参数的服务端引用（选文件即上传，提交时用 {id, filename}）与展示用文件名
 const uploadRefs = ref<Record<string, UploadOut>>({})
 const fileNames = ref<Record<string, string>>({})
+// file_list 参数：每个参数存多个文件
+const multiUploadRefs = ref<Record<string, UploadOut[]>>({})
+const multiFileNames = ref<Record<string, string[]>>({})
 // file 参数上传中（防重复选择 + 按钮态）
 const uploading = ref<Record<string, boolean>>({})
+// number 参数的原始值（el-input-number 需要 number | undefined）
+const numberValues = ref<Record<string, number | undefined>>({})
+// checkbox 参数的布尔值
+const checkboxValues = ref<Record<string, boolean>>({})
 // 动态选项（按参数名自动从 API 加载）
 const dynamicOptions = ref<Record<string, { name: string; description: string }[]>>({})
 const selectedOptions = ref<Record<string, string[]>>({})
@@ -56,24 +63,29 @@ const parsedInputs = computed<{ value?: Record<string, unknown>; error: string |
   }
 })
 
-// 所选流水线的参数声明（从详情缓存取）
+// 所选流水线的参数声明
 const selectedPipeline = computed(() =>
   pipelinesStore.pipelines.find((p) => p.name === configName.value),
 )
 watch(configName, (name) => { if (name) pipelinesStore.select(name) }, { immediate: true })
 const paramSpecs = computed(() => {
-  const cache = pipelinesStore.detailCache[configName.value]
-  if (!cache) return []
-  const startNode = cache.nodes.find((n) => n.name === '__start__')
-  return toParamSpecs((startNode?.inputs as Record<string, unknown>) ?? {})
+  const d = pipelinesStore.detail
+  if (!d || d.name !== configName.value) return []
+  return toParamSpecs((d.params as Record<string, unknown>) ?? {})
 })
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
-const detailParams = computed(() => {
-  const cache = pipelinesStore.detailCache[store.detail?.pipeline ?? '']
-  if (!cache) return []
-  const startNode = cache.nodes.find((n) => n.name === '__start__')
-  return toParamSpecs((startNode?.inputs as Record<string, unknown>) ?? {})
-})
+const runPipelineDetail = ref<PipelineDetail | null>(null)
+watch(
+  () => store.detail?.pipeline,
+  async (name) => {
+    if (!name) { runPipelineDetail.value = null; return }
+    try { runPipelineDetail.value = await getPipeline(name) } catch { runPipelineDetail.value = null }
+  },
+  { immediate: true },
+)
+const detailParams = computed(() =>
+  toParamSpecs((runPipelineDetail.value?.params as Record<string, unknown>) ?? {}),
+)
 // 必填键/默认值从参数行派生（声明行是单一事实源，后端不再单独输出）
 const requiredInputs = computed(() => paramSpecs.value.filter((p) => p.required).map((p) => p.name))
 const defaultInputs = computed(() =>
@@ -95,13 +107,38 @@ watch(
   () => {
     paramValues.value = Object.fromEntries(
       paramSpecs.value
-        .filter((s) => s.default != null && (typeof s.default === 'string' || !s.multiline))
+        .filter((s) => {
+          if (s.default == null) return false
+          const t = resolveParamType(s)
+          // paragraph / file / file_list / checkbox / number 的非字符串默认值不预填文本
+          if (t === 'paragraph' || t === 'file' || t === 'file_list' || t === 'checkbox' || t === 'number') return false
+          return typeof s.default === 'string'
+        })
         .map((s) => [s.name, defaultToText(s.default)]),
+    )
+    // number 参数预填
+    numberValues.value = Object.fromEntries(
+      paramSpecs.value
+        .filter((s) => resolveParamType(s) === 'number' && s.default != null && typeof s.default === 'number')
+        .map((s) => [s.name, s.default as number]),
+    )
+    // checkbox 参数预填
+    checkboxValues.value = Object.fromEntries(
+      paramSpecs.value
+        .filter((s) => resolveParamType(s) === 'checkbox' && s.default != null && typeof s.default === 'boolean')
+        .map((s) => [s.name, s.default as boolean]),
+    )
+    // select 参数预填（单选取第一个 default，多选取 default 数组）
+    selectedOptions.value = Object.fromEntries(
+      paramSpecs.value
+        .filter((s) => resolveParamType(s) === 'select' && s.default != null)
+        .map((s) => [s.name, Array.isArray(s.default) ? s.default : [s.default]]),
     )
     fileNames.value = {}
     uploadRefs.value = {}
+    multiFileNames.value = {}
+    multiUploadRefs.value = {}
     inputsText.value = ''
-    selectedOptions.value = {}
   },
 )
 
@@ -156,24 +193,54 @@ function parseFieldValue(raw: string, multiline: boolean): unknown {
 const formInputs = computed(() => {
   const value: Record<string, unknown> = {}
   for (const spec of paramSpecs.value) {
-    // file 字段的值是上传接口返回的 {id, filename} 引用（rag_load 按 id 读盘）；
-    // 未选文件 = 不传该参数（用默认值或不传）
-    if (spec.file) {
-      const ref = uploadRefs.value[spec.name]
-      if (!ref) continue
-      value[spec.name] = { id: ref.id, filename: ref.filename }
-      continue
+    const type = resolveParamType(spec)
+    switch (type) {
+      case 'file': {
+        const ref = uploadRefs.value[spec.name]
+        if (!ref) continue
+        value[spec.name] = { id: ref.id }
+        break
+      }
+      case 'file_list': {
+        const refs = multiUploadRefs.value[spec.name]
+        if (!refs?.length) continue
+        value[spec.name] = refs.map((r) => ({ id: r.id }))
+        break
+      }
+      case 'number': {
+        const n = numberValues.value[spec.name]
+        if (n == null) continue
+        value[spec.name] = n
+        break
+      }
+      case 'checkbox': {
+        const b = checkboxValues.value[spec.name]
+        // checkbox 始终提交（false 也是有意义的值），除非未初始化
+        if (b == null) continue
+        value[spec.name] = b
+        break
+      }
+      case 'select': {
+        const selected = selectedOptions.value[spec.name]
+        if (!selected?.length) continue
+        value[spec.name] = selected
+        break
+      }
+      case 'paragraph': {
+        const raw = (paramValues.value[spec.name] ?? '').trim()
+        if (raw === '') continue
+        // paragraph 是纯文本语义，不做 JSON 启发式
+        value[spec.name] = raw
+        break
+      }
+      default: {
+        // text
+        const raw = (paramValues.value[spec.name] ?? '').trim()
+        if (raw === '') continue
+        value[spec.name] = parseFieldValue(raw, false)
+        break
+      }
     }
-    // 动态选项字段：提交 string[]，空数组 = 不传
-    if (spec.name in DYNAMIC_OPTION_FETCHERS) {
-      const selected = selectedOptions.value[spec.name]
-      if (!selected?.length) continue
-      value[spec.name] = selected
-      continue
-    }
-    const raw = (paramValues.value[spec.name] ?? '').trim()
-    if (raw === '') continue
-    value[spec.name] = parseFieldValue(raw, spec.multiline)
   }
   return value
 })
@@ -259,6 +326,38 @@ function clearFile(spec: ParamSpec) {
   delete fileNames.value[spec.name]
 }
 
+// file_list 参数选择文件（追加模式）
+async function onMultiFilePicked(spec: ParamSpec, event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = input.files
+  input.value = ''
+  if (!files?.length) return
+  uploading.value[spec.name] = true
+  try {
+    const refs: UploadOut[] = [...(multiUploadRefs.value[spec.name] ?? [])]
+    const names: string[] = [...(multiFileNames.value[spec.name] ?? [])]
+    for (const file of files) {
+      const ref = await uploadFile(file)
+      refs.push(ref)
+      names.push(ref.filename)
+    }
+    multiUploadRefs.value[spec.name] = refs
+    multiFileNames.value[spec.name] = names
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    uploading.value[spec.name] = false
+  }
+}
+
+// 移除 file_list 中的某个文件
+function clearMultiFile(spec: ParamSpec, index: number) {
+  const refs = multiUploadRefs.value[spec.name]
+  const names = multiFileNames.value[spec.name]
+  if (refs) refs.splice(index, 1)
+  if (names) names.splice(index, 1)
+}
+
 // ---------------------------------------------------------------------------
 // 流水线详情 drawer：顶部「预览」看所选流水线，run 详情里的「查看配置」
 // 看该 run 跑的配置 —— 同一个 drawer，标题区分来源。详情按文件名缓存
@@ -274,22 +373,17 @@ const previewItem = computed(() =>
   pipelinesStore.pipelines.find((p) => p.name === previewName.value),
 )
 
-// 抽屉实际渲染的详情：走 store 缓存
-const previewDetail = computed<PipelineDetail | null>(() =>
-  previewName.value ? (pipelinesStore.detailCache[previewName.value] ?? null) : null,
-)
+// 抽屉实际渲染的详情
+const previewDetail = ref<PipelineDetail | null>(null)
 
 async function loadPreview() {
   if (!previewName.value) return
   previewError.value = null
-  // 无缓存才转圈；有缓存先秒显旧内容，后台重取静默更新
-  previewLoading.value = !pipelinesStore.detailCache[previewName.value]
+  previewLoading.value = true
   try {
-    await pipelinesStore.select(previewName.value)
+    previewDetail.value = await getPipeline(previewName.value)
   } catch {
-    if (!previewDetail.value) {
-      previewError.value = '加载流水线失败，请检查后端是否可用。'
-    }
+    previewError.value = '加载流水线失败，请检查后端是否可用。'
   } finally {
     previewLoading.value = false
   }
@@ -559,7 +653,9 @@ onUnmounted(() => {
                   {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
                   <span v-else class="param-optional">可选</span>
                 </div>
-                <div v-if="spec.file" class="param-file">
+
+                <!-- file: 单文件上传 -->
+                <div v-if="resolveParamType(spec) === 'file'" class="param-file">
                   <label
                     class="param-file-button"
                     :class="{ disabled: uploading[spec.name] }"
@@ -580,8 +676,44 @@ onUnmounted(() => {
                   </template>
                   <span v-else class="param-file-empty">{{ uploading[spec.name] ? '上传中，请稍候…' : '未选择文件' }}</span>
                 </div>
+
+                <!-- file_list: 多文件上传 -->
+                <div v-else-if="resolveParamType(spec) === 'file_list'" class="param-file-list">
+                  <label
+                    class="param-file-button"
+                    :class="{ disabled: uploading[spec.name] }"
+                  >
+                    {{ uploading[spec.name] ? '上传中…' : '添加文件' }}
+                    <input
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.markdown,.pdf,text/plain,application/pdf"
+                      :disabled="uploading[spec.name]"
+                      @change="onMultiFilePicked(spec, $event)"
+                    />
+                  </label>
+                  <div v-if="(multiFileNames[spec.name] ?? []).length" class="param-multi-files">
+                    <div v-for="(fname, idx) in multiFileNames[spec.name]" :key="idx" class="param-multi-file-item">
+                      <span class="param-file-name" :title="fname">{{ fname }}</span>
+                      <button class="param-file-clear" title="移除文件" @click="clearMultiFile(spec, idx)">✕</button>
+                    </div>
+                  </div>
+                  <span v-else class="param-file-empty">{{ uploading[spec.name] ? '上传中，请稍候…' : '未选择文件' }}</span>
+                </div>
+
+                <!-- number: 数字输入 -->
+                <el-input-number
+                  v-else-if="resolveParamType(spec) === 'number'"
+                  v-model="numberValues[spec.name]"
+                  size="small"
+                  controls-position="right"
+                  :placeholder="spec.default != null ? `默认: ${spec.default}` : ''"
+                  style="width: 100%"
+                />
+
+                <!-- select: 下拉选项 -->
                 <el-select
-                  v-else-if="spec.name in DYNAMIC_OPTION_FETCHERS"
+                  v-else-if="resolveParamType(spec) === 'select'"
                   v-model="selectedOptions[spec.name]"
                   multiple
                   filterable
@@ -591,25 +723,56 @@ onUnmounted(() => {
                   size="small"
                   style="width: 100%"
                 >
-                  <el-option
-                    v-for="opt in (dynamicOptions[spec.name] ?? [])"
-                    :key="opt.name"
-                    :label="opt.name"
-                    :value="opt.name"
-                  >
-                    <span>{{ opt.name }}</span>
-                    <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
-                  </el-option>
+                  <!-- 动态选项（skills/tools） -->
+                  <template v-if="spec.name in DYNAMIC_OPTION_FETCHERS">
+                    <el-option
+                      v-for="opt in (dynamicOptions[spec.name] ?? [])"
+                      :key="opt.name"
+                      :label="opt.name"
+                      :value="opt.name"
+                    >
+                      <span>{{ opt.name }}</span>
+                      <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
+                    </el-option>
+                  </template>
+                  <!-- 静态选项（YAML options 声明） -->
+                  <template v-else>
+                    <el-option
+                      v-for="opt in (spec.options ?? [])"
+                      :key="opt"
+                      :label="opt"
+                      :value="opt"
+                    />
+                  </template>
                 </el-select>
+
+                <!-- checkbox: 复选框 -->
+                <el-checkbox
+                  v-else-if="resolveParamType(spec) === 'checkbox'"
+                  v-model="checkboxValues[spec.name]"
+                  size="small"
+                />
+
+                <!-- paragraph: 多行文本 -->
                 <el-input
-                  v-else
+                  v-else-if="resolveParamType(spec) === 'paragraph'"
                   v-model="paramValues[spec.name]"
-                  :type="spec.multiline ? 'textarea' : 'text'"
-                  :autosize="spec.multiline ? { minRows: 3, maxRows: 8 } : undefined"
+                  type="textarea"
+                  :autosize="{ minRows: 3, maxRows: 8 }"
                   size="small"
                   spellcheck="false"
                   :placeholder="paramPlaceholder(spec)"
                 />
+
+                <!-- text: 单行文本（默认） -->
+                <el-input
+                  v-else
+                  v-model="paramValues[spec.name]"
+                  size="small"
+                  spellcheck="false"
+                  :placeholder="paramPlaceholder(spec)"
+                />
+
                 <div v-if="spec.description" class="param-desc">{{ spec.description }}</div>
               </div>
               <div v-if="missingRequired.length" class="inputs-error">
@@ -817,6 +980,23 @@ onUnmounted(() => {
 .param-file-empty {
   font-size: 12px;
   color: var(--ink-3);
+}
+/* file_list 参数：多文件列表 */
+.param-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.param-multi-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.param-multi-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .option-desc {
   display: inline-block;

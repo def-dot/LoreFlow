@@ -68,6 +68,39 @@ function inputsSummary(inputs: Record<string, unknown> | null): string {
     .join(', ')
 }
 
+interface RetryInfo {
+  max: number
+  base?: number
+  factor?: number
+  backoffMax?: number
+  jitter?: boolean
+  on?: string[]
+}
+
+function parseRetry(retry: unknown): RetryInfo | null {
+  if (retry == null) return null
+  if (typeof retry === 'number') return { max: retry }
+  if (typeof retry === 'object' && retry !== null) {
+    const r = retry as Record<string, unknown>
+    const max = r.max_retries as number ?? 0
+    if (!max) return null
+    return {
+      max,
+      base: r.backoff_base as number | undefined,
+      factor: r.backoff_factor as number | undefined,
+      backoffMax: r.backoff_max as number | undefined,
+      jitter: r.jitter as boolean | undefined,
+      on: r.retry_on as string[] | undefined,
+    }
+  }
+  return null
+}
+
+function retryTooltip(retry: unknown): string {
+  if (retry == null || typeof retry !== 'object') return ''
+  return JSON.stringify(retry, null, 2)
+}
+
 function inputSchemaTooltip(schema: JsonSchema | null): string {
   if (!schema?.properties) return ''
   const reqSet = new Set(schema.required ?? [])
@@ -104,11 +137,11 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
     <div class="panels">
       <section class="panel">
         <h2>流水线</h2>
-        <MermaidDiagram :source="detail.mermaid" />
+        <MermaidDiagram :key="detail.name" :source="detail.mermaid" />
       </section>
       <section class="panel">
         <h2>节点</h2>
-        <el-table :data="detail.nodes" size="small" max-height="420">
+        <el-table :data="detail.nodes" size="small">
           <el-table-column label="节点" width="90">
             <template #default="{ row }">{{ row.label ?? row.name }}</template>
           </el-table-column>
@@ -151,8 +184,16 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
               {{ row.depends_on.length ? dependLabels(row.depends_on) : '—' }}
             </template>
           </el-table-column>
-          <el-table-column label="重试" min-width="110">
-            <template #default="{ row }">{{ row.retry ?? '—' }}</template>
+          <el-table-column label="重试" min-width="200">
+            <template #default="{ row }">
+              <template v-if="parseRetry(row.retry)">
+                <div class="retry-row"><span class="retry-label">次数</span> {{ parseRetry(row.retry)!.max }}</div>
+                <div class="retry-row"><span class="retry-label">退避</span> {{ parseRetry(row.retry)!.base ?? 1 }}s × {{ parseRetry(row.retry)!.factor ?? 2 }}<sup>n</sup> ≤ {{ parseRetry(row.retry)!.backoffMax ?? 60 }}s</div>
+                <div v-if="parseRetry(row.retry)!.jitter === false" class="retry-row"><span class="retry-label">抖动</span> 关</div>
+                <div v-if="parseRetry(row.retry)!.on?.length" class="retry-row"><span class="retry-label">触发</span> {{ parseRetry(row.retry)!.on!.join(', ') }}</div>
+              </template>
+              <span v-else class="wiring-text">—</span>
+            </template>
           </el-table-column>
           <el-table-column label="条件" min-width="100">
             <template #default="{ row }">{{ row.condition ?? '—' }}</template>
@@ -216,6 +257,17 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
   border-radius: 50%;
   cursor: help;
   vertical-align: middle;
+}
+.retry-row {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.retry-label {
+  display: inline-block;
+  width: 28px;
+  color: var(--ink-3);
+  font-size: 11px;
 }
 .params-panel {
   margin-bottom: 18px;
