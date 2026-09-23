@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -119,8 +120,7 @@ async def init_mcp(config_path: Path) -> None:
         logger.info("[mcp] 无服务器配置")
         return
 
-    for s in servers:
-        await _connect_server(s)
+    await asyncio.gather(*[_connect_server(s) for s in servers])
 
 
 async def shutdown_mcp() -> None:

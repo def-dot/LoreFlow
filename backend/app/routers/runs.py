@@ -85,10 +85,7 @@ async def get_run_config(run_id: int) -> PipelineDetail:
     record = await run_service.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
-    config = yaml.safe_load(record.definition)
-    if not isinstance(config, dict):
-        raise HTTPException(status_code=500, detail="run 配置快照解析失败：顶层不是映射")
-    return PipelineDetail(**pipeline_service.detail_from_config(raw=record.definition, config=config))
+    return PipelineDetail(**pipeline_service.detail_from_config(record.definition))
 
 
 @router.delete("/{run_id}")

@@ -23,7 +23,7 @@ from app.engine import (
 from app.engine.pipeline import validate_and_merge
 from app.models.run import RunRecord, RunStatus
 from app.services import runs
-from app.services.pipelines import get_pipeline
+from app.services.pipelines import PIPELINES_DIR
 
 logger = get_logger(__name__)
 
@@ -100,14 +100,18 @@ async def create_run(
     if not pipeline:
         raise ValueError("pipeline 必填")
     inputs = dict(inputs) if inputs else {}
-    text, config = get_pipeline(pipeline)
+    path = PIPELINES_DIR / (pipeline + ".yaml")
+    if not path.is_file():
+        raise ValueError(f"流水线 {pipeline!r} 不存在")
+    raw = path.read_text(encoding="utf-8")
+    config = yaml.safe_load(raw)
     dag = Pipeline(config)
     record = RunRecord(
         name=name or dag.name,
         pipeline=dag.name,
         status=RunStatus.RUNNING,
     )
-    record.definition = text
+    record.definition = raw
 
     # 声明参数来自 Pipeline.params（唯一来源）
     if dag.params:

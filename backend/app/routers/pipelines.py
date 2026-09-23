@@ -1,6 +1,6 @@
 """流水线 CRUD — /api/v1/pipelines"""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.core.response import UnifiedResponseRoute
 from app.engine.pipeline import Pipeline
@@ -21,8 +21,11 @@ async def list_pipelines() -> list[PipelineListItem]:
 
 @router.get("/{name}", response_model=PipelineDetail)
 async def get_pipeline(name: str) -> PipelineDetail:
-    raw, config = pipeline_service.get_pipeline(name)
-    return PipelineDetail(**pipeline_service.detail_from_config(raw=raw, config=config))
+    path = pipeline_service.PIPELINES_DIR / (name + ".yaml")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
+    raw = path.read_text(encoding="utf-8")
+    return PipelineDetail(**pipeline_service.detail_from_config(raw))
 
 
 @router.post("", response_model=Pipeline, status_code=201)

@@ -156,12 +156,13 @@ class Node(BaseModel):
 
         fields = schema.model_fields
         missing = [k for k, f in fields.items() if f.is_required() and k not in self.inputs]
-        unknown = set(self.inputs) - set(fields)
         msgs = []
         if missing:
             msgs.append(f"缺少必填参数 {missing}")
-        if unknown:
-            msgs.append(f"包含未知参数 {unknown}")
+        if schema.model_config.get("extra") != "allow":
+            unknown = set(self.inputs) - set(fields)
+            if unknown:
+                msgs.append(f"包含未知参数 {unknown}")
         if msgs:
             raise ValueError("inputs " + ", ".join(msgs))
         return self

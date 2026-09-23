@@ -6,6 +6,19 @@ import MermaidDiagram from './MermaidDiagram.vue'
 
 const props = defineProps<{ detail: PipelineDetail }>()
 
+const paramsRows = computed(() => {
+  const p = props.detail.params
+  if (!p) return []
+  return Object.entries(p).map(([name, spec]: [string, any]) => ({
+    name,
+    label: spec?.label ?? name,
+    type: spec?.type ?? 'string',
+    description: spec?.description ?? '',
+    default: spec?.default,
+    required: spec?.required ?? true,
+  }))
+})
+
 function typeTagType(type: string | null) {
   return type === 'human' ? 'warning' : type === 'loop' ? 'info' : 'primary'
 }
@@ -73,6 +86,21 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
   <div>
     <!-- 无自身头部：仅用于 Runs 页 drawer，名称/文件名由 drawer 标题展示 -->
     <p v-if="detail.description" class="desc">{{ detail.description }}</p>
+    <section v-if="detail.params && Object.keys(detail.params).length" class="panel params-panel">
+      <h2>参数</h2>
+      <el-table :data="paramsRows" size="small" max-height="200">
+        <el-table-column prop="name" label="参数名" width="120" />
+        <el-table-column prop="label" label="标签" width="120" />
+        <el-table-column prop="type" label="类型" width="80" />
+        <el-table-column prop="description" label="说明" min-width="160" />
+        <el-table-column label="默认值" width="120">
+          <template #default="{ row }">{{ row.default ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column label="必填" width="60">
+          <template #default="{ row }">{{ row.required ? '✓' : '—' }}</template>
+        </el-table-column>
+      </el-table>
+    </section>
     <div class="panels">
       <section class="panel">
         <h2>流水线</h2>
@@ -188,6 +216,9 @@ function inputSchemaTooltip(schema: JsonSchema | null): string {
   border-radius: 50%;
   cursor: help;
   vertical-align: middle;
+}
+.params-panel {
+  margin-bottom: 18px;
 }
 .source-panel {
   margin-top: 18px;

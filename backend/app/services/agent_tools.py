@@ -8,6 +8,8 @@ import json
 import logging
 from typing import Any
 
+import yaml
+
 from pydantic import Field, create_model
 
 from app.registry.types import TOOL_REGISTRY, FuncDef
@@ -56,12 +58,12 @@ def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
 
 def _resolve_pipeline_tool(name: str) -> FuncDef | None:
     """如果 name 匹配一个 pipeline，返回包装后的 FuncDef；否则 None。"""
-    from app.services import pipelines as pipeline_service
+    from app.services.pipelines import PIPELINES_DIR
 
-    try:
-        _, config = pipeline_service.get_pipeline(name)
-    except Exception:
+    path = PIPELINES_DIR / (name + ".yaml")
+    if not path.is_file():
         return None
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
 
     description = config.get("description") or f"执行工作流 {name}"
     description = f"[workflow] {description}"

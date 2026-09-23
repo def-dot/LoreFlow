@@ -33,6 +33,7 @@ export interface PipelineListItem {
 }
 
 export interface PipelineDetail extends PipelineListItem {
+  params: Record<string, unknown> | null
   mermaid: string
   source: string
   nodes: PipelineNodeInfo[]
