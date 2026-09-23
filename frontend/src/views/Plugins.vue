@@ -137,42 +137,50 @@ onMounted(fetchAll)
     </main>
 
     <!-- 编写指南 drawer -->
-    <el-drawer v-model="guideOpen" title="插件编写指南" size="min(560px, 90vw)">
+    <el-drawer v-model="guideOpen" title="插件编写指南" size="min(640px, 90vw)">
       <div class="guide">
-        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@func</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可通过页面「上传插件」按钮上传。</p>
+        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@func</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可通过页面「上传插件」按钮上传 <code>.py</code> 文件。</p>
 
         <h4 class="guide-h4">示例</h4>
-        <pre class="guide-code">from app.registry import func
+        <pre class="guide-code">from pydantic import BaseModel, Field
 
-@func(
-    label="发送通知",
-    description="发送通知消息",
-    params={"message": "消息内容", "channel": "通知渠道"},
-    output_schema={"type": "string", "description": "发送结果"},
-)
-async def send_notify(message: str, channel: str = "default") -> str:
-    # 你的业务逻辑
-    return f"已发送至 {channel}"</pre>
+class NotifyInput(BaseModel):
+    message: str = Field(description="消息内容")
+
+class NotifyOutput(BaseModel):
+    result: str = Field(description="发送结果")
+
+@func(label="发送通知", description="发送通知消息")
+async def send_notify(params: NotifyInput) -> NotifyOutput:
+    return NotifyOutput(result=f"已发送: {params.message}")</pre>
+        <p>函数名 <code>send_notify</code> 即为节点类型名，YAML 中通过 <code>type: send_notify</code> 引用。输入输出参数类型都必须是 <code>BaseModel</code> 子类，框架自动推导 JSON Schema。</p>
+
+        <h4 class="guide-h4">注册选项</h4>
+        <table class="guide-table">
+          <thead><tr><th>参数</th><th>默认值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>label</code></td><td>—</td><td>显示名称（建议填写）</td></tr>
+            <tr><td><code>description</code></td><td>—</td><td>节点功能描述（建议填写）</td></tr>
+            <tr><td><code>node</code></td><td><code>True</code></td><td>注册到节点注册表（工作流引擎可用）</td></tr>
+            <tr><td><code>tool</code></td><td><code>True</code></td><td>注册到工具注册表（LLM Agent 可调用）</td></tr>
+          </tbody>
+        </table>
+        <p>设 <code>node=False</code> 可创建仅 Agent 可调用的工具；设 <code>tool=False</code> 可创建仅流程使用的节点。</p>
 
         <h4 class="guide-h4">规则</h4>
         <ul class="guide-rules">
-          <li>函数必须是 <code>async def</code></li>
-          <li>输入通过函数参数接收，参数名对应 YAML 中的 inputs 键</li>
-          <li>需要完整上下文时可用 <code>ctx: dict</code> 参数（特殊场景）</li>
+          <li>函数必须是 <code>async def</code>，输入输出都用 <code>BaseModel</code></li>
+          <li>节点名（函数名）不可与内置或其他插件冲突</li>
         </ul>
 
-        <h4 class="guide-h4">@func 参数</h4>
-        <table class="guide-table">
-          <thead>
-            <tr><th>参数</th><th>必填</th><th>说明</th></tr>
-          </thead>
-          <tbody>
-            <tr><td><code>label</code></td><td>是</td><td>显示名称</td></tr>
-            <tr><td><code>description</code></td><td>是</td><td>节点类型功能描述</td></tr>
-            <tr><td><code>params</code></td><td>否</td><td>参数描述，如 {"query": "搜索关键词"}（type/required 从函数签名自动推导）</td></tr>
-            <tr><td><code>output_schema</code></td><td>否</td><td>输出结构声明</td></tr>
-          </tbody>
-        </table>
+        <h4 class="guide-h4">错误处理</h4>
+        <p>插件加载失败时会在页面显示错误信息，常见原因：</p>
+        <ul class="guide-rules">
+          <li>Python 语法错误或导入失败</li>
+          <li>节点名与已有节点冲突</li>
+          <li>运行时缺少依赖包</li>
+        </ul>
+        <p>修正后保存文件，热加载会自动重试。也可删除文件后重新上传。</p>
       </div>
     </el-drawer>
   </div>
