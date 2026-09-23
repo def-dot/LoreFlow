@@ -1,16 +1,10 @@
 name: 人工多级审核
 description: 内容发布多级审批：编辑初审、主编终审，两审都通过才发布。
 nodes:
-- name: __start__
-  type: start
-  inputs:
-    title: $input.title
-    content: $input.content
 - name: first_review
   type: human
   label: 编辑初审
   description: 初审把关：标题达意、正文完整可读再通过。
-  depends_on: __start__
   inputs:
     payload:
     - key: title

@@ -1,10 +1,6 @@
 name: 条件分支
 description: 客服分流：闲聊 LLM 直接回答；知识类问题先检索知识库再作答；提示词包含「人工」转人工客服。
 nodes:
-- name: __start__
-  type: start
-  inputs:
-    prompt: $input.prompt
 - name: intent_recognition
   type: llm_classify
   label: 意图识别
@@ -15,8 +11,6 @@ nodes:
     classify_labels:
     - chat
     - rag
-  depends_on:
-  - __start__
 - name: llm_chat
   type: llm_chat
   label: LLM回答

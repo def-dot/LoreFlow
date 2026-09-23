@@ -1,11 +1,6 @@
 name: 自定义插件
 description: 内容发布后发送邮件通知。
 nodes:
-- name: __start__
-  type: start
-  inputs:
-    title: $input.title
-    content: $input.content
 - name: review
   type: human
   label: 内容审核

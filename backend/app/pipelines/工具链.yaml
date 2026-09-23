@@ -4,10 +4,6 @@ description: '演示「工具 → LLM → 工具」链式调用： 查天气 →
 
   '
 nodes:
-- name: __start__
-  type: start
-  inputs:
-    city: $input.city
 - name: weather
   type: agent
   label: 查天气
@@ -17,8 +13,6 @@ nodes:
     tools:
     - web_search
     max_iterations: 3
-  depends_on:
-  - __start__
   timeout: 60
 - name: suggest
   type: llm_chat

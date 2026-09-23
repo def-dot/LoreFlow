@@ -31,6 +31,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+        logger.warning("ValueError: %s", exc, exc_info=exc)
         return JSONResponse(
             status_code=400,
             content={"code": 400, "msg": str(exc), "data": None},

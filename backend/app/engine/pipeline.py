@@ -16,7 +16,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from app.registry import REGISTRY
 from .types import ApproverFunc
@@ -74,6 +74,17 @@ class RetryPolicy(BaseModel):
     backoff_max: float = 60.0
     retry_on: tuple[type[Exception], ...] = (Exception,)
     jitter: bool = True
+
+    @model_serializer
+    def _serialize(self) -> dict[str, Any]:
+        return {
+            "max_retries": self.max_retries,
+            "backoff_base": self.backoff_base,
+            "backoff_factor": self.backoff_factor,
+            "backoff_max": self.backoff_max,
+            "retry_on": [e.__name__ for e in self.retry_on],
+            "jitter": self.jitter,
+        }
 
     def get_delay(self, attempt: int) -> float:
         """Compute the backoff delay for a given retry attempt (0-indexed)."""

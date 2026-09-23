@@ -1,16 +1,10 @@
 name: 人工审核
 description: 内容发布审批：审批通过才发布。
 nodes:
-- name: __start__
-  type: start
-  inputs:
-    title: $input.title
-    content: $input.content
 - name: review
   type: human
   label: 内容审核
   description: 请审核文章内容是否可以发布
-  depends_on: __start__
   inputs:
     payload:
     - key: title

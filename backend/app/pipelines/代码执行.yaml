@@ -4,10 +4,6 @@ description: '演示 code 节点：接收原始 JSON 数据，用 Python 脚本�
 
   '
 nodes:
-- name: __start__
-  type: start
-  inputs:
-    data: $input.data
 - name: parse
   type: code
   label: 解析数据
@@ -15,9 +11,8 @@ nodes:
     script: "def main(raw):\n    import json\n    items = json.loads(raw)\n    if\
       \ not isinstance(items, list):\n        raise ValueError(\"输入必须是 JSON 数组\")\n\
       \    return items\n"
-    raw: $input.data
-  depends_on:
-  - __start__
+    params:
+      raw: $input.data
   timeout: 10
 - name: stats
   type: code
@@ -30,7 +25,8 @@ nodes:
       : len(scores),\n        \"sum\": sum(scores),\n        \"avg\": round(sum(scores)\
       \ / len(scores), 2) if scores else 0,\n        \"max\": max(scores) if scores\
       \ else None,\n        \"min\": min(scores) if scores else None,\n    }\n"
-    items: $parse.result
+    params:
+      items: $parse.result
   timeout: 10
 - name: report
   type: code

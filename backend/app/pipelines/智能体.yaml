@@ -1,18 +1,9 @@
 name: 智能体
 description: 通用智能助手。能闲聊、答疑，也能自主调用工具和技能完成复杂任务。
 nodes:
-- name: __start__
-  type: start
-  inputs:
-    prompt: $input.prompt
-    tools: $input.tools
-    skills: $input.skills
-    file: $input.file
 - name: agent
   type: agent
   label: 智能助手
-  depends_on:
-  - __start__
   description: 根据问题自主判断是否需要工具，闲聊时直接回复，复杂任务时调用工具逐步完成
   inputs:
     system: '你是一个通用智能助手，能够闲聊、回答问题，也能调用工具完成复杂任务。
