@@ -18,7 +18,7 @@ from typing import Any
 
 from app.registry import REGISTRY
 from .condition import eval_condition
-from .types import HumanRejected, NodeContext, current_node_ctx, wired_ctx
+from .types import HumanRejected, wired_ctx
 from .pipeline import Node, RetryPolicy
 from .types import (
     PipeLineExecutionError,
@@ -87,7 +87,7 @@ class PipeLineExecutor:
 
         for node in self.nodes.values():
             saved = self._resume.get(node.name)
-            if saved is not None and saved.get("status") in ("completed", "skipped", "upstream_skipped"):
+            if saved is not None and saved.get("status") in ("completed", "failed", "skipped", "upstream_skipped"):
                 events[node.name].set()
                 resumed = NodeResult(
                     node_name=node.name,
@@ -308,13 +308,6 @@ class PipeLineExecutor:
         """Invoke the node function (from REGISTRY) with timeout and output validation."""
         func_def = REGISTRY[node.type]
         resolved = wired_ctx(self.ctx, node.inputs or {})
-
-        # 注入 NodeContext（所有节点都设置，需要的函数通过 current_node_ctx.get() 读取）
-        saved = self._resume.get(node.name)
-        stored_decision = None
-        if saved and saved.get("output"):
-            stored_decision = saved["output"].get("decision")
-        current_node_ctx.set(NodeContext(node_name=node.name, stored_decision=stored_decision))
 
         coro = func_def.func(func_def.input_schema(**resolved)) if func_def.input_schema else func_def.func()
 

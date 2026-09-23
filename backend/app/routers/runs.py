@@ -135,5 +135,10 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
     ):
         raise HTTPException(status_code=404, detail=f"节点 {node_name!r} 不在等待审核")
 
-    await orchestrator.approve_and_resume(record, node_name, body.model_dump())
+    # 写入决策：通过 → completed（下游继续），拒绝 → failed（workflow 停止）
+    entry = record.nodes.setdefault(node_name, {})
+    entry["status"] = "completed" if body.approve else "failed"
+    entry["output"] = body.model_dump()
+    await run_service.save_nodes(record)
+    await orchestrator.resume_record(record)
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)

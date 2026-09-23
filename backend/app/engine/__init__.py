@@ -21,11 +21,9 @@ from .validator import validate_dag, validate_ref
 from .types import (
     PipeLineExecutionError,
     HumanRejected,
-    NodeContext,
     NodeResult,
     NodeStatus,
     SuspendExecution,
-    current_node_ctx,
     wired_ctx,
 )
 
@@ -33,13 +31,11 @@ __all__ = [
     "PipeLineExecutionError",
     "HumanRejected",
     "Node",
-    "NodeContext",
     "NodeResult",
     "NodeStatus",
     "Pipeline",
     "RetryPolicy",
     "SuspendExecution",
-    "current_node_ctx",
     "terminal_approver",
     "validate_dag",
     "validate_ref",

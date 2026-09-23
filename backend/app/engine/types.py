@@ -2,7 +2,6 @@
 Core types for the DAG Flow orchestration engine.
 """
 
-import contextvars
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -132,20 +131,6 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
     if not wiring:
         return {}
     return {k: _resolve(v) for k, v in wiring.items()}
-
-
-class NodeContext:
-    """引擎注入的节点运行上下文（与用户 inputs 分离）。"""
-
-    __slots__ = ("node_name", "stored_decision")
-
-    def __init__(self, node_name: str, stored_decision: dict[str, Any] | None = None):
-        self.node_name = node_name
-        self.stored_decision = stored_decision
-
-
-#: NodeContext 注入：executor 在调用节点函数前设置，函数内通过 .get() 读取。
-current_node_ctx: contextvars.ContextVar[NodeContext] = contextvars.ContextVar("current_node_ctx")
 
 
 class HumanRejected(Exception):

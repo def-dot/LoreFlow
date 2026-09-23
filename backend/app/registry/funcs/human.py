@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.engine.types import HumanRejected, NodeContext, SuspendExecution, current_node_ctx
+from app.engine.types import SuspendExecution
 from app.registry.types import func
 
 
@@ -34,30 +34,11 @@ logger = logging.getLogger(__name__)
     metadata={"group": "基础", "order": 10},
 )
 async def human(params: HumanParams) -> HumanOutput:
-    """审核协议：有已存储决策则处理，否则挂起等待审批。"""
-    ctx: NodeContext = current_node_ctx.get()
-
-    # 展平 payload 列表为 dict
+    """挂起等待人工审批。决策由 approve 端点直接写入节点快照。"""
     payload_dict = {item.key: item.value for item in params.payload}
     payload_display = {item.key: item.label for item in params.payload}
 
-    # 恢复场景：有已存储的决策
-    if ctx.stored_decision:
-        decision = ctx.stored_decision
-        edits = decision.get("edits", {})
-        final = {**payload_dict, **edits}
-
-        if decision.get("approve"):
-            logger.info("[%s] approved by human reviewer", ctx.node_name)
-            return HumanOutput(approve=True, reason=decision.get("reason", ""), result=final)
-
-        reason = f"人工审核拒绝：{decision.get('reason')}"
-        logger.warning("[%s] REJECTED by human reviewer: %s", ctx.node_name, reason)
-        raise HumanRejected(reason, output=HumanOutput(approve=False, reason=decision.get("reason", ""), result=final))
-
-    # 首次运行：挂起
-    logger.info("[REVIEW] node %r is waiting for human approval", ctx.node_name)
     raise SuspendExecution(
-        f"节点 {ctx.node_name} 等待人工审批",
+        "等待人工审批",
         {"payload": payload_dict, "labels": payload_display},
     )

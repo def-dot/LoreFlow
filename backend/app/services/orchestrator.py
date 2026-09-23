@@ -28,16 +28,6 @@ from app.services.pipelines import get_pipeline
 logger = get_logger(__name__)
 
 
-async def approve_and_resume(record: RunRecord, node_name: str, decision: dict[str, Any]) -> None:
-    """决策写进节点快照并持久化，随后恢复执行（approve 端点的全部动作）。
-    """
-    decision = {**decision, "approved_at": datetime.now().isoformat(timespec="seconds")}
-    entry = record.nodes.setdefault(node_name, {})
-    entry.setdefault("output", {})["decision"] = decision
-    await runs.save_nodes(record)
-    await resume_record(record)
-
-
 async def run_pipeline(record: RunRecord, dag: Pipeline) -> None:
     """执行一次 run。挂起与终态均走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
     """
