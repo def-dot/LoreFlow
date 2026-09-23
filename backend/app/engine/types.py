@@ -109,21 +109,28 @@ ApproverFunc = Callable[[str, dict[str, Any], dict[str, str]], Awaitable[dict[st
 
 
 def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[str, Any]:
-    """接线 → 节点上下文 ``{**ctx, **{本地键: 解析值}}``（唯一实现，全引擎共用）。
-    """
-    def resolve(v: Any) -> Any:
-        if isinstance(v, str) and v.startswith("$"):
-            value: Any = ctx
-            for part in v[1:].split("."):
-                if not isinstance(value, Mapping) or part not in value:
-                    return None
-                value = value[part]
-            return value
-        return v
+    """接线 → 节点上下文 ``{**ctx, **{本地键: 解析值}}``，递归解析嵌套 $ 引用。"""
+
+    def _deref(ref: str) -> Any:
+        val: Any = ctx
+        for part in ref[1:].split("."):
+            if not isinstance(val, Mapping) or part not in val:
+                raise KeyError(f"$ 引用解析失败：{ref}，无法取 {part}）")
+            val = val[part]
+        return val
+
+    def _resolve(obj: Any) -> Any:
+        if isinstance(obj, str) and obj.startswith("$"):
+            return _deref(obj)
+        if isinstance(obj, dict):
+            return {k: _resolve(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_resolve(v) for v in obj]
+        return obj
 
     if not wiring:
         return dict(ctx)
-    return {**ctx, **{k: resolve(v) for k, v in wiring.items()}}
+    return {**ctx, **{k: _resolve(v) for k, v in wiring.items()}}
 
 
 class NodeContext:

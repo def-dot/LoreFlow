@@ -14,7 +14,6 @@ import asyncio
 import inspect
 import logging
 import time
-from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -309,27 +308,8 @@ class PipeLineExecutor:
     # ------------------------------------------------------------------
 
     async def _call(self, node: Node) -> Any:
-        """Invoke the node function (from REGISTRY) with timeout, output validation and deep $-resolution."""
+        """Invoke the node function (from REGISTRY) with timeout and output validation."""
         target = wired_ctx(self.ctx, node.inputs or {})
-
-        # 对 dict 类型的 input 值递归解析 $ 引用（如 review 卡片模板）
-        def resolve_deep(obj: Any) -> Any:
-            if isinstance(obj, str) and obj.startswith("$"):
-                val: Any = self.ctx
-                for part in obj[1:].split("."):
-                    if not isinstance(val, Mapping) or part not in val:
-                        return obj
-                    val = val[part]
-                return val
-            if isinstance(obj, dict):
-                return {k: resolve_deep(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [resolve_deep(v) for v in obj]
-            return obj
-
-        for k, v in list(target.items()):
-            if isinstance(v, dict):
-                target[k] = resolve_deep(v)
 
         func = REGISTRY[node.type].func
         sig = inspect.signature(func)
