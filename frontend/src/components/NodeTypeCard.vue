@@ -25,6 +25,10 @@ function outputType(schema: JsonSchema): string {
       <h3 class="schema-title">输入</h3>
       <SchemaFields :schema="node.input_schema" />
     </div>
+    <div v-else-if="node.input_schema?.additionalProperties" class="schema-section">
+      <h3 class="schema-title">输入</h3>
+      <span class="schema-dynamic">动态参数（用户定义）</span>
+    </div>
     <div v-else class="schema-section">
       <h3 class="schema-title">输入</h3>
       <span class="schema-empty">无</span>
@@ -32,13 +36,16 @@ function outputType(schema: JsonSchema): string {
 
     <div v-if="node.output_schema" class="schema-section">
       <h3 class="schema-title">输出</h3>
-      <SchemaFields v-if="node.output_schema.properties" :schema="node.output_schema" />
+      <SchemaFields v-if="node.output_schema.properties && Object.keys(node.output_schema.properties).length" :schema="node.output_schema" />
       <template v-else-if="node.output_schema.type === 'array' && node.output_schema.items?.properties">
         <div class="nc-field">
           <span class="nc-type">list[object]</span>
         </div>
         <SchemaFields :schema="node.output_schema.items" :defs="node.output_schema.$defs" :depth="1" />
       </template>
+      <div v-else-if="node.output_schema.additionalProperties" class="nc-field">
+        <span class="schema-dynamic">动态参数（用户定义）</span>
+      </div>
       <div v-else class="nc-field">
         <span class="nc-type">{{ outputType(node.output_schema) }}</span>
         <span v-if="node.output_schema.description" class="nc-desc">{{ node.output_schema.description }}</span>
@@ -84,6 +91,11 @@ function outputType(schema: JsonSchema): string {
 .schema-empty {
   font-size: 11px;
   color: var(--ink-3);
+}
+.schema-dynamic {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-style: italic;
 }
 .nc-field {
   display: flex;
