@@ -1,27 +1,21 @@
 """
-RAG 演示节点 — 文档入库与知识库检索。
+RAG 节点 — 切块、向量化、检索与知识库管理。
 """
 
 import asyncio
 import contextvars
 import logging
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.registry.types import func
 from app.services import knowledge
-from app.utils import files
 
 
 # ---------------------------------------------------------------------------
 # Output models
 # ---------------------------------------------------------------------------
-
-class RagLoadOutput(BaseModel):
-    doc_name: str = Field(description="文档名称")
-    text: str = Field(description="文档正文")
 
 
 class RagEmbedItem(BaseModel):
@@ -59,13 +53,6 @@ class StringResultOutput(BaseModel):
 # Input models
 # ---------------------------------------------------------------------------
 
-class DocumentRef(BaseModel):
-    id: str = Field(description="文件 ID", min_length=1)
-
-
-class RagLoadParams(BaseModel):
-    document: DocumentRef = Field(description="上传文档")
-
 
 class RagChunkParams(BaseModel):
     text: str = Field(description="文档正文", min_length=1)
@@ -99,24 +86,6 @@ class SearchKnowledgeBaseParams(BaseModel):
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
-
-
-@func(
-    label="加载文档",
-    description="读取上传文档内容",
-    metadata={"group": "RAG", "order": 10},
-)
-async def rag_load(params: RagLoadParams) -> RagLoadOutput:
-    """从上传目录读取 params 声明的 document 文件"""
-    text = files.read_upload(params.document.id)
-    if not text.strip():
-        raise ValueError("上传文档正文为空：文件内容为空白文本")
-    # 从数据库获取原始文件名
-    from app.services import uploads as uploads_service
-    record = await uploads_service.get_upload(params.document.id)
-    filename = record.filename if record else params.document.id
-    stem = Path(filename).stem or "document"
-    return RagLoadOutput(doc_name=stem, text=text)
 
 
 @func(

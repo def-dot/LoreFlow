@@ -204,7 +204,7 @@ function goBack() {
             ref="fileInput"
             type="file"
             multiple
-            accept=".txt,.md,.markdown,.pdf"
+            accept=".txt,.md,.pdf"
             style="display: none"
             @change="handleFileSelect"
           />

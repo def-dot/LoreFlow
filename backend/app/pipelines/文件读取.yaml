@@ -2,7 +2,7 @@ name: 文件读取
 description: 上传文件并输出文件内容。
 nodes:
 - name: load
-  type: rag_load
+  type: read_document
   label: 读取文件
   inputs:
     document: $input.file

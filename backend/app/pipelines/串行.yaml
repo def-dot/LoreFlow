@@ -2,7 +2,7 @@ name: 串行
 description: RAG文档入库串行执行：上传文档 → 切块 → 向量化 → 写入向量库。
 nodes:
 - name: load
-  type: rag_load
+  type: read_document
   label: 文档解析
   inputs:
     document: $input.document

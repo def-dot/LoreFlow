@@ -1,4 +1,4 @@
-"""上传端点与 rag_load 读盘解析 — 白名单/大小/空内容拒绝、编码探测、路径穿越、E2E。"""
+"""上传端点与 read_document 读盘解析 — 白名单/大小/空内容拒绝、编码探测、路径穿越、E2E。"""
 
 import asyncio
 from io import BytesIO
@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from pypdf import PdfWriter
 
 from app.core.config import settings
-from app.registry.funcs.rag import rag_load
+from app.registry.funcs.file import read_document
 from app.utils.files import decode_text
 
 
@@ -31,14 +31,14 @@ async def _wait_terminal(client: AsyncClient, run_id: int, timeout: float = 15) 
 
 
 async def test_upload_stores_file(client: AsyncClient) -> None:
-    """上传 201：返回 {id, filename, size} 引用，磁盘字节一致。"""
+    """上传 201：返回 {id, stored_name, filename, size} 引用，磁盘字节一致。"""
     resp = await _upload(client, "北境要塞.md", "第一段设定。\n\n第二段设定。".encode())
     assert resp.status_code == 201
     doc = resp.json()["data"]
-    assert doc["id"].endswith(".md")
+    assert doc["stored_name"].endswith(".md")
     assert doc["filename"] == "北境要塞.md"
     assert doc["size"] == len("第一段设定。\n\n第二段设定。".encode())
-    stored = settings.UPLOADS_DIR / doc["id"]
+    stored = settings.UPLOADS_DIR / doc["stored_name"]
     assert stored.is_file()
     assert stored.read_bytes() == "第一段设定。\n\n第二段设定。".encode()
 
@@ -51,7 +51,7 @@ async def test_upload_rejects_bad_extension(client: AsyncClient) -> None:
 
 
 async def test_upload_stores_pdf(client: AsyncClient) -> None:
-    """PDF 上传成功：返回 .pdf 后缀 id，磁盘字节一致。"""
+    """PDF 上传成功：返回 .pdf 后缀 stored_name，磁盘字节一致。"""
     writer = PdfWriter()
     writer.add_blank_page(width=72, height=72)
     buf = BytesIO()
@@ -61,10 +61,10 @@ async def test_upload_stores_pdf(client: AsyncClient) -> None:
     resp = await _upload(client, "设定集.pdf", pdf_bytes)
     assert resp.status_code == 201
     doc = resp.json()["data"]
-    assert doc["id"].endswith(".pdf")
+    assert doc["stored_name"].endswith(".pdf")
     assert doc["filename"] == "设定集.pdf"
     assert doc["size"] == len(pdf_bytes)
-    assert (settings.UPLOADS_DIR / doc["id"]).read_bytes() == pdf_bytes
+    assert (settings.UPLOADS_DIR / doc["stored_name"]).read_bytes() == pdf_bytes
 
 
 async def test_upload_rejects_empty(client: AsyncClient) -> None:
@@ -88,10 +88,10 @@ def test_decode_text() -> None:
     assert decode_text(b"\xff\xff\xff\xff") == "����"  # replace 不抛
 
 
-async def test_rag_load_rejects_traversal() -> None:
-    """JSON 模式手输穿越 id：中文 ValueError，不碰盘上任意路径。"""
+async def test_read_document_rejects_traversal() -> None:
+    """JSON 模式手输穿越 stored_name：中文 ValueError，不碰盘上任意路径。"""
     with pytest.raises(ValueError, match="无效的文件引用"):
-        await rag_load({"document": {"id": "../app/pipelines/01_serial.yaml", "filename": "x.md"}})
+        await read_document({"document": {"stored_name": "../app/pipelines/01_serial.yaml", "filename": "x.md"}})
 
 
 async def test_upload_to_run_e2e_gbk(client: AsyncClient) -> None:
@@ -101,7 +101,7 @@ async def test_upload_to_run_e2e_gbk(client: AsyncClient) -> None:
 
     resp = await client.post(
         "/api/v1/runs",
-        json={"config_file": "01_serial.yaml", "inputs": {"document": {"id": doc["id"], "filename": doc["filename"]}}},
+        json={"config_file": "01_serial.yaml", "inputs": {"document": {"stored_name": doc["stored_name"], "filename": doc["filename"]}}},
     )
     assert resp.status_code == 201
     data = await _wait_terminal(client, resp.json()["data"]["run_id"])
@@ -116,11 +116,11 @@ async def test_upload_to_run_e2e_gbk(client: AsyncClient) -> None:
 async def test_run_fails_when_file_deleted(client: AsyncClient) -> None:
     """引用的文件被清理：节点失败并报中文错误。"""
     doc = (await _upload(client, "gone.md", "内容".encode())).json()["data"]
-    (settings.UPLOADS_DIR / doc["id"]).unlink()
+    (settings.UPLOADS_DIR / doc["stored_name"]).unlink()
 
     resp = await client.post(
         "/api/v1/runs",
-        json={"config_file": "01_serial.yaml", "inputs": {"document": {"id": doc["id"], "filename": doc["filename"]}}},
+        json={"config_file": "01_serial.yaml", "inputs": {"document": {"stored_name": doc["stored_name"], "filename": doc["filename"]}}},
     )
     assert resp.status_code == 201
     data = await _wait_terminal(client, resp.json()["data"]["run_id"])

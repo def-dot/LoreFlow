@@ -162,7 +162,7 @@ function statusType(s: string) {
             ref="fileInput"
             type="file"
             multiple
-            accept=".txt,.md,.markdown,.pdf"
+            accept=".txt,.md,.pdf"
             @change="onFileChange"
           />
         </el-form-item>

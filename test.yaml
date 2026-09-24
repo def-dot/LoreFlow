@@ -3,7 +3,7 @@ description: 实际示例：加载文档 → 切块 → 向量化 → 写入向�
 
 nodes:
   load:
-    type: rag_load
+    type: read_document
 
   chunk:
     type: rag_chunk

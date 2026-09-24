@@ -353,8 +353,8 @@ async def test_create_run_with_config_file(client: AsyncClient) -> None:
         "/api/v1/runs",
         json={
             "config_file": "01_serial.yaml",
-            # file 参数传上传接口返回的 {id, filename} 引用（rag_load 读盘解析）
-            "inputs": {"document": {"id": doc["id"], "filename": doc["filename"]}},
+            # file 参数传上传接口返回的 {stored_name, filename} 引用（read_document 读盘解析）
+            "inputs": {"document": {"stored_name": doc["stored_name"], "filename": doc["filename"]}},
         },
     )
     assert resp.status_code == 201

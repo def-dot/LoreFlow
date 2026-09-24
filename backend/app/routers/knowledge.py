@@ -62,7 +62,7 @@ async def list_documents(kb_id: int) -> list[dict]:
 @kb_router.post("/{kb_id}/documents/upload", status_code=201)
 async def upload_and_ingest(
     kb_id: int,
-    file: UploadFile = File(..., description="文档文件（.txt/.md/.markdown/.pdf）"),
+    file: UploadFile = File(..., description="文档文件（.txt/.md/.pdf）"),
 ) -> dict:
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()

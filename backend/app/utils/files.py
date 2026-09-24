@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.core.config import settings
 
-ALLOWED_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".pdf"})
+ALLOWED_SUFFIXES = frozenset({".txt", ".md", ".pdf"})
 
 
 def decode_text(data: bytes) -> str:

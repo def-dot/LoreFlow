@@ -14,7 +14,3 @@ async def create(record: UploadRecord) -> None:
         await session.refresh(record)
 
 
-async def get_upload(upload_id: str) -> UploadRecord | None:
-    """按 id 获取上传记录，不存在返回 None。"""
-    async with database.AsyncSessionLocal() as session:
-        return await session.get(UploadRecord, upload_id)

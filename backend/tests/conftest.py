@@ -64,7 +64,7 @@ async def setup_db() -> AsyncGenerator[None, None]:
 
 @pytest.fixture(autouse=True)
 def redirect_uploads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """上传目录指向临时目录：上传/rag_load 测试落盘不污染 backend/uploads/。"""
+    """上传目录指向临时目录：上传/read_document 测试落盘不污染 backend/uploads/。"""
     monkeypatch.setattr(settings, "UPLOADS_DIR", tmp_path / "uploads")
 
 

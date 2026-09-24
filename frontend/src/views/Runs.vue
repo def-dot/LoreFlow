@@ -7,7 +7,7 @@ import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
 import type { ParamSpec, PipelineDetail, ParamType } from '@/api/pipelines'
 import { getPipeline, toParamSpecs, resolveParamType } from '@/api/pipelines'
 import { listSkills, listTools } from '@/api/registry'
-import { uploadFile, type UploadOut } from '@/api/uploads'
+import { uploadFile, type UploadRecord } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
 import { usePipelinesStore } from '@/stores/pipelines'
 
@@ -32,10 +32,10 @@ const inputsText = ref('')
 // 表单模式的字段值（字符串输入，提交时解析）
 const paramValues = ref<Record<string, string>>({})
 // file 参数的服务端引用（选文件即上传，提交时用 {id, filename}）与展示用文件名
-const uploadRefs = ref<Record<string, UploadOut>>({})
+const uploadRefs = ref<Record<string, UploadRecord>>({})
 const fileNames = ref<Record<string, string>>({})
 // file_list 参数：每个参数存多个文件
-const multiUploadRefs = ref<Record<string, UploadOut[]>>({})
+const multiUploadRefs = ref<Record<string, UploadRecord[]>>({})
 const multiFileNames = ref<Record<string, string[]>>({})
 // file 参数上传中（防重复选择 + 按钮态）
 const uploading = ref<Record<string, boolean>>({})
@@ -198,13 +198,13 @@ const formInputs = computed(() => {
       case 'file': {
         const ref = uploadRefs.value[spec.name]
         if (!ref) continue
-        value[spec.name] = { id: ref.id }
+        value[spec.name] = { stored_name: ref.stored_name, filename: ref.filename }
         break
       }
       case 'file_list': {
         const refs = multiUploadRefs.value[spec.name]
         if (!refs?.length) continue
-        value[spec.name] = refs.map((r) => ({ id: r.id }))
+        value[spec.name] = refs.map((r) => ({ stored_name: r.stored_name, filename: r.filename }))
         break
       }
       case 'number': {
@@ -301,7 +301,7 @@ function fillDefaults() {
   inputsText.value = defaultsJson.value
 }
 
-// file 参数选择文件：上传到服务端换 {id, filename} 引用（rag_load 按 id 读盘），
+// file 参数选择文件：上传到服务端换 {id, filename} 引用（read_document 按 id 读盘），
 // 不再客户端读正文；上传失败由拦截器提示，保持「未选择」状态
 async function onFilePicked(spec: ParamSpec, event: Event) {
   const input = event.target as HTMLInputElement
@@ -334,7 +334,7 @@ async function onMultiFilePicked(spec: ParamSpec, event: Event) {
   if (!files?.length) return
   uploading.value[spec.name] = true
   try {
-    const refs: UploadOut[] = [...(multiUploadRefs.value[spec.name] ?? [])]
+    const refs: UploadRecord[] = [...(multiUploadRefs.value[spec.name] ?? [])]
     const names: string[] = [...(multiFileNames.value[spec.name] ?? [])]
     for (const file of files) {
       const ref = await uploadFile(file)
@@ -663,7 +663,7 @@ onUnmounted(() => {
                     {{ uploading[spec.name] ? '上传中…' : '选择文件' }}
                     <input
                       type="file"
-                      accept=".txt,.md,.markdown,.pdf,text/plain,application/pdf"
+                      accept=".txt,.md,.pdf,text/plain,application/pdf"
                       :disabled="uploading[spec.name]"
                       @change="onFilePicked(spec, $event)"
                     />
@@ -687,7 +687,7 @@ onUnmounted(() => {
                     <input
                       type="file"
                       multiple
-                      accept=".txt,.md,.markdown,.pdf,text/plain,application/pdf"
+                      accept=".txt,.md,.pdf,text/plain,application/pdf"
                       :disabled="uploading[spec.name]"
                       @change="onMultiFilePicked(spec, $event)"
                     />
