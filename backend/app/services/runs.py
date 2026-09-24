@@ -39,7 +39,7 @@ async def list_runs(
     if status is not None:
         cond.append(RunRecord.status == status)
     if pipeline is not None:
-        cond.append(RunRecord.pipeline == pipeline)
+        cond.append(RunRecord.pipeline_name == pipeline)
 
     async with database.AsyncSessionLocal() as session:
         stmt = select(RunRecord)
@@ -59,7 +59,7 @@ TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 
 async def run_counts() -> dict[str, int]:
     """全局执行计数（**不受筛选影响**）：running 驱动前端轮询启停，
-    active（含 reviewing 等非终态）驱动导航“电流”等页面状态。"""
+    active（含 reviewing 等非终态）驱动导航"电流"等页面状态。"""
     async with database.AsyncSessionLocal() as session:
         running = (
             await session.exec(

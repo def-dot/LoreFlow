@@ -33,11 +33,14 @@ export interface ParamSpec {
 }
 
 export interface PipelineListItem {
+  id: number
   name: string
   description: string
 }
 
-export interface PipelineDetail extends PipelineListItem {
+export interface PipelineDetail {
+  name: string
+  description: string
   params: Record<string, unknown> | null
   mermaid: string
   source: string
@@ -57,12 +60,14 @@ export function resolveParamType(spec: ParamSpec): ParamType {
   return 'text'
 }
 
-export function listPipelines(): Promise<PipelineListItem[]> {
-  return api.get('/pipelines')
+export function listPipelines(q?: string): Promise<PipelineListItem[]> {
+  const params: Record<string, string> = {}
+  if (q) params.q = q
+  return api.get('/pipelines', { params })
 }
 
-export function getPipeline(name: string): Promise<PipelineDetail> {
-  return api.get(`/pipelines/${encodeURIComponent(name)}`)
+export function getPipeline(id: number): Promise<PipelineDetail> {
+  return api.get(`/pipelines/${id}`)
 }
 
 /** 创建用户自定义 pipeline（name 从 YAML 自动生成） */
@@ -72,15 +77,15 @@ export function createPipeline(data: {
   return api.post('/pipelines', data)
 }
 
-/** 更新用户自定义 pipeline（name 变了会自动重命名，返回最终 name） */
+/** 更新用户自定义 pipeline */
 export function updatePipeline(
-  name: string,
+  id: number,
   data: { definition: string },
 ): Promise<PipelineListItem> {
-  return api.put(`/pipelines/${encodeURIComponent(name)}`, data)
+  return api.put(`/pipelines/${id}`, data)
 }
 
 /** 删除用户自定义 pipeline */
-export function deletePipeline(name: string): Promise<{ deleted: string }> {
-  return api.delete(`/pipelines/${encodeURIComponent(name)}`)
+export function deletePipeline(id: number): Promise<{ deleted: number }> {
+  return api.delete(`/pipelines/${id}`)
 }

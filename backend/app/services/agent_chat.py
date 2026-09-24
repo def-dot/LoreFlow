@@ -94,7 +94,7 @@ async def run_agent_chat(
     tool_names: list[str] = list(agent.tools or [])
     if agent.skills and "*" not in tool_names and "load_skill" not in tool_names:
         tool_names.append("load_skill")
-    tools = build_tools(tool_names)
+    tools = await build_tools(tool_names)
 
     # 5. Agentic loop
     max_iter = settings.AGENT_MAX_ROUNDS

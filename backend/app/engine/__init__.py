@@ -5,7 +5,7 @@ Quick start::
 
     from app.engine import Pipeline, RetryPolicy
 
-    pipeline = Pipeline(**{
+    pipeline = Pipeline.model_validate({
         "name": "pipeline",
         "nodes": [
             {"name": "fetch", "type": "my_fetch", "retry": 3},

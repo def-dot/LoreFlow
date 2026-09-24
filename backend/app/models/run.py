@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, Column, Text
+from sqlalchemy import JSON, Column, ForeignKey, Text
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
@@ -27,7 +27,8 @@ class RunRecord(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)  # 自增
     name: str = ""  # 任务名称（用户自定义或配置文件名）
-    pipeline: str = ""  # 工作流名称（YAML 的 name 字段）
+    pipeline_id: int = Field(foreign_key="pipelines.id")  # 外键关联 PipelineRecord
+    pipeline_name: str = ""  # 冗余：工作流名称（免 join 查询）
     created_at: datetime = Field(default_factory=datetime.now)
     finished_at: datetime | None = None
     # native_enum=False + values_callable：沿用 VARCHAR 列按 value 存取，兼容存量库

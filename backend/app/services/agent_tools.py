@@ -23,7 +23,7 @@ _PIPELINE_POLL_INTERVAL = 2.0   # 秒
 _PIPELINE_POLL_TIMEOUT = 300.0  # 5 分钟
 
 
-def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
+async def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
     """构建 OpenAI 格式工具列表。['*'] → 全部，[] → 无。
 
     Pipeline 名称不在 TOOL_REGISTRY 中时，动态包装为工具。
@@ -42,7 +42,7 @@ def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
             result.append(_tooldef_to_openai(td))
             continue
         # 尝试 pipeline
-        ptd = _resolve_pipeline_tool(name)
+        ptd = await _resolve_pipeline_tool(name)
         if ptd is not None:
             result.append(_tooldef_to_openai(ptd))
         else:
@@ -56,14 +56,14 @@ def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_pipeline_tool(name: str) -> FuncDef | None:
+async def _resolve_pipeline_tool(name: str) -> FuncDef | None:
     """如果 name 匹配一个 pipeline，返回包装后的 FuncDef；否则 None。"""
-    from app.services.pipelines import PIPELINES_DIR
+    from app.services import pipelines as pipelines_service
 
-    path = PIPELINES_DIR / (name + ".yaml")
-    if not path.is_file():
+    rec = await pipelines_service.get_pipeline_by_name(name)
+    if rec is None:
         return None
-    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config = yaml.safe_load(rec.definition)
 
     description = config.get("description") or f"执行工作流 {name}"
     description = f"[workflow] {description}"
@@ -181,7 +181,7 @@ async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
             output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
             status = "error"
     else:
-        ptd = _resolve_pipeline_tool(name)
+        ptd = await _resolve_pipeline_tool(name)
         if ptd is not None:
             try:
                 output = await ptd.func(**args)

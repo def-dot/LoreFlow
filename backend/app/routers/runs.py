@@ -26,11 +26,11 @@ router = APIRouter(prefix="/runs", route_class=UnifiedResponseRoute, tags=["runs
 
 
 @router.post("", response_model=RunCreateResponse, status_code=201)
-async def create_run(body: RunCreateRequest | None = None) -> RunCreateResponse:
+async def create_run(body: RunCreateRequest) -> RunCreateResponse:
     run_id = await orchestrator.create_run(
-        pipeline=body.pipeline if body else None,
-        name=body.name if body else None,
-        inputs=body.inputs if body else None,
+        pipeline_id=body.pipeline_id,
+        name=body.name,
+        inputs=body.inputs,
     )
     return RunCreateResponse(run_id=run_id)
 
@@ -61,12 +61,13 @@ async def get_run(run_id: int) -> RunDetail:
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
     data = record.model_dump()
+    data["pipeline"] = record.pipeline_name
     # 从 definition 实时生成 mermaid（渲染格式改进后存量 run 自动跟上）
     if record.definition:
         try:
             config = yaml.safe_load(record.definition)
             if isinstance(config, dict):
-                data["mermaid"] = Pipeline(config).to_mermaid()
+                data["mermaid"] = Pipeline.model_validate(config).to_mermaid()
         except Exception:
             data["mermaid"] = ""
     cfg = yaml.safe_load(record.definition) if record.definition else {}

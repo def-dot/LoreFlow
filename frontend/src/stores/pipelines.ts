@@ -5,24 +5,28 @@ import { getPipeline, listPipelines } from '@/api/pipelines'
 
 export const usePipelinesStore = defineStore('pipelines', () => {
   const pipelines = ref<PipelineListItem[]>([])
-  const selectedName = ref<string>('')
+  const selectedId = ref<number | null>(null)
   const detail = ref<PipelineDetail | null>(null)
   const loaded = ref(false)
 
-  async function fetchPipelines() {
-    const data = await listPipelines()
+  const selectedName = ref('')
+
+  async function fetchPipelines(q?: string) {
+    const data = await listPipelines(q)
     pipelines.value = data
     loaded.value = true
   }
 
-  async function select(name: string) {
-    selectedName.value = name
-    if (!name) return
-    detail.value = await getPipeline(name)
+  async function select(id: number) {
+    selectedId.value = id
+    const item = pipelines.value.find((p) => p.id === id)
+    selectedName.value = item?.name ?? ''
+    detail.value = await getPipeline(id)
   }
 
   return {
     pipelines,
+    selectedId,
     selectedName,
     detail,
     loaded,

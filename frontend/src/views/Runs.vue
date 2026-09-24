@@ -14,8 +14,8 @@ import { usePipelinesStore } from '@/stores/pipelines'
 const store = useRunsStore()
 const pipelinesStore = usePipelinesStore()
 
-// 新建 run 时运行的流水线（下拉来自 /pipelines，值为 YAML name）
-const configName = ref('')
+// 新建 run 时运行的流水线（下拉来自 /pipelines，值为 id）
+const configId = ref<number | null>(null)
 // 任务名称（可选，不传则用配置文件名）
 const runName = ref('')
 // 防止「新建运行」按钮重复点击导致并发创建
@@ -65,12 +65,12 @@ const parsedInputs = computed<{ value?: Record<string, unknown>; error: string |
 
 // 所选流水线的参数声明
 const selectedPipeline = computed(() =>
-  pipelinesStore.pipelines.find((p) => p.name === configName.value),
+  configId.value != null ? pipelinesStore.pipelines.find((p) => p.id === configId.value) : undefined,
 )
-watch(configName, (name) => { if (name) pipelinesStore.select(name) }, { immediate: true })
+watch(configId, (id) => { if (id != null) pipelinesStore.select(id) }, { immediate: true })
 const paramSpecs = computed(() => {
   const d = pipelinesStore.detail
-  if (!d || d.name !== configName.value) return []
+  if (!d) return []
   return toParamSpecs((d.params as Record<string, unknown>) ?? {})
 })
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
@@ -366,22 +366,22 @@ function clearMultiFile(spec: ParamSpec, index: number) {
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
-const previewName = ref<string | null>(null)
+const previewId = ref<number | null>(null)
 
 // 标题里的流水线中文名：详情未加载时从列表兜底，打开即可见
 const previewItem = computed(() =>
-  pipelinesStore.pipelines.find((p) => p.name === previewName.value),
+  previewId.value != null ? pipelinesStore.pipelines.find((p) => p.id === previewId.value) : undefined,
 )
 
 // 抽屉实际渲染的详情
 const previewDetail = ref<PipelineDetail | null>(null)
 
 async function loadPreview() {
-  if (!previewName.value) return
+  if (previewId.value == null) return
   previewError.value = null
   previewLoading.value = true
   try {
-    previewDetail.value = await getPipeline(previewName.value)
+    previewDetail.value = await getPipeline(previewId.value)
   } catch {
     previewError.value = '加载流水线失败，请检查后端是否可用。'
   } finally {
@@ -389,8 +389,8 @@ async function loadPreview() {
   }
 }
 
-async function openPreview(name: string) {
-  previewName.value = name
+async function openPreview(id: number) {
+  previewId.value = id
   previewOpen.value = true
   await loadPreview()
 }
@@ -472,7 +472,8 @@ async function startNewRun() {
   }
   creating.value = true
   try {
-    await store.startNewRun(configName.value, submitInputs.value.value, runName.value || undefined)
+    if (configId.value == null) return
+    await store.startNewRun(configId.value, submitInputs.value.value, runName.value || undefined)
     runName.value = '' // 创建成功后清空
     createDrawerOpen.value = false
     startDetailPolling()
@@ -536,8 +537,8 @@ onMounted(async () => {
   pipelinesStore
     .fetchPipelines()
     .then(() => {
-      if (!pipelinesStore.pipelines.some((p) => p.name === configName.value)) {
-        configName.value = pipelinesStore.pipelines[0]?.name ?? configName.value
+      if (configId.value == null || !pipelinesStore.pipelines.some((p) => p.id === configId.value)) {
+        configId.value = pipelinesStore.pipelines[0]?.id ?? null
       }
     })
     .catch(() => {})
@@ -586,7 +587,7 @@ onUnmounted(() => {
       <template #title>
         <div class="drawer-title">
           <span class="name">{{ previewDetail?.name ?? previewItem?.name ?? '流水线详情' }}</span>
-          <span class="muted file">{{ previewName }}</span>
+          <span class="muted file">{{ previewItem?.name ?? previewId }}</span>
         </div>
       </template>
       <div v-loading="previewLoading" class="drawer-body">
@@ -605,7 +606,7 @@ onUnmounted(() => {
           <label class="create-label">流水线</label>
           <div class="create-select-group">
             <el-select
-              v-model="configName"
+              v-model="configId"
               :disabled="!pipelinesStore.pipelines.length"
               filterable
               placeholder="选择流水线"
@@ -613,12 +614,12 @@ onUnmounted(() => {
             >
               <el-option
                 v-for="p in pipelinesStore.pipelines"
-                :key="p.name"
-                :value="p.name"
+                :key="p.id"
+                :value="p.id"
                 :label="p.name"
               />
             </el-select>
-            <el-button plain :disabled="!pipelinesStore.pipelines.length" @click="openPreview(configName)">
+            <el-button plain :disabled="configId == null" @click="openPreview(configId)">
               👁 预览
             </el-button>
           </div>

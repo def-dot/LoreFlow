@@ -6,36 +6,34 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 from fastapi import HTTPException
+from sqlmodel import select
 
+from app.core import database
 from app.core.config import settings
-from app.core.logging import get_logger
 
 from app.engine.pipeline import Pipeline
+from app.models.pipeline import PipelineRecord
 from app.registry import REGISTRY
-
-logger = get_logger(__name__)
 
 PIPELINES_DIR = settings.PIPELINES_DIR
 
 
-def list_pipelines() -> list[Pipeline]:
-    """枚举目录下全部 .yaml；单个文件解析失败跳过并告警。"""
-    entries: list[Pipeline] = []
-    for path in sorted(PIPELINES_DIR.glob("*.yaml")):
-        try:
-            raw = path.read_text(encoding="utf-8")
-            data = yaml.safe_load(raw)
-            cfg = Pipeline.model_construct(**data)
-        except Exception as exc:
-            logger.warning("Skip pipeline %s: %s", path.name, exc)
-            continue
-        entries.append(cfg)
-    return entries
+async def list_pipelines(q: str | None = None) -> list[PipelineRecord]:
+    """从数据库枚举 PipelineRecord，支持按名称/描述模糊搜索。"""
+    stmt = select(PipelineRecord).order_by(PipelineRecord.id)
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            (PipelineRecord.name.ilike(pattern)) | (PipelineRecord.description.ilike(pattern))
+        )
+    async with database.AsyncSessionLocal() as session:
+        return list((await session.exec(stmt)).all())
 
 
 def detail_from_config(raw: str) -> dict[str, Any]:
@@ -63,50 +61,74 @@ def detail_from_config(raw: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline CRUD
+# Pipeline CRUD（DB）
 # ---------------------------------------------------------------------------
 
 
-def create_pipeline(definition: str) -> Pipeline:
-    """创建 pipeline 文件：校验 YAML → 写入目录。"""
+async def create_pipeline(definition: str) -> PipelineRecord:
+    """创建 pipeline：校验 YAML → 写入 DB。"""
     try:
         data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
         raise ValueError(f"YAML 解析失败: {exc}") from exc
     cfg = Pipeline.model_validate(data)
-    PIPELINES_DIR.mkdir(parents=True, exist_ok=True)
-    dest = PIPELINES_DIR / f"{cfg.name}.yaml"
-    if dest.is_file():
-        raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
-    dest.write_text(definition, encoding="utf-8")
-    return cfg
 
-
-def update_pipeline(name: str, definition: str) -> Pipeline:
-    """更新 pipeline 文件。如果 YAML name 变了，自动重命名文件。"""
-    path = PIPELINES_DIR / (name + ".yaml")
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"流水线 {name!r} 不存在")
-    try:
-        data = yaml.safe_load(definition)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"YAML 解析失败: {exc}") from exc
-    cfg = Pipeline.model_validate(data)
-    new_path = PIPELINES_DIR / f"{cfg.name}.yaml"
-    if new_path != path:
-        if new_path.is_file():
+    async with database.AsyncSessionLocal() as session:
+        exists = await session.exec(select(PipelineRecord).where(PipelineRecord.name == cfg.name))
+        if exists.first():
             raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
-        new_path.write_text(definition, encoding="utf-8")
-        path.unlink()
-        return cfg
-    path.write_text(definition, encoding="utf-8")
-    return cfg
+        rec = PipelineRecord(name=cfg.name, description=cfg.description or "", definition=definition)
+        session.add(rec)
+        await session.commit()
+        await session.refresh(rec)
+        return rec
 
 
-def delete_pipeline(name: str) -> bool:
-    """删除 pipeline 文件。不存在返回 False。"""
-    path = PIPELINES_DIR / (name + ".yaml")
-    if not path.is_file():
-        return False
-    path.unlink()
-    return True
+async def get_pipeline(pipeline_id: int) -> PipelineRecord | None:
+    """按 ID 查 pipeline。"""
+    async with database.AsyncSessionLocal() as session:
+        return await session.get(PipelineRecord, pipeline_id)
+
+
+async def get_pipeline_by_name(name: str) -> PipelineRecord | None:
+    """按名称查 pipeline（供 orchestrator 使用）。"""
+    async with database.AsyncSessionLocal() as session:
+        result = await session.exec(select(PipelineRecord).where(PipelineRecord.name == name))
+        return result.first()
+
+
+async def update_pipeline(pipeline_id: int, definition: str) -> PipelineRecord:
+    """更新 pipeline：校验 YAML → 更新 DB。name 变更时检查冲突。"""
+    try:
+        data = yaml.safe_load(definition)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"YAML 解析失败: {exc}") from exc
+    cfg = Pipeline.model_validate(data)
+
+    async with database.AsyncSessionLocal() as session:
+        rec = await session.get(PipelineRecord, pipeline_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail=f"流水线 {pipeline_id} 不存在")
+        # name 变了，检查新 name 是否冲突
+        if cfg.name != rec.name:
+            dup = await session.exec(select(PipelineRecord).where(PipelineRecord.name == cfg.name))
+            if dup.first():
+                raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
+        rec.name = cfg.name
+        rec.description = cfg.description or ""
+        rec.definition = definition
+        rec.updated_at = datetime.now()
+        await session.commit()
+        await session.refresh(rec)
+        return rec
+
+
+async def delete_pipeline(pipeline_id: int) -> bool:
+    """删除 pipeline。不存在返回 False。"""
+    async with database.AsyncSessionLocal() as session:
+        rec = await session.get(PipelineRecord, pipeline_id)
+        if rec is None:
+            return False
+        await session.delete(rec)
+        await session.commit()
+        return True

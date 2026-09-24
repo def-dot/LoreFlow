@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
+import YamlEditor from '@/components/YamlEditor.vue'
 import { createPipeline, deletePipeline, updatePipeline } from '@/api/pipelines'
 import { usePipelinesStore } from '@/stores/pipelines'
 
@@ -13,30 +14,26 @@ const loadError = ref(false)
 // 编写指南 drawer
 const guideOpen = ref(false)
 
-// 筛选
+// 搜索（后端筛选）
 const filterText = ref('')
-const filteredPipelines = computed(() => {
-  const q = filterText.value.trim().toLowerCase()
-  if (!q) return store.pipelines
-  return store.pipelines.filter(
-    (p) =>
-      p.name.toLowerCase().includes(q)
-      || p.description.toLowerCase().includes(q),
-  )
-})
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+function onSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => fetchAll(filterText.value.trim()), 300)
+}
 
 // 新建/编辑 drawer
 const editorOpen = ref(false)
-const editingName = ref<string | null>(null)
+const editingId = ref<number | null>(null)
 const editorDefinition = ref('')
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 
-async function fetchAll() {
+async function fetchAll(q?: string) {
   loading.value = true
   loadError.value = false
   try {
-    await store.fetchPipelines()
+    await store.fetchPipelines(q)
   } catch {
     loadError.value = true
   } finally {
@@ -48,11 +45,11 @@ async function fetchAll() {
 const detailLoading = ref(false)
 const detailError = ref<string | null>(null)
 
-async function selectPipeline(name: string) {
+async function selectPipeline(id: number) {
   detailError.value = null
   detailLoading.value = true
   try {
-    await store.select(name)
+    await store.select(id)
   } catch {
     detailError.value = '加载失败'
   } finally {
@@ -60,22 +57,23 @@ async function selectPipeline(name: string) {
   }
 }
 
-const selectedItem = computed(() =>
-  store.pipelines.find((p) => p.name === store.selectedName),
-)
-
 // 打开新建 drawer
 function openCreate() {
-  editingName.value = null
+  editingId.value = null
   editorDefinition.value = defaultYaml
   saveError.value = null
   editorOpen.value = true
 }
 
 // 打开编辑 drawer
-async function openEdit() {
-  if (!store.selectedName || !store.detail) return
-  editingName.value = store.selectedName
+async function openEdit(id?: number) {
+  const targetId = id ?? store.selectedId
+  if (targetId == null) return
+  if (!store.detail || store.selectedId !== targetId) {
+    await selectPipeline(targetId)
+  }
+  if (!store.detail) return
+  editingId.value = targetId
   editorDefinition.value = store.detail.source
   saveError.value = null
   editorOpen.value = true
@@ -90,16 +88,16 @@ async function handleSave() {
   saving.value = true
   saveError.value = null
   try {
-    if (editingName.value) {
-      const { name: newName } = await updatePipeline(editingName.value, { definition: editorDefinition.value })
+    if (editingId.value != null) {
+      await updatePipeline(editingId.value, { definition: editorDefinition.value })
       await fetchAll()
       ElMessage.success('流水线已更新')
-      await selectPipeline(newName)
+      await selectPipeline(editingId.value)
     } else {
-      const { name } = await createPipeline({ definition: editorDefinition.value })
-      ElMessage.success(`流水线已创建: ${name}`)
+      const { id } = await createPipeline({ definition: editorDefinition.value })
+      ElMessage.success('流水线已创建')
       await fetchAll()
-      await selectPipeline(name)
+      await selectPipeline(id)
     }
     editorOpen.value = false
   } catch (err: unknown) {
@@ -111,21 +109,26 @@ async function handleSave() {
 }
 
 // 删除
-async function handleDelete() {
-  if (!store.selectedName || !selectedItem.value) return
+async function handleDelete(id?: number) {
+  const targetId = id ?? store.selectedId
+  if (targetId == null) return
+  const item = store.pipelines.find((p) => p.id === targetId)
   try {
     await ElMessageBox.confirm(
-      `删除流水线「${selectedItem.value.name}」？删除后不可恢复。`,
+      `删除流水线「${item?.name ?? targetId}」？删除后不可恢复。`,
       '删除流水线',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
   } catch {
     return
   }
-  await deletePipeline(store.selectedName)
-  ElMessage.success(`已删除流水线「${selectedItem.value.name}」`)
-  store.selectedName = ''
-  store.detail = null
+  await deletePipeline(targetId)
+  ElMessage.success(`已删除流水线「${item?.name ?? targetId}」`)
+  if (store.selectedId === targetId) {
+    store.selectedId = null
+    store.selectedName = ''
+    store.detail = null
+  }
   await fetchAll()
 }
 
@@ -158,7 +161,7 @@ nodes:
 onMounted(async () => {
   await fetchAll()
   if (store.pipelines.length) {
-    await selectPipeline(store.pipelines[0].name)
+    await selectPipeline(store.pipelines[0].id)
   }
 })
 </script>
@@ -180,18 +183,25 @@ onMounted(async () => {
       <!-- 左侧：流水线列表 -->
       <div class="sidebar">
         <div class="sidebar-filter">
-          <el-input v-model="filterText" placeholder="搜索工作流…" clearable size="small" />
+          <el-input v-model="filterText" placeholder="搜索工作流…" clearable size="small" @input="onSearch" @clear="fetchAll()" />
         </div>
         <div
-          v-for="p in filteredPipelines"
-          :key="p.name"
+          v-for="p in store.pipelines"
+          :key="p.id"
           class="sidebar-item"
-          :class="{ active: p.name === store.selectedName }"
-          @click="selectPipeline(p.name)"
+          :class="{ active: p.id === store.selectedId }"
+          @click="selectPipeline(p.id)"
         >
-          <span class="sidebar-name">{{ p.name }}</span>
+          <div class="sidebar-main">
+            <span class="sidebar-name">{{ p.name }}</span>
+            <span v-if="p.description" class="sidebar-desc">{{ p.description }}</span>
+          </div>
+          <div class="sidebar-actions" @click.stop>
+            <el-button size="small" text @click="openEdit(p.id)">✎</el-button>
+            <el-button size="small" text type="danger" @click="handleDelete(p.id)">✕</el-button>
+          </div>
         </div>
-        <div v-if="!filteredPipelines.length && !loading" class="sidebar-empty muted">
+        <div v-if="!store.pipelines.length && !loading" class="sidebar-empty muted">
           暂无工作流
         </div>
       </div>
@@ -199,19 +209,6 @@ onMounted(async () => {
       <!-- 右侧：详情 -->
       <div class="detail">
         <template v-if="store.detail">
-          <div class="detail-head">
-            <div class="detail-title">
-              <h2>{{ store.detail.name }}</h2>
-            </div>
-            <div class="detail-actions">
-              <el-button size="small" plain @click="openEdit()">
-                ✎ 编辑
-              </el-button>
-              <el-button size="small" plain type="danger" @click="handleDelete()">
-                ✕ 删除
-              </el-button>
-            </div>
-          </div>
           <div class="detail-body">
             <PipelineDetailPanel :key="store.detail.name" :detail="store.detail" />
           </div>
@@ -227,15 +224,12 @@ onMounted(async () => {
     </main>
 
     <!-- 新建/编辑 drawer -->
-    <el-drawer v-model="editorOpen" :title="editingName ? '编辑工作流' : '新建工作流'" size="min(720px, 94vw)">
+    <el-drawer v-model="editorOpen" :title="editingName ? '编辑工作流' : '新建工作流'" size="min(720px, 94vw)" class="editor-drawer">
       <div class="editor-form">
         <div class="editor-field editor-field-grow">
           <label class="editor-label">YAML 定义</label>
-          <el-input
+          <YamlEditor
             v-model="editorDefinition"
-            type="textarea"
-            :autosize="{ minRows: 16, maxRows: 40 }"
-            spellcheck="false"
             placeholder="粘贴或编写 YAML 工作流定义"
             class="yaml-editor"
           />
@@ -443,9 +437,9 @@ nodes:
 }
 .sidebar-item {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 16px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--line);
   transition: background 0.15s;
@@ -456,12 +450,39 @@ nodes:
 .sidebar-item.active {
   background: rgba(77, 196, 178, 0.08);
   border-left: 3px solid var(--accent);
-  padding-left: 13px;
+  padding-left: 9px;
+}
+.sidebar-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .sidebar-name {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-desc {
+  font-size: 11px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-actions {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.sidebar-item:hover .sidebar-actions {
+  opacity: 1;
 }
 .sidebar-meta {
   display: flex;
@@ -478,28 +499,6 @@ nodes:
 .detail {
   overflow-y: auto;
 }
-.detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--line);
-}
-.detail-title {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-.detail-title h2 {
-  font-size: 15px;
-  margin: 0;
-}
-.detail-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
 .detail-body {
   padding: 16px 20px;
 }
@@ -509,6 +508,12 @@ nodes:
   justify-content: center;
   height: 100%;
   min-height: 200px;
+}
+/* drawer body needs to fill height for flex children */
+.editor-drawer :deep(.el-drawer__body) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 /* 编辑 drawer */
 .editor-form {
@@ -531,10 +536,9 @@ nodes:
   font-weight: 600;
   color: var(--ink-3);
 }
-.yaml-editor :deep(textarea) {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
+.yaml-editor {
+  flex: 1;
+  min-height: 0;
 }
 .editor-error {
   color: #ff8f8a;

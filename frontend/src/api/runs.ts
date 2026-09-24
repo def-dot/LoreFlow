@@ -79,11 +79,11 @@ export function cancelRun(runId: number): Promise<{ data: RunDetail }> {
 }
 
 export function startRun(
-  pipeline: string,
+  pipelineId: number,
   inputs?: Record<string, unknown>,
   name?: string,
 ): Promise<{ run_id: number }> {
-  const body: Record<string, unknown> = { pipeline }
+  const body: Record<string, unknown> = { pipeline_id: pipelineId }
   if (name) body.name = name
   if (inputs && Object.keys(inputs).length) body.inputs = inputs
   return api.post('/runs', body)

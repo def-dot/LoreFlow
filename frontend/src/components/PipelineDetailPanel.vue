@@ -124,7 +124,6 @@ async function copySource() {
 <template>
   <div>
     <!-- 无自身头部：仅用于 Runs 页 drawer，名称/文件名由 drawer 标题展示 -->
-    <p v-if="detail.description" class="desc">{{ detail.description }}</p>
     <section v-if="detail.params && Object.keys(detail.params).length" class="panel params-panel">
       <h2>参数</h2>
       <el-table :data="paramsRows" size="small" max-height="200">

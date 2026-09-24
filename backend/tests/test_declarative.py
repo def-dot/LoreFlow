@@ -37,7 +37,7 @@ async def test_load_dag_from_dict_runs(registered: Any) -> None:
             "clean": {"type": "clean", "depends_on": ["fetch"]},
         },
     }
-    dag = Pipeline(config)
+    dag = Pipeline.model_validate(config)
     assert dag.name == "cfg_demo"
     results, _ = await dag.run()
     assert results["clean"].output == "declarative config rocks"
@@ -49,7 +49,7 @@ async def test_load_dag_with_human_node() -> None:
             "review": {"type": "human", "depends_on": ["data"], "prompt": "check it"},
         },
     }
-    dag = Pipeline(config)
+    dag = Pipeline.model_validate(config)
     # human 节点会抛 SuspendExecution
     with pytest.raises(SuspendExecution):
         await dag.run()
@@ -58,18 +58,18 @@ async def test_load_dag_human_with_condition() -> None:
     """human 节点支持 condition 表达式 —— False 时跳过审核。"""
     config = {'nodes': {'data': {'type': 'test_fetch'}, 'review': {'type': 'human', 'depends_on': ['data'], 'condition': '$approved == true'}, '__start__': {'type': 'start', 'inputs': {'approved': {'default': False}}}}}
 
-    dag = Pipeline(config)
+    dag = Pipeline.model_validate(config)
     results = await dag.run()
     assert results["review"].status == NodeStatus.SKIPPED
 
 def test_registry_only_lookup() -> None:
     # type 只能引用注册表中的名字，没有 functions 参数可传
-    dag = Pipeline({"nodes": {"a": {"type": "test_fetch"}}})
+    dag = Pipeline.model_validate({"nodes": {"a": {"type": "test_fetch"}}})
     assert "a" in dag.nodes
 
     # 点路径不是注册名字，同样被拒绝
     with pytest.raises(ValueError, match="未注册"):
-        Pipeline({"nodes": {"b": {"type": "app.registry.other.test_fetch"}}})
+        Pipeline.model_validate({"nodes": {"b": {"type": "app.registry.other.test_fetch"}}})
 
 def test_parse_retry_forms() -> None:
     mapping = parse_retry({"max_retries": 2, "retry_on": ["RuntimeError"]})
@@ -82,26 +82,24 @@ def test_parse_retry_forms() -> None:
 
 def test_validation_errors() -> None:
     with pytest.raises(ValueError, match="不支持的字段"):
-        Pipeline({"nodes": {"a": {"kind": "human"}}})  # kind 已废除，只有 type
+        Pipeline.model_validate({"nodes": {"a": {"kind": "human"}}})  # kind 已废除，只有 type
     with pytest.raises(ValueError, match="不支持的字段"):
-        Pipeline({"nodes": {"a": {"type": "test_fetch", "bogus": 1}}})
+        Pipeline.model_validate({"nodes": {"a": {"type": "test_fetch", "bogus": 1}}})
     with pytest.raises(ValueError, match="需要 'type'"):
-        Pipeline({"nodes": {"a": {}}})
+        Pipeline.model_validate({"nodes": {"a": {}}})
     with pytest.raises(ValueError, match="类型函数 'no_such_fn' 未注册"):
-        Pipeline({"nodes": {"a": {"type": "no_such_fn"}}})
+        Pipeline.model_validate({"nodes": {"a": {"type": "no_such_fn"}}})
     with pytest.raises(ValueError, match="不在 DAG 中"):
-        Pipeline({"nodes": {"a": {"type": "test_fetch", "depends_on": ["ghost"]}}})
+        Pipeline.model_validate({"nodes": {"a": {"type": "test_fetch", "depends_on": ["ghost"]}}})
     with pytest.raises(ValueError, match="循环依赖"):
-        Pipeline(
-            {
-                "nodes": {
-                    "a": {"type": "test_fetch", "depends_on": ["b"]},
-                    "b": {"type": "test_fetch", "depends_on": ["a"]},
-                }
+        Pipeline.model_validate({
+            "nodes": {
+                "a": {"type": "test_fetch", "depends_on": ["b"]},
+                "b": {"type": "test_fetch", "depends_on": ["a"]},
             }
-        )
+        })
     # human 节点不再需要 approver
-    dag = Pipeline({"nodes": {"r": {"type": "human"}}})
+    dag = Pipeline.model_validate({"nodes": {"r": {"type": "human"}}})
     assert "r" in dag.nodes
     with pytest.raises((ValueError, TypeError)):
         Pipeline(123)  # type: ignore[arg-type]
@@ -112,19 +110,11 @@ def test_load_dag_from_yaml(tmp_path) -> None:
         "name: tiny\nnodes:\n  fetch:\n    type: test_fetch\n    retry: 2\n",
         encoding="utf-8",
     )
-    dag = Pipeline(p)
+    config = yaml.safe_load(p.read_text(encoding="utf-8"))
+    dag = Pipeline.model_validate(config)
     assert isinstance(dag, Pipeline)
     assert dag.name == "tiny"
     assert dag.nodes["fetch"].retry == RetryPolicy(max_retries=2)
-
-def test_load_dag_bad_file(tmp_path) -> None:
-    with pytest.raises(ValueError, match="无法读取配置文件"):
-        Pipeline(tmp_path / "missing.yaml")
-
-    bad = tmp_path / "bad.yaml"
-    bad.write_text("nodes: [unclosed", encoding="utf-8")
-    with pytest.raises(ValueError, match="YAML 无效"):
-        Pipeline(bad)
 
 # ---------------------------------------------------------------------------
 # required_inputs — 必填输入声明与校验
@@ -139,7 +129,7 @@ async def test_required_inputs_enforced_at_run(registered: Any) -> None:
         return ctx["query"]
 
     registered("t_only", only)
-    dag = Pipeline({'nodes': {'only': {'type': 't_only'}, '__start__': {'type': 'start', 'inputs': {'query': {'required': True}}}}})
+    dag = Pipeline.model_validate({'nodes': {'only': {'type': 't_only'}, '__start__': {'type': 'start', 'inputs': {'query': {'required': True}}}}})
 
     assert dag.validate() == []
 
@@ -160,7 +150,7 @@ async def test_required_with_default_fills_when_omitted(registered: Any) -> None
         return ctx["query"]
 
     registered("t_required_default", only)
-    dag = Pipeline(
+    dag = Pipeline.model_validate(
         {'nodes': {'only': {'type': 't_required_default'}, '__start__': {'type': 'start', 'inputs': {'query': {'required': True, 'default': '建议值'}}}}})
     assert dag.required_inputs == ["query"]
     assert dag.default_inputs == {"query": "建议值"}  # 必填键的 default 也进回填视图
@@ -189,7 +179,7 @@ async def test_required_inputs_empty_values_rejected(registered: Any) -> None:
         return ctx["count"]
 
     registered("t_echo_count", only)
-    dag = Pipeline(
+    dag = Pipeline.model_validate(
         {'nodes': {'echo': {'type': 't_echo_count'}, '__start__': {'type': 'start', 'inputs': {'count': {'required': True}}}}})
 
     # key 存在即算已提供（不检查值内容）
@@ -208,13 +198,13 @@ async def test_undeclared_inputs_reject_all_inputs(registered: Any) -> None:
     registered("t_echo_extra", echo)
 
     # 声明了 inputs 契约：extra 静默忽略（只取声明的 key）
-    declared = Pipeline(
+    declared = Pipeline.model_validate(
         {'nodes': {'echo': {'type': 't_echo_extra'}, '__start__': {'type': 'start', 'inputs': {'q': {'required': True}}}}})
     results = await declared.run(inputs={"q": "ok", "extra": 1})
     assert results["echo"].output == "ok"  # extra 被忽略
 
     # 未声明 inputs：无 start 节点，原样进 ctx
-    free = Pipeline({"nodes": {"echo": {"type": "t_echo_extra"}}})
+    free = Pipeline.model_validate({"nodes": {"echo": {"type": "t_echo_extra"}}})
     results = await free.run(inputs={"extra": 1})
     assert results["echo"].output == 1
 
@@ -225,8 +215,7 @@ async def test_undeclared_inputs_reject_all_inputs(registered: Any) -> None:
 def test_input_keys_clash_node_names_rejected() -> None:
     """参数键与节点名冲突 → load_dag 拒绝（ctx 命名空间共享）。"""
     with pytest.raises(ValueError, match="参数键与节点名冲突"):
-        Pipeline(
-            {'nodes': {'only': {'type': 'test_fetch'}, '__start__': {'type': 'start', 'inputs': {'only': {'required': True}}}}})
+        Pipeline.model_validate({'nodes': {'only': {'type': 'test_fetch'}, '__start__': {'type': 'start', 'inputs': {'only': {'required': True}}}}})
 
 # ---------------------------------------------------------------------------
 # inputs 富声明 — label/description/default/required，与简式归一化
@@ -241,7 +230,7 @@ def test_inputs_rich_form() -> None:
         "limit": {"default": 5},  # 可选、无 label → 展示层 label 退化为键名
         "body": {"required": True, "type": "paragraph"},  # 多行文本（前端 textarea）
     }
-    dag = Pipeline({"nodes": {"only": {"type": "test_fetch"}, "__start__": {"type": "start", "inputs": params}}})
+    dag = Pipeline.model_validate({"nodes": {"only": {"type": "test_fetch"}, "__start__": {"type": "start", "inputs": params}}})
     assert dag.params == params  # 声明原样保留
     assert dag.default_inputs == {"topic": "默认主题", "limit": 5}
     assert dag.required_inputs == ["query", "body"]
@@ -257,7 +246,7 @@ async def test_inputs_rich_form_runs(registered: Any) -> None:
         return {"query": ctx["query"], "topic": ctx.get("topic")}
 
     registered("t_search", search)
-    dag = Pipeline(
+    dag = Pipeline.model_validate(
         {'nodes': {'search': {'type': 't_search'}, '__start__': {'type': 'start', 'inputs': {'query': {'required': True, 'label': '查询词'}, 'topic': {'default': '默认主题'}}}}})
     assert dag.default_inputs == {"topic": "默认主题"}
     assert dag.required_inputs == ["query"]
@@ -440,7 +429,7 @@ def test_validate_config_rejects_param_node_clash() -> None:
 
 def test_param_node_clash_checked_at_engine() -> None:
     """Pipeline 构造时 __start__ inputs 与节点名冲突由 validate 兜底拦截。"""
-    dag = Pipeline({
+    dag = Pipeline.model_validate({
         "nodes": {
             "__start__": {"type": "start", "inputs": {"query": {"required": True}}},
             "query": {"type": "test_fetch"},
@@ -457,7 +446,7 @@ def test_validate_config_collects_all_errors() -> None:
 
     # load_dag 将全部错误合并进同一个 ValueError
     with pytest.raises(ValueError) as exc_info:
-        Pipeline(config)
+        Pipeline.model_validate(config)
     message = str(exc_info.value)
     assert "不支持的字段 ['bogus']" in message
     assert "required 必须是布尔值" in message
@@ -475,7 +464,7 @@ async def test_human_review_view_payload(registered: Any) -> None:
         return "done"
 
     registered("t_work", work)
-    dag = Pipeline(
+    dag = Pipeline.model_validate(
         {'nodes': {'work': {'type': 't_work'}, 'gate': {'type': 'human', 'depends_on': ['work'], 'description': '重点核对工作成果', 'inputs': {'_review': {'work': {'label': '工作成果'}, 'opt': {'label': '可选参数'}}}}, '__start__': {'type': 'start', 'inputs': {'opt': {}}}}})
     results = await dag.run(approver=approver)
     assert seen == {
@@ -492,7 +481,7 @@ def test_review_unknown_key_not_checked() -> None:
     async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         return {"approve": True}
 
-    dag = Pipeline(
+    dag = Pipeline.model_validate(
         {'nodes': {'work': {'type': 'test_fetch'}, 'gate': {'type': 'human', 'depends_on': ['work'], 'inputs': {'_review': {'ttile': '标题'}}}, '__start__': {'type': 'start', 'inputs': {}}}})
     assert dag.human_nodes[0].name == "gate"
 
@@ -501,7 +490,7 @@ def test_review_param_key_allowed() -> None:
     async def approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
         return {"approve": True}
 
-    dag = Pipeline(
+    dag = Pipeline.model_validate(
         {'nodes': {'gate': {'type': 'human', 'depends_on': [], 'inputs': {'_review': {'q': '查询', 'opt': '可选参数'}}}, '__start__': {'type': 'start', 'inputs': {'q': {'required': True}, 'opt': {}}}}})
     assert dag.human_nodes[0].name == "gate"
 
@@ -513,11 +502,11 @@ async def test_condition_expression_runs_and_skips() -> None:
     """等值表达式按 inputs 值分流：pick == a / pick == b 各自命中。"""
     config = {'nodes': {'a': {'type': 'test_fetch', 'condition': '$pick == a'}, 'b': {'type': 'test_fetch', 'condition': '$pick == b'}, '__start__': {'type': 'start', 'inputs': {'pick': {}}}}}
 
-    results = await Pipeline(config).run(inputs={"pick": "a"})
+    results = await Pipeline.model_validate(config).run(inputs={"pick": "a"})
     assert results["a"].status is NodeStatus.COMPLETED
     assert results["b"].status is NodeStatus.SKIPPED
 
-    results = await Pipeline(config).run(inputs={"pick": "b"})
+    results = await Pipeline.model_validate(config).run(inputs={"pick": "b"})
     assert results["a"].status is NodeStatus.SKIPPED
     assert results["b"].status is NodeStatus.COMPLETED
 
@@ -534,7 +523,7 @@ async def test_condition_expression_on_wired_key() -> None:
             },
         },
     }
-    results = await Pipeline(config).run()
+    results = await Pipeline.model_validate(config).run()
     assert results["gold"].status is NodeStatus.SKIPPED
 
 async def test_condition_expression_dollar_reference() -> None:
@@ -549,11 +538,11 @@ async def test_condition_expression_dollar_reference() -> None:
             },
         },
     }
-    results = await Pipeline(config).run()
+    results = await Pipeline.model_validate(config).run()
     assert results["gold"].status is NodeStatus.COMPLETED
 
     config["nodes"]["gold"]["condition"] = "$data.title == nope"
-    results = await Pipeline(config).run()
+    results = await Pipeline.model_validate(config).run()
     assert results["gold"].status is NodeStatus.SKIPPED
 
 async def test_condition_boolean_constants() -> None:
@@ -565,7 +554,7 @@ async def test_condition_boolean_constants() -> None:
         },
     }
     assert validate_config(config) == []
-    results = await Pipeline(config).run()
+    results = await Pipeline.model_validate(config).run()
     assert results["off"].status is NodeStatus.SKIPPED
     assert results["on"].status is NodeStatus.COMPLETED
 
@@ -612,7 +601,7 @@ async def _run_condition_yaml(
 
     monkeypatch.setattr(llm_mod, "llm_chat_call", fake_chat)
     config = yaml.safe_load((settings.PIPELINES_DIR / "02_condition.yaml").read_text(encoding="utf-8"))
-    dag = Pipeline(config)
+    dag = Pipeline.model_validate(config)
     return await dag.run(inputs={"prompt": prompt})
 
 async def test_condition_yaml_chat_branch_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:

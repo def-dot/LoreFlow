@@ -26,7 +26,7 @@ async def main():
         ]
     }
 
-    pipeline = Pipeline(**data)
+    pipeline = Pipeline.model_validate(data)
 
     # 临时 patch executor 来检查 ctx
     from app.engine.executor import PipeLineExecutor

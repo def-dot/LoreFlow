@@ -65,13 +65,16 @@ async def test_pipeline_traversal_404(client: AsyncClient) -> None:
         assert body["data"] is None  # 任何 404 都不泄露文件内容
 
 
-async def test_list_skips_broken_yaml(monkeypatch, tmp_path) -> None:
-    """单个坏文件不影响列表：跳过并继续枚举其余文件。"""
-    good = tmp_path / "good.yaml"
-    good.write_text("name: good\nnodes:\n  a:\n    type: test_fetch\n", encoding="utf-8")
-    broken = tmp_path / "broken.yaml"
-    broken.write_text("nodes: [unclosed", encoding="utf-8")
-    monkeypatch.setattr(pipeline_service.settings, "PIPELINES_DIR", tmp_path)
+async def test_list_skips_broken_yaml() -> None:
+    """list_pipelines 直接返回 PipelineRecord，不再解析 YAML。"""
+    import app.core.database as db_mod
+    from app.models.pipeline import PipelineRecord
 
-    entries = pipeline_service.list_pipelines()
-    assert [e.name for e in entries] == ["good"]
+    async with db_mod.AsyncSessionLocal() as session:
+        session.add(PipelineRecord(name="good", definition="name: good\nnodes:\n  a:\n    type: test_fetch\n"))
+        session.add(PipelineRecord(name="broken", definition="nodes: [unclosed"))
+        await session.commit()
+
+    entries = await pipeline_service.list_pipelines()
+    assert len(entries) == 2
+    assert [e.name for e in entries] == ["good", "broken"]

@@ -63,7 +63,7 @@ async def agent(params: AgentParams) -> AgentOutput:
     tool_names: list[str] = list(params.tools or [])
     if params.skills and "*" not in tool_names and "load_skill" not in tool_names:
         tool_names.append("load_skill")
-    tool_defs = build_tools(tool_names)
+    tool_defs = await build_tools(tool_names)
 
     content = ""
 

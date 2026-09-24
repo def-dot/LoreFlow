@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core import database
@@ -20,17 +20,46 @@ from app.engine import (
     NodeResult,
     SuspendExecution,
 )
-from app.engine.pipeline import validate_and_merge
+from app.engine.pipeline import validate_and_merge, validate_inputs
+from app.models.pipeline import PipelineRecord
 from app.models.run import RunRecord, RunStatus
+from app.services import pipelines as pipelines_service
 from app.services import runs
-from app.services.pipelines import PIPELINES_DIR
 
 logger = get_logger(__name__)
 
 
-async def run_pipeline(record: RunRecord, dag: Pipeline) -> None:
+async def _ensure_pipeline_record(name: str, description: str, definition: str) -> PipelineRecord:
+    """获取或创建 PipelineRecord（按 name 去重）。"""
+    async with database.AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PipelineRecord).where(PipelineRecord.name == name)
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            record = PipelineRecord(name=name, description=description, definition=definition)
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+        else:
+            changed = False
+            if record.definition != definition:
+                record.definition = definition
+                changed = True
+            if record.description != description:
+                record.description = description
+                changed = True
+            if changed:
+                record.updated_at = datetime.now()
+                await session.commit()
+                await session.refresh(record)
+        return record
+
+
+async def run_pipeline(record: RunRecord) -> None:
     """执行一次 run。挂起与终态均走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
     """
+    pipeline = Pipeline.model_validate(yaml.safe_load(record.definition))
 
     async def on_event(result: NodeResult) -> None:
         record.nodes[result.node_name] = result.to_dict()
@@ -43,7 +72,7 @@ async def run_pipeline(record: RunRecord, dag: Pipeline) -> None:
     error: str | None = None
     output: dict[str, Any] | None = None
     try:
-        _, output = await dag.run(
+        _, output = await pipeline.run(
             inputs=record.inputs,
             on_event=on_event,
             resume=record.nodes,
@@ -92,35 +121,34 @@ async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: 
 
 
 async def create_run(
-    pipeline: str | None = None,
+    pipeline_id: int,
     name: str | None = None,
     inputs: dict[str, Any] | None = None,
 ) -> int:
     """校验配置并落库一个新 run，返回 run_id。"""
-    if not pipeline:
-        raise ValueError("pipeline 必填")
     inputs = dict(inputs) if inputs else {}
-    path = PIPELINES_DIR / (pipeline + ".yaml")
-    if not path.is_file():
-        raise ValueError(f"流水线 {pipeline!r} 不存在")
-    raw = path.read_text(encoding="utf-8")
+
+    pipeline_rec = await pipelines_service.get_pipeline(pipeline_id)
+    if pipeline_rec is None:
+        raise ValueError(f"流水线 {pipeline_id} 不存在")
+
+    raw = pipeline_rec.definition
     config = yaml.safe_load(raw)
-    dag = Pipeline(config)
+    dag = Pipeline.model_validate(config)
+    if dag.params:
+        validate_inputs(dag.params, inputs)
+
     record = RunRecord(
         name=name or dag.name,
-        pipeline=dag.name,
+        pipeline_id=pipeline_rec.id,
+        pipeline_name=dag.name,
         status=RunStatus.RUNNING,
+        definition=raw,
+        inputs=inputs,
     )
-    record.definition = raw
-
-    # 声明参数来自 Pipeline.params（唯一来源）
-    if dag.params:
-        record.inputs = validate_and_merge(dag.params, inputs)
-    else:
-        record.inputs = dict(inputs) if inputs else {}
-
     await runs.create(record)
-    task = asyncio.create_task(run_pipeline(record, dag))
+
+    task = asyncio.create_task(run_pipeline(record))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
     task.add_done_callback(lambda _: watchdog.cancel())
     return record.id
@@ -170,12 +198,10 @@ async def resume_record(record: RunRecord) -> None:
     if not result.rowcount:
         logger.info("[run %s] 恢复运行失败：当前状态已是运行中", record.id)
         return
-    
-    record.status = RunStatus.RUNNING
-   
-    dag = Pipeline(yaml.safe_load(record.definition))
 
-    task = asyncio.create_task(run_pipeline(record, dag))
+    record.status = RunStatus.RUNNING
+
+    task = asyncio.create_task(run_pipeline(record))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))
     task.add_done_callback(lambda _: watchdog.cancel())
 

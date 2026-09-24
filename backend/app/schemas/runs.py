@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class RunCreateRequest(BaseModel):
-    pipeline: str | None = None
+    pipeline_id: int
     name: str | None = None
     inputs: dict[str, Any] | None = None
 

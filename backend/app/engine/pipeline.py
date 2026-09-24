@@ -51,16 +51,25 @@ class InputParamDef(BaseModel):
     options: list[str] | None = None  # type=select 时的选项列表
 
 
-def validate_and_merge(
+def validate_inputs(
     params: dict[str, InputParamDef],
     inputs: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """校验必填 / 多余参数，合并默认值，返回最终输入。"""
+) -> None:
+    """校验必填 / 多余参数，不合并默认值。"""
     inputs = inputs or {}
     if missing := {k for k, v in params.items() if v.required} - set(inputs):
         raise ValueError(f"必填参数缺失: {missing}")
     if extra := set(inputs) - set(params):
         raise ValueError(f"多余的参数: {extra}")
+
+
+def validate_and_merge(
+    params: dict[str, InputParamDef],
+    inputs: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """校验必填 / 多余参数，合并默认值，返回最终输入。"""
+    validate_inputs(params, inputs)
+    inputs = inputs or {}
     defaults = {k: v.default for k, v in params.items() if v.default is not None}
     return {**defaults, **inputs}
 
@@ -220,7 +229,7 @@ class Pipeline(BaseModel):
 
     用法::
 
-        p = Pipeline(**data)
+        p = Pipeline.model_validate(data)
         results, _ = await p.run(inputs={"q": "hello"})
 
     ``params`` 是 Pipeline 级输入参数声明（InputParamDef）；
