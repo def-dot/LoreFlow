@@ -13,8 +13,7 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 
@@ -124,6 +123,7 @@ class PipeLineExecutor:
             # ---- 4. Execute with concurrency gate + retry ----
             if self.on_event is not None:
                 await self.on_event(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
+                
             result = await self._execute_with_retry(node)
 
         except asyncio.CancelledError:
@@ -142,13 +142,14 @@ class PipeLineExecutor:
 
     async def _execute_with_retry(self, node: Node) -> NodeResult:
         """Run a node through its retry loop; returns the final ``NodeResult``."""
-        retry = self._retry_policy(node)
+        retry = node.retry if isinstance(node.retry, RetryPolicy) else RetryPolicy(max_retries=node.retry or 0)
+
         retry_history: list[dict[str, Any]] = []
         last_error: str | None = None
 
         for attempt in range(retry.max_retries + 1):
             try:
-                async with self._concurrency_gate():
+                async with self._semaphore or nullcontext():
                     start = time.monotonic()
                     output = await self._call(node)
                     duration_ms = (time.monotonic() - start) * 1000
@@ -187,26 +188,9 @@ class PipeLineExecutor:
             error=last_error, attempts=attempt + 1, retry_history=retry_history or None,
         )
 
-    @asynccontextmanager
-    async def _concurrency_gate(self) -> AsyncIterator[None]:
-        """Gate execution through the concurrency semaphore."""
-        if self._semaphore is None:
-            yield
-        else:
-            async with self._semaphore:
-                yield
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _retry_policy(node: Node) -> RetryPolicy:
-        """Normalize retry config once per call (cached on Node at runtime)."""
-        rp = node.retry
-        if isinstance(rp, RetryPolicy):
-            return rp
-        return RetryPolicy(max_retries=rp or 0)
 
     async def _call(self, node: Node) -> Any:
         func_def = REGISTRY[node.type]
