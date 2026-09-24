@@ -90,22 +90,20 @@ async def run_pipeline(record: RunRecord) -> None:
         outcome = RunStatus.FAILED
         error = str(exc)
     finally:
-        values: dict[str, Any] = {
-            "status": outcome,
-            "output": output,
-            "finished_at": datetime.now() if outcome is not RunStatus.REVIEWING else None,
-            "error": error,
-        }
-
         async with database.AsyncSessionLocal() as session:
             result = await session.execute(
                 update(RunRecord)
                 .where(RunRecord.id == record.id, RunRecord.status == RunStatus.RUNNING)
-                .values(**values)
+                .values(
+                    status=outcome,
+                    output=output,
+                    error=error,
+                    finished_at=datetime.now() if outcome is not RunStatus.REVIEWING else None,
+                )
             )
             await session.commit()
         if not result.rowcount:
-            logger.info("[run %s] %s 未落库：状态已被并发修改（如取消）", record.id, values["status"].value)
+            logger.info("[run %s] %s 未落库：状态已被并发修改（如取消）", record.id, outcome.value)
 
 
 async def _cancel_watchdog(run_id: int, pipeline: asyncio.Task[None], interval: float = 1.0) -> None:
