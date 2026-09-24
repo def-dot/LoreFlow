@@ -90,8 +90,6 @@ async def run_pipeline(record: RunRecord) -> None:
         outcome = RunStatus.FAILED
         error = str(exc)
     finally:
-        # 挂起非终态：不写 finished_at（outcome 只会是 COMPLETED/CANCELLED/
-        # REVIEWING/FAILED，永不是 RUNNING）
         values: dict[str, Any] = {
             "status": outcome,
             "output": output,
