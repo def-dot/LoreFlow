@@ -288,31 +288,69 @@ nodes:
     label: 提示词               # [可选] 表单显示名称
     description: 用户输入的问题  # [可选] 表单提示说明
     type: text                 # [可选] 参数类型，默认 text，见下表
-    default: "你好"             # [可选] 默认值
+    default: 你好               # [可选] 默认值
     options:                   # [可选] type=select 时的可选值
       - 选项1
       - 选项2</pre>
-        <div class="guide-type-list">
-          <span class="type-label">参数类型</span>
-          <div class="type-item"><code>text</code> 单行文本</div>
-          <div class="type-item"><code>paragraph</code> 多行文本</div>
-          <div class="type-item"><code>number</code> 数字</div>
-          <div class="type-item"><code>select</code> 下拉选项</div>
-          <div class="type-item"><code>checkbox</code> 复选框</div>
-          <div class="type-item"><code>file</code> 单文件上传</div>
-          <div class="type-item"><code>file_list</code> 多文件上传</div>
+        <span class="type-label">参数类型</span>
+        <div class="guide-cond-grid">
+          <span class="cond-item"><code>text</code> 单行文本</span>
+          <span class="cond-item"><code>paragraph</code> 多行文本</span>
+          <span class="cond-item"><code>number</code> 数字</span>
+          <span class="cond-item"><code>select</code> 下拉选项</span>
+          <span class="cond-item"><code>checkbox</code> 复选框</span>
+          <span class="cond-item"><code>file</code> 单文件上传</span>
+          <span class="cond-item"><code>file_list</code> 多文件上传</span>
         </div>
 
-        <h4>常用节点类型 (nodes.type)</h4>
-        <div class="guide-type-list">
-          <div class="type-item"><code>llm_chat</code> LLM 对话</div>
-          <div class="type-item"><code>llm_classify</code> 意图识别</div>
-          <div class="type-item"><code>rag_load</code> 加载文档</div>
-          <div class="type-item"><code>rag_retrieve</code> 知识库检索</div>
-          <div class="type-item"><code>agent</code> 智能体（工具调用）</div>
-          <div class="type-item"><code>code</code> 代码执行</div>
-          <div class="type-item"><code>human</code> 人工审核</div>
-          <div class="type-item"><code>end</code> 结束节点（必须）</div>
+        <h4>节点 (nodes)</h4>
+        <p class="guide-desc">nodes 定义工作流中的执行步骤，节点按 depends_on 构成 DAG 顺序执行。</p>
+        <pre class="guide-code">nodes:
+- name: reply               # 节点名（必填），唯一标识
+  type: llm_chat             # 节点类型（必填），须从可用类型中选择
+  label: LLM 回复             # [可选] 显示名称
+  description: 调用LLM回答    # [可选] 节点说明
+  depends_on: node_a         # [可选] 依赖上游节点，可写单个字符串或数组
+  # depends_on:              # 等价写法
+  #   - node_a
+  #   - node_b
+  inputs:                    # [可选] 定义 type 函数的输入参数，key 须匹配 type 的输入 schema，
+                         # 值通过 $ 引用全局参数或上游节点输出，也可以是字符串面量
+    prompt: $input.prompt
+    system: 你是一个助手
+  condition: $classify.intent == chat   # [可选] 布尔值或条件表达式，为 false 时跳过，
+                                     # 支持 $ 引用全局参数或上游节点输出，表达式示例见下表
+  retry: 3                   # [可选] 简写，固定间隔重试最多 3 次
+  # retry:                   # 完整写法，定义退避策略
+  #   max_retries: 3         # 最大重试次数
+  #   backoff_base: 1.0      # 初始等待秒数
+  #   backoff_factor: 2.0    # 每次等待倍数
+  #   backoff_max: 60.0      # 最大等待秒数
+  #   jitter: true           # 是否随机抖动
+  #   retry_on:              # 触发重试的异常类型，默认所有异常
+  #     - ValueError
+  #     - TimeoutError
+  timeout: 300               # [可选] 超时秒数</pre>
+        <span class="type-label">condition 表达式示例</span>
+        <div class="guide-cond-grid">
+          <span class="cond-item">等值 <code>$intent == chat</code></span>
+          <span class="cond-item">不等 <code>$intent != chat</code></span>
+          <span class="cond-item">比较 <code>$score >= 0.8</code></span>
+          <span class="cond-item">成员 <code>$intent in chat,rag</code></span>
+          <span class="cond-item">取反 <code>not $flag</code></span>
+          <span class="cond-item">或 <code>$a == x or $b == y</code></span>
+          <span class="cond-item">且 <code>$a and $b</code></span>
+        </div>
+        <span class="type-label">常用节点类型</span>
+        <div class="guide-cond-grid">
+          <span class="cond-item"><code>llm_chat</code> LLM 对话</span>
+          <span class="cond-item"><code>llm_classify</code> 意图识别</span>
+          <span class="cond-item"><code>rag_load</code> 加载文档</span>
+          <span class="cond-item"><code>rag_retrieve</code> 知识库检索</span>
+          <span class="cond-item"><code>agent</code> 智能体</span>
+          <span class="cond-item"><code>code</code> 代码执行</span>
+          <span class="cond-item"><code>human</code> 人工审核</span>
+          <span class="cond-item"><code>end</code> 结束节点（必须）</span>
         </div>
         <p class="guide-link-hint">
           完整列表及详细参数见 <router-link to="/plugins" class="guide-jump">节点类型 →</router-link>
@@ -320,10 +358,8 @@ nodes:
 
         <h4>数据引用语法</h4>
         <ul class="guide-rules">
-          <li><code>$input.xxx</code> — 引用运行时输入参数</li>
+          <li><code>$input.xxx</code> — 引用用户填写的输入参数</li>
           <li><code>$节点名.字段</code> — 引用上游节点的输出，如 <code>$reply.content</code></li>
-          <li><code>depends_on</code> — 声明节点依赖关系（决定执行顺序）</li>
-          <li><code>condition</code> — 条件执行，支持表达式（可选）</li>
         </ul>
 
         <h4>规则</h4>
@@ -543,42 +579,25 @@ nodes:
   border-radius: 3px;
   color: var(--accent);
 }
-.guide-type-list {
-  font-size: 13px;
-  color: var(--ink-2);
-  line-height: 2;
-}
 .type-label {
   display: block;
   font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+.guide-cond-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
   color: var(--ink-3);
-  margin-bottom: 2px;
 }
-.type-item {
-  display: inline;
-  margin-right: 12px;
-}
-.type-item::after {
-  content: '·';
-  margin-left: 12px;
-  color: var(--ink-3);
-  opacity: 0.5;
-}
-.type-item:last-child::after {
-  content: '';
-}
-.type-item code {
+.cond-item code {
   font-family: var(--font-mono);
   font-size: 11px;
-  background: rgba(77, 196, 178, 0.12);
-  padding: 2px 6px;
-  border-radius: 3px;
   color: var(--accent);
-  margin-right: 4px;
-}
-.type-extra {
-  font-size: 12px;
-  opacity: 0.6;
+  margin-left: 4px;
 }
 .guide-link-hint {
   margin: 8px 0 0;
