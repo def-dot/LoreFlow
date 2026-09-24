@@ -64,14 +64,18 @@ async def run_pipeline(record: RunRecord) -> None:
     async def on_event(result: NodeResult) -> None:
         record.nodes[result.node_name] = result.model_dump(mode="json")
         try:
-            await runs.save_nodes(record)
+            async with database.AsyncSessionLocal() as session:
+                await session.execute(
+                    update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes)
+                )
+                await session.commit()
         except Exception as exc:
             logger.error("Failed to save run snapshot: %s", exc)
 
-    outcome = RunStatus.COMPLETED
     error: str | None = None
     output: dict[str, Any] | None = None
     try:
+        outcome = RunStatus.COMPLETED
         _, output = await pipeline.run(
             inputs=record.inputs,
             on_event=on_event,

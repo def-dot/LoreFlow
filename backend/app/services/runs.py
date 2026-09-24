@@ -6,9 +6,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from sqlalchemy import update
 from sqlmodel import func, select
 
 from app.core import database
@@ -69,19 +66,6 @@ async def get_run(run_id: int) -> RunRecord | None:
     """One run record, or ``None``."""
     async with database.AsyncSessionLocal() as session:
         return await session.get(RunRecord, run_id)
-
-
-async def save_nodes(record: RunRecord) -> None:
-    """节点快照落库（事件汇与 approve 决策写入共用的唯一持久化路径）。
-
-    决策随快照持久化：approve 后进程崩溃，启动恢复重跑时 approver 仍能
-    从快照取到决策。
-    """
-    async with database.AsyncSessionLocal() as session:
-        await session.execute(
-            update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes)
-        )
-        await session.commit()
 
 
 async def delete_run(run_id: int) -> bool:

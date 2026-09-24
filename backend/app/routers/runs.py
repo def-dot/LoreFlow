@@ -4,10 +4,12 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import update as sa_update
 
+from app.core import database
 from app.core.response import UnifiedResponseRoute
 from app.engine import Pipeline, NodeStatus
-from app.models.run import RunStatus
+from app.models.run import RunRecord, RunStatus
 from app.schemas.pipelines import PipelineDetail
 from app.schemas.runs import (
     ApproveRequest,
@@ -137,6 +139,10 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
     entry = record.nodes.setdefault(node_name, {})
     entry["status"] = "completed" if body.approve else "failed"
     entry["output"] = body.model_dump()
-    await run_service.save_nodes(record)
+    async with database.AsyncSessionLocal() as session:
+        await session.execute(
+            sa_update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes)
+        )
+        await session.commit()
     await orchestrator.resume_record(record)
     return ApproveResponse(status="ok", run_id=run_id, node=node_name, approve=body.approve)
