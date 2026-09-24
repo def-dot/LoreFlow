@@ -253,6 +253,8 @@ onMounted(async () => {
     <!-- 编写指南 drawer -->
     <el-drawer v-model="guideOpen" title="工作流编写指南" size="min(720px, 94vw)">
       <div class="guide">
+        <p class="guide-yaml-note">工作流使用 <strong>YAML</strong> 格式编写，以下为各字段说明。</p>
+
         <h4>基本结构</h4>
         <pre class="guide-code">name: 我的工作流
 description: 一句话描述
@@ -278,32 +280,43 @@ nodes:
   inputs:
     reply: $reply.content</pre>
 
-        <h4>参数类型 (params.type)</h4>
-        <table class="guide-table">
-          <thead><tr><th>类型</th><th>说明</th><th>额外字段</th></tr></thead>
-          <tbody>
-            <tr><td><code>text</code></td><td>单行文本</td><td>—</td></tr>
-            <tr><td><code>paragraph</code></td><td>多行文本</td><td>—</td></tr>
-            <tr><td><code>number</code></td><td>数字</td><td>—</td></tr>
-            <tr><td><code>select</code></td><td>下拉选项</td><td><code>options: ["选项1", "选项2"]</code></td></tr>
-            <tr><td><code>checkbox</code></td><td>复选框</td><td>—</td></tr>
-            <tr><td><code>file</code></td><td>单文件上传</td><td>—</td></tr>
-            <tr><td><code>file_list</code></td><td>多文件上传</td><td>—</td></tr>
-          </tbody>
-        </table>
+        <h4>输入参数 (params)</h4>
+        <p class="guide-desc">params 定义工作流的全局输入参数，支持文本、文件上传、下拉选择等类型。运行时由用户填写，任意节点通过 <code>$input.xxx</code> 引用填写的参数值。</p>
+        <pre class="guide-code">params:
+  prompt:                      # 参数名（必填），即 $input.prompt
+    required: true             # [可选] 是否必填，默认 false
+    label: 提示词               # [可选] 表单显示名称
+    description: 用户输入的问题  # [可选] 表单提示说明
+    type: text                 # [可选] 参数类型，默认 text，见下表
+    default: "你好"             # [可选] 默认值
+    options:                   # [可选] type=select 时的可选值
+      - 选项1
+      - 选项2</pre>
+        <div class="guide-type-list">
+          <span class="type-label">参数类型</span>
+          <div class="type-item"><code>text</code> 单行文本</div>
+          <div class="type-item"><code>paragraph</code> 多行文本</div>
+          <div class="type-item"><code>number</code> 数字</div>
+          <div class="type-item"><code>select</code> 下拉选项</div>
+          <div class="type-item"><code>checkbox</code> 复选框</div>
+          <div class="type-item"><code>file</code> 单文件上传</div>
+          <div class="type-item"><code>file_list</code> 多文件上传</div>
+        </div>
 
         <h4>常用节点类型 (nodes.type)</h4>
-        <table class="guide-table">
-          <thead><tr><th>type</th><th>说明</th><th>输入示例</th></tr></thead>
-          <tbody>
-            <tr><td><code>llm_chat</code></td><td>LLM 对话</td><td><code>prompt</code>, <code>system</code>, <code>context</code></td></tr>
-            <tr><td><code>llm_classify</code></td><td>意图识别</td><td><code>prompt</code>, <code>classify_labels</code></td></tr>
-            <tr><td><code>rag_load</code></td><td>加载文档</td><td><code>document: {id: $input.file_id}</code></td></tr>
-            <tr><td><code>rag_retrieve</code></td><td>知识库检索</td><td><code>prompt</code></td></tr>
-            <tr><td><code>human</code></td><td>人工审核</td><td><code>payload: [{key, label, value}]</code></td></tr>
-            <tr><td><code>end</code></td><td>结束节点（必须）</td><td>自定义输出字段</td></tr>
-          </tbody>
-        </table>
+        <div class="guide-type-list">
+          <div class="type-item"><code>llm_chat</code> LLM 对话</div>
+          <div class="type-item"><code>llm_classify</code> 意图识别</div>
+          <div class="type-item"><code>rag_load</code> 加载文档</div>
+          <div class="type-item"><code>rag_retrieve</code> 知识库检索</div>
+          <div class="type-item"><code>agent</code> 智能体（工具调用）</div>
+          <div class="type-item"><code>code</code> 代码执行</div>
+          <div class="type-item"><code>human</code> 人工审核</div>
+          <div class="type-item"><code>end</code> 结束节点（必须）</div>
+        </div>
+        <p class="guide-link-hint">
+          完整列表及详细参数见 <router-link to="/plugins" class="guide-jump">节点类型 →</router-link>
+        </p>
 
         <h4>数据引用语法</h4>
         <ul class="guide-rules">
@@ -511,6 +524,77 @@ nodes:
 .guide h4:first-child {
   margin-top: 0;
 }
+.guide-yaml-note {
+  font-size: 13px;
+  color: var(--ink-3);
+  margin: 0 0 6px;
+}
+.guide-desc {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+.guide-desc code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(77, 196, 178, 0.12);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--accent);
+}
+.guide-type-list {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 2;
+}
+.type-label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+.type-item {
+  display: inline;
+  margin-right: 12px;
+}
+.type-item::after {
+  content: '·';
+  margin-left: 12px;
+  color: var(--ink-3);
+  opacity: 0.5;
+}
+.type-item:last-child::after {
+  content: '';
+}
+.type-item code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(77, 196, 178, 0.12);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--accent);
+  margin-right: 4px;
+}
+.type-extra {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.guide-link-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.guide-jump {
+  color: #5b9dff;
+  text-decoration: none;
+  border-bottom: 1px dashed #5b9dff;
+  padding-bottom: 1px;
+}
+.guide-jump:hover {
+  color: #7db5ff;
+  border-bottom-style: solid;
+}
 .guide-code {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -522,30 +606,6 @@ nodes:
   overflow-x: auto;
   white-space: pre;
   margin: 0;
-}
-.guide-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.guide-table th,
-.guide-table td {
-  padding: 8px 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--line);
-}
-.guide-table th {
-  font-weight: 600;
-  color: var(--ink-2);
-  font-size: 12px;
-}
-.guide-table code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  background: rgba(77, 196, 178, 0.15);
-  padding: 2px 5px;
-  border-radius: 3px;
-  color: var(--accent);
 }
 .guide-rules {
   margin: 0;
