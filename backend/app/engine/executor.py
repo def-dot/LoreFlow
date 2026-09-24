@@ -89,16 +89,15 @@ class PipeLineExecutor:
             saved = self._resume.get(node.name)
             if saved is not None and saved.get("status") in ("completed", "failed", "skipped", "upstream_skipped"):
                 events[node.name].set()
-                resumed = NodeResult(
+                results[node.name] = NodeResult(
                     node_name=node.name,
                     status=NodeStatus(saved.get("status")),
                     output=saved.get("output"),
                     attempts=saved.get("attempts"),
                     duration_ms=saved.get("duration_ms") or 0.0,
                 )
-                results[node.name] = resumed
-                if resumed.status == NodeStatus.COMPLETED:
-                    self.ctx[node.name] = resumed.output
+                if saved.get("output") == NodeStatus.COMPLETED:
+                    self.ctx[node.name] = saved.get("output")
             else:
                 tasks.append(asyncio.create_task(self._run_node(node, events, results)))
 
