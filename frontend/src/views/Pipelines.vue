@@ -364,7 +364,6 @@ nodes:
 
         <h4>规则</h4>
         <ul class="guide-rules">
-          <li>必须有一个 <code>type: end</code> 的结束节点</li>
           <li>节点 <code>name</code> 唯一，用作引用标识</li>
           <li><code>depends_on</code> 中的名字必须对应已定义的节点</li>
           <li><code>inputs</code> 中的 <code>$</code> 引用必须指向输入参数或上游节点</li>
