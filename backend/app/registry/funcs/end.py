@@ -13,6 +13,6 @@ class EndParams(BaseModel):
 
 
 @func(node=True, tool=False, label="结束")
-async def end(params: EndParams):
+async def end(params: EndParams) -> EndParams:
     """返回 params 中所有键。"""
-    return params.model_dump()
+    return params

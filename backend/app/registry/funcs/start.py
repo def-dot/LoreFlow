@@ -15,6 +15,6 @@ class StartParams(BaseModel):
 
 
 @func(node=True, tool=False, label="输入")
-async def start(params: StartParams):
+async def start(params: StartParams) -> StartParams:
     """透传外部输入，供下游节点通过 $ 引用取值。"""
-    return params.model_dump()
+    return params
