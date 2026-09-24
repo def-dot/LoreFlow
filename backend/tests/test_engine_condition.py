@@ -191,7 +191,7 @@ async def test_resume_restores_skipped_without_reeval() -> None:
     assert first["notify"].status == NodeStatus.UPSTREAM_SKIPPED
     assert calls == 1
 
-    snapshot = {name: r.to_dict() for name, r in first.items()}
+    snapshot = {name: r.model_dump(mode="json") for name, r in first.items()}
     second, _ = await dag.run(resume=snapshot)
     assert second["premium_flow"].status == NodeStatus.SKIPPED  # 仍是跳过，非重评估
     assert second["notify"].status == NodeStatus.UPSTREAM_SKIPPED  # 既成事实不重跑

@@ -62,7 +62,7 @@ async def run_pipeline(record: RunRecord) -> None:
     pipeline = Pipeline.model_validate(yaml.safe_load(record.definition))
 
     async def on_event(result: NodeResult) -> None:
-        record.nodes[result.node_name] = result.to_dict()
+        record.nodes[result.node_name] = result.model_dump(mode="json")
         try:
             await runs.save_nodes(record)
         except Exception as exc:
@@ -145,7 +145,10 @@ async def create_run(
         definition=raw,
         inputs=inputs,
     )
-    await runs.create(record)
+    async with database.AsyncSessionLocal() as session:
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
 
     task = asyncio.create_task(run_pipeline(record))
     watchdog = asyncio.create_task(_cancel_watchdog(record.id, task))

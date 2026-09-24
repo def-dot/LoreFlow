@@ -218,7 +218,7 @@ class PipeLineExecutor:
                         node_name=node.name,
                         status=NodeStatus.FAILED,
                         output=exc.output,
-                        error=exc,
+                        error=str(exc),
                         attempts=attempt + 1,
                         retry_history=retry_history or None,
                     )
@@ -275,7 +275,7 @@ class PipeLineExecutor:
             result = NodeResult(
                 node_name=node.name,
                 status=NodeStatus.FAILED,
-                error=last_error,
+                error=str(last_error),
                 attempts=attempt + 1,
                 retry_history=retry_history or None,
             )

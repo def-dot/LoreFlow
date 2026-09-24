@@ -15,15 +15,6 @@ from app.core import database
 from app.models.run import RunRecord, RunStatus
 
 
-async def create(record: RunRecord) -> None:
-    """插入新 run 记录（id 由 DB 生成回填）。
-    """
-    async with database.AsyncSessionLocal() as session:
-        session.add(record)
-        await session.commit()
-        await session.refresh(record)
-
-
 async def list_runs(
     offset: int = 0,
     limit: int | None = None,
