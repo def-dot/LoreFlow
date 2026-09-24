@@ -13,6 +13,8 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
@@ -34,12 +36,6 @@ logger = logging.getLogger(__name__)
 class PipeLineExecutor:
     """Executes a DAG concurrently, respecting node dependencies.
 
-    字段 = 构造输入与配置（nodes/ctx/semaphore/on_event，回答"执行什么"）；
-    events / results 是 execute 的过程状态（回答"这次怎么走"），作为参数传给 _run_node。
-    两个平面：ctx 是数据流（input + 成功节点 output，给 $ / condition / 入参），
-    results 是执行状态（NodeResult，给依赖级联 / 返回值 / UI）。
-    同一实例并发调用 execute 不安全，顺序复用安全（execute 不改 nodes，ctx 语义上属于单次运行）。
-
     Attributes:
         concurrency: Maximum number of nodes to run simultaneously.
                      ``None`` means unlimited.
@@ -53,34 +49,17 @@ class PipeLineExecutor:
         on_event: NodeEventFunc | None = None,
         resume: dict[str, dict[str, Any]] | None = None,
     ):
-        # 执行对象（nodes）与共享上下文（ctx）都从构造器进：
-        # nodes 是要执行的图，ctx 是执行器推进的工作流数据；
-        # 控制流簿记（events/tasks）是 execute 的过程状态，留在方法内
         self.nodes: dict[str, Node] = {node.name: node for node in nodes}
-        self.ctx: dict[str, Any] = ctx if ctx is not None else {}
+        self.ctx: dict[str, Any] = ctx or {}
         self._semaphore: asyncio.Semaphore | None = asyncio.Semaphore(concurrency) if concurrency else None
         self.on_event = on_event
         self._resume: dict[str, dict[str, Any]] = resume or {}
-
-    async def _emit(self, result: NodeResult) -> None:
-        """Push a node state change to the ``on_event`` callback (if set)."""
-        if self.on_event is not None:
-            await self.on_event(result)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     async def execute(self) -> dict[str, NodeResult]:
-        """Execute ``self.nodes`` and return a mapping of node name → NodeResult.
-
-        Returns:
-            Dict mapping each node name to its :class:`NodeResult`.
-
-        Raises:
-            DAGExecutionError: If one or more nodes ultimately failed.
-        """
-        # ----- control-flow bookkeeping -----
         events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in self.nodes}
         results: dict[str, NodeResult] = {}
         tasks: list[asyncio.Task[None]] = []
@@ -89,30 +68,21 @@ class PipeLineExecutor:
             saved = self._resume.get(node.name)
             if saved is not None and saved.get("status") in ("completed", "failed", "skipped", "upstream_skipped"):
                 events[node.name].set()
-                results[node.name] = NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus(saved.get("status")),
-                    output=saved.get("output"),
-                    attempts=saved.get("attempts"),
-                    duration_ms=saved.get("duration_ms") or 0.0,
-                )
-                if saved.get("output") == NodeStatus.COMPLETED:
+                results[node.name] = NodeResult.model_validate(saved)
+                if saved["status"] == "completed":
                     self.ctx[node.name] = saved.get("output")
             else:
                 tasks.append(asyncio.create_task(self._run_node(node, events, results)))
 
-        # ----- wait for completion -----
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # ----- surface failures as DAGExecutionError -----
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
-            fail_lines = [f"PipeLine 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}"]
+            lines = [f"PipeLine 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}"]
             for name in failed:
-                result = results[name]
-                if result.error is not None:
-                    fail_lines.append(f"  {name}: {type(result.error).__name__}: {result.error}")
-            raise PipeLineExecutionError("\n".join(fail_lines), results)
+                if results[name].error:
+                    lines.append(f"  {name}: {results[name].error}")
+            raise PipeLineExecutionError("\n".join(lines), results)
 
         return results
 
@@ -126,198 +96,132 @@ class PipeLineExecutor:
         events: dict[str, asyncio.Event],
         results: dict[str, NodeResult],
     ) -> None:
-        """Lifecycle of a single node: 等依赖 → 失败/跳过级联 → 条件判断 → 带重试执行 → 收尾。
-
-        收尾在 finally 里直接登记：NodeResult 进 results，成功 output 落 self.ctx。
-        """
         result: NodeResult | None = None
         try:
             # ---- 1. Wait for dependencies ----
             for dep in node.depends_on:
                 await events[dep].wait()
 
-            # ---- 2. Cascading failure / cascading skip ----
-            dep_status = {dep: results[dep].status for dep in node.depends_on}
-            # 失败优先级最高，压过一切跳过规则
-            blocked = [
-                dep
-                for dep, s in dep_status.items()
-                if s in (NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED)
-            ]
+            # ---- 2. Cascading failure / skip ----
+            dep_statuses = {dep: results[dep].status for dep in node.depends_on}
+            blocked = [dep for dep, s in dep_statuses.items() if s in (NodeStatus.FAILED, NodeStatus.UPSTREAM_FAILED)]
             if blocked:
                 logger.warning("[%s] Upstream failed, node not executed: %s", node.name, blocked)
-                result = NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus.UPSTREAM_FAILED,
-                )
+                result = NodeResult(node_name=node.name, status=NodeStatus.UPSTREAM_FAILED)
                 return
 
-            # 汇合语义（any-success）：全部依赖被跳过才跟着跳过（级联）；
-            if node.depends_on and all(
-                s in (NodeStatus.SKIPPED, NodeStatus.UPSTREAM_SKIPPED) for s in dep_status.values()
-            ):
+            if node.depends_on and all(s in (NodeStatus.SKIPPED, NodeStatus.UPSTREAM_SKIPPED) for s in dep_statuses.values()):
                 logger.info("[%s] Upstream skipped, node not executed", node.name)
-                result = NodeResult(
-                    node_name=node.name,
-                    status=NodeStatus.UPSTREAM_SKIPPED,
-                )
+                result = NodeResult(node_name=node.name, status=NodeStatus.UPSTREAM_SKIPPED)
                 return
 
-            # ---- 3. Evaluate condition (branching) ----
-            if node.condition is not None:
-                should_run = eval_condition(node.condition, self.ctx)
+            # ---- 3. Condition ----
+            if node.condition is not None and not eval_condition(node.condition, self.ctx):
+                logger.info("[%s] Skipped - condition not met", node.name)
+                result = NodeResult(node_name=node.name, status=NodeStatus.SKIPPED)
+                return
 
-                if not should_run:
-                    logger.info("[%s] Skipped - condition not met", node.name)
-                    result = NodeResult(
-                        node_name=node.name,
-                        status=NodeStatus.SKIPPED,
-                    )
-                    return
+            # ---- 4. Execute with concurrency gate + retry ----
+            if self.on_event is not None:
+                await self.on_event(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
+            result = await self._execute_with_retry(node)
 
-            # ---- 4. Execute with retry ----
-            await self._emit(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
-            retry = node.retry if isinstance(node.retry, RetryPolicy) else RetryPolicy(max_retries=node.retry or 0)
-            last_error: Exception | None = None
-            retry_history: list[dict[str, Any]] = []
-
-            for attempt in range(retry.max_retries + 1):
-                try:
-                    start = time.monotonic()
-
-                    if self._semaphore:
-                        async with self._semaphore:
-                            output = await self._call(node)
-                    else:
-                        output = await self._call(node)
-
-                    duration_ms = (time.monotonic() - start) * 1000
-
-                    # success（output 落 ctx 由收尾的 _record 统一登记）
-                    logger.info(
-                        "[%s] OK  completed  (attempt %d/%d, %.0f ms)",
-                        node.name,
-                        attempt + 1,
-                        retry.max_retries + 1,
-                        duration_ms,
-                    )
-                    result = NodeResult(
-                        node_name=node.name,
-                        status=NodeStatus.COMPLETED,
-                        output=output,
-                        attempts=attempt + 1,
-                        duration_ms=duration_ms,
-                        retry_history=retry_history or None,
-                    )
-                    return
-
-                except HumanRejected as exc:
-                    # 人工拒绝是终局决策：不进重试循环，FAILED 结果携带拒绝详情
-                    result = NodeResult(
-                        node_name=node.name,
-                        status=NodeStatus.FAILED,
-                        output=exc.output,
-                        error=str(exc),
-                        attempts=attempt + 1,
-                        retry_history=retry_history or None,
-                    )
-                    return
-
-                except SuspendExecution as exc:
-                    # 本节点审批挂起：REVIEWING + 审核视图（payload）随 finally 的
-                    # emit 落快照；重新抛出让 run 走挂起收尾。
-                    result = NodeResult(
-                        node_name=node.name,
-                        status=NodeStatus.REVIEWING,
-                        output=exc.results,
-                        retry_history=retry_history or None,
-                    )
-                    raise
-
-                except Exception as exc:
-                    last_error = exc
-
-                    if not retry.should_retry(exc, attempt):
-                        logger.error(
-                            "[%s] FAIL  non-retryable / retries exhausted: %s: %s",
-                            node.name,
-                            type(exc).__name__,
-                            exc,
-                        )
-                        break
-
-                    delay = retry.get_delay(attempt)
-                    logger.warning(
-                        "[%s] RETRY  attempt %d/%d failed (%s: %s), retrying in %.1f s ...",
-                        node.name,
-                        attempt + 1,
-                        retry.max_retries + 1,
-                        type(exc).__name__,
-                        exc,
-                        delay,
-                    )
-                    retry_history.append({
-                        "attempt": attempt + 1,
-                        "error": str(exc),
-                        "at": datetime.now().isoformat(timespec="seconds"),
-                    })
-                    await asyncio.sleep(delay)
-
-            # ---- 5. All retries exhausted ----
-            logger.error(
-                "[%s] FAILED after %d attempt(s): %s: %s",
-                node.name,
-                attempt + 1,
-                type(last_error).__name__ if last_error else "?",
-                last_error,
-            )
-            result = NodeResult(
-                node_name=node.name,
-                status=NodeStatus.FAILED,
-                error=str(last_error),
-                attempts=attempt + 1,
-                retry_history=retry_history or None,
-            )
         except asyncio.CancelledError:
-            result = NodeResult(
-                node_name=node.name,
-                status=NodeStatus.CANCELLED,
-            )
+            result = NodeResult(node_name=node.name, status=NodeStatus.CANCELLED)
         except Exception as exc:
-            # Should not happen — the code above is defensive, but guard anyway
             logger.exception("Unexpected error in executor for %s", node.name)
-            result = NodeResult(
-                node_name=node.name,
-                status=NodeStatus.FAILED,
-                error=exc,
-            )
+            result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc))
         finally:
             if result is not None:
                 results[result.node_name] = result
                 if result.status == NodeStatus.COMPLETED:
                     self.ctx[result.node_name] = result.output
-                await self._emit(result)
+                if self.on_event is not None:
+                    await self.on_event(result)
             events[node.name].set()
+
+    async def _execute_with_retry(self, node: Node) -> NodeResult:
+        """Run a node through its retry loop; returns the final ``NodeResult``."""
+        retry = self._retry_policy(node)
+        retry_history: list[dict[str, Any]] = []
+        last_error: str | None = None
+
+        for attempt in range(retry.max_retries + 1):
+            try:
+                async with self._concurrency_gate():
+                    start = time.monotonic()
+                    output = await self._call(node)
+                    duration_ms = (time.monotonic() - start) * 1000
+
+                logger.info("[%s] OK (attempt %d/%d, %.0f ms)", node.name, attempt + 1, retry.max_retries + 1, duration_ms)
+                return NodeResult(
+                    node_name=node.name, status=NodeStatus.COMPLETED,
+                    output=output, attempts=attempt + 1, duration_ms=duration_ms,
+                    retry_history=retry_history or None,
+                )
+
+            except HumanRejected as exc:
+                return NodeResult(
+                    node_name=node.name, status=NodeStatus.FAILED,
+                    output=exc.output, error=str(exc), attempts=attempt + 1,
+                    retry_history=retry_history or None,
+                )
+
+            except SuspendExecution:
+                raise
+
+            except Exception as exc:
+                last_error = str(exc)
+                if not retry.should_retry(exc, attempt):
+                    logger.error("[%s] FAIL non-retryable: %s", node.name, last_error)
+                    break
+
+                delay = retry.get_delay(attempt)
+                logger.warning("[%s] RETRY %d/%d failed (%s), retrying in %.1fs", node.name, attempt + 1, retry.max_retries + 1, last_error, delay)
+                retry_history.append({"attempt": attempt + 1, "error": last_error, "at": datetime.now().isoformat(timespec="seconds")})
+                await asyncio.sleep(delay)
+
+        logger.error("[%s] FAILED after %d attempt(s): %s", node.name, attempt + 1, last_error)
+        return NodeResult(
+            node_name=node.name, status=NodeStatus.FAILED,
+            error=last_error, attempts=attempt + 1, retry_history=retry_history or None,
+        )
+
+    @asynccontextmanager
+    async def _concurrency_gate(self) -> AsyncIterator[None]:
+        """Gate execution through the concurrency semaphore."""
+        if self._semaphore is None:
+            yield
+        else:
+            async with self._semaphore:
+                yield
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _retry_policy(node: Node) -> RetryPolicy:
+        """Normalize retry config once per call (cached on Node at runtime)."""
+        rp = node.retry
+        if isinstance(rp, RetryPolicy):
+            return rp
+        return RetryPolicy(max_retries=rp or 0)
+
     async def _call(self, node: Node) -> Any:
-        """Invoke the node function (from REGISTRY) with timeout and output validation."""
         func_def = REGISTRY[node.type]
         resolved = wired_ctx(self.ctx, node.inputs or {})
 
         coro = func_def.func(func_def.input_schema(**resolved)) if func_def.input_schema else func_def.func()
 
-        output = await asyncio.wait_for(coro, timeout=node.timeout) if node.timeout is not None else await coro
+        if node.timeout is not None:
+            output = await asyncio.wait_for(coro, timeout=node.timeout)
+        else:
+            output = await coro
         return self._validate_output(node, output)
 
-    # ---- output validation ----
-
     @staticmethod
-    def _validate_output(node: Node, output: Any) -> dict[str, Any]:
-        """若 node 声明了 output_schema，用 Pydantic 校验并转 dict。"""
+    def _validate_output(node: Node, output: Any) -> Any:
         if output is None:
             return output
         schema = node.resolve_output_schema()

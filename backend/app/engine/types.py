@@ -3,13 +3,13 @@ Core types for the DAG Flow orchestration engine.
 """
 
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
 
 
-class NodeStatus(Enum):
+class NodeStatus(StrEnum):
     """Execution status of a DAG node."""
 
     PENDING = "pending"
