@@ -134,14 +134,13 @@ async def create_run(
 
     raw = pipeline_rec.definition
     config = yaml.safe_load(raw)
-    dag = Pipeline.model_validate(config)
-    if dag.params:
-        validate_inputs(dag.params, inputs)
+    pipeline = Pipeline.model_validate(config)
+    validate_inputs(pipeline.params or {}, inputs)
 
     record = RunRecord(
-        name=name or dag.name,
+        name=name or pipeline.name,
         pipeline_id=pipeline_rec.id,
-        pipeline_name=dag.name,
+        pipeline_name=pipeline.name,
         status=RunStatus.RUNNING,
         definition=raw,
         inputs=inputs,
