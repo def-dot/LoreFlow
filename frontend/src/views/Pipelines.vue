@@ -343,14 +343,14 @@ nodes:
         </div>
         <span class="type-label">常用节点类型</span>
         <div class="guide-cond-grid">
+          <span class="cond-item"><code>agent</code> 智能体</span>
           <span class="cond-item"><code>llm_chat</code> LLM 对话</span>
           <span class="cond-item"><code>llm_classify</code> 意图识别</span>
           <span class="cond-item"><code>rag_load</code> 加载文档</span>
           <span class="cond-item"><code>rag_retrieve</code> 知识库检索</span>
-          <span class="cond-item"><code>agent</code> 智能体</span>
           <span class="cond-item"><code>code</code> 代码执行</span>
           <span class="cond-item"><code>human</code> 人工审核</span>
-          <span class="cond-item"><code>end</code> 结束节点（必须）</span>
+          <span class="cond-item"><code>end</code> 最终输出</span>
         </div>
         <p class="guide-link-hint">
           完整列表及详细参数见 <router-link to="/plugins" class="guide-jump">节点类型 →</router-link>
@@ -367,6 +367,7 @@ nodes:
           <li>节点 <code>name</code> 唯一，用作引用标识</li>
           <li><code>depends_on</code> 中的名字必须对应已定义的节点</li>
           <li><code>inputs</code> 中的 <code>$</code> 引用必须指向输入参数或上游节点</li>
+          <li><code>end</code> 节点定义工作流的最终输出</li>
           <li>DAG 不能有环（依赖必须是有向无环图）</li>
         </ul>
       </div>
