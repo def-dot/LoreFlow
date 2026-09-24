@@ -25,7 +25,6 @@ inputs 接线同一拼法，``$`` 开头 = 引用上下文）::
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any, NamedTuple
 
@@ -151,12 +150,9 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
 
 def _eval_atom(ctx: dict[str, Any], atom: Atom) -> bool:
     """单条原子条件在视图上求值。"""
-    actual = ctx
-    for part in atom.key.split("."):
-        if not isinstance(actual, Mapping) or part not in actual:
-            actual = None
-            break
-        actual = actual[part]
+    from .types import deref
+
+    actual = deref(ctx, f"${atom.key}")
     result = _compare(actual, atom.op, atom.expected) if atom.op else bool(actual)
     return not result if atom.neg else result
 
