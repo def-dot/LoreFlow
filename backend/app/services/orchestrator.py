@@ -20,7 +20,7 @@ from app.engine import (
     NodeResult,
     SuspendExecution,
 )
-from app.engine.pipeline import validate_and_merge, validate_inputs
+from app.engine.pipeline import validate_inputs
 from app.models.pipeline import PipelineRecord
 from app.models.run import RunRecord, RunStatus
 from app.services import pipelines as pipelines_service
@@ -57,7 +57,7 @@ async def _ensure_pipeline_record(name: str, description: str, definition: str) 
 
 
 async def run_pipeline(record: RunRecord) -> None:
-    """执行一次 run。挂起与终态均走 CAS 裁决：与取消/approve 并发时谁先抢到算谁的。
+    """执行一次 run。
     """
     pipeline = Pipeline.model_validate(yaml.safe_load(record.definition))
 
@@ -75,12 +75,12 @@ async def run_pipeline(record: RunRecord) -> None:
     error: str | None = None
     output: dict[str, Any] | None = None
     try:
-        outcome = RunStatus.COMPLETED
         _, output = await pipeline.run(
             inputs=record.inputs,
             on_event=on_event,
             resume=record.nodes,
         )
+        outcome = RunStatus.COMPLETED
     except asyncio.CancelledError:
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"

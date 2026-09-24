@@ -63,16 +63,6 @@ def validate_inputs(
         raise ValueError(f"多余的参数: {extra}")
 
 
-def validate_and_merge(
-    params: dict[str, InputParamDef],
-    inputs: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """校验必填 / 多余参数，合并默认值，返回最终输入。"""
-    validate_inputs(params, inputs)
-    inputs = inputs or {}
-    defaults = {k: v.default for k, v in params.items() if v.default is not None}
-    return {**defaults, **inputs}
-
 
 class RetryPolicy(BaseModel):
     """可配置的重试策略（指数退避 + 抖动）。"""
@@ -282,11 +272,8 @@ class Pipeline(BaseModel):
         """
         from .executor import PipeLineExecutor
 
-        # ---- 按 params 合并默认值 + 校验必填 ----
-        merged = validate_and_merge(self.params or {}, inputs)
-
         executor = PipeLineExecutor(
-            nodes=self.nodes, ctx={"input": merged},
+            nodes=self.nodes, ctx={"input": inputs or {}},
             concurrency=concurrency, on_event=on_event,
             resume=resume,
         )
