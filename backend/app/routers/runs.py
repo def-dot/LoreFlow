@@ -71,12 +71,11 @@ async def get_run(run_id: int) -> RunDetail:
     data["mermaid"] = pipeline.to_mermaid()
 
     # 节点 label/description 补全
-    nodes_cfg = {n["name"]: n for n in cfg.get("nodes", []) if isinstance(n, dict) and "name" in n}
+    nodes_dict = {n.name: n for n in pipeline.nodes}
     for name, node in data.get("nodes", {}).items():
-        spec = nodes_cfg.get(name)
-        if isinstance(spec, dict) and isinstance(node, dict):
-            node["label"] = spec.get("label") or name
-            node["description"] = spec.get("description")
+        spec = nodes_dict.get(name)
+        node["label"] = spec.label
+        node["description"] = spec.description
 
     return RunDetail(**data)
 
