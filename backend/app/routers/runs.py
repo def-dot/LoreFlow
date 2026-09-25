@@ -9,6 +9,7 @@ from sqlalchemy import update as sa_update
 from app.core import database
 from app.core.response import UnifiedResponseRoute
 from app.engine import Pipeline, NodeStatus
+from app.registry import REGISTRY
 from app.models.run import RunRecord, RunStatus
 from app.schemas.pipelines import PipelineDetail
 from app.schemas.runs import (
@@ -70,12 +71,15 @@ async def get_run(run_id: int) -> RunDetail:
     pipeline = Pipeline.model_validate(cfg)
     data["mermaid"] = pipeline.to_mermaid()
 
-    # 节点 label/description 补全
+    # 节点 label/description/type/type_label 补全（inputs 已由 NodeResult.model_dump 写入 run 记录）
     nodes_dict = {n.name: n for n in pipeline.nodes}
     for name, node in data.get("nodes", {}).items():
         spec = nodes_dict.get(name)
         node["label"] = spec.label
         node["description"] = spec.description
+        node["type"] = spec.type
+        func_def = REGISTRY.get(spec.type)
+        node["type_label"] = func_def.label if func_def else spec.type
 
     return RunDetail(**data)
 

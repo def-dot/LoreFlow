@@ -16,6 +16,9 @@ export interface NodeSnapshot {
   status: string
   label?: string
   description?: string | null
+  type?: string
+  type_label?: string
+  inputs?: Record<string, unknown> | null
   output: unknown
   error: string | null
   attempts: number

@@ -122,16 +122,17 @@ class PipeLineExecutor:
                 return
 
             # ---- 4. Execute with concurrency gate + retry ----
+            resolved_inputs = wired_ctx(self.ctx, node.inputs or {})
             if self.on_event is not None:
-                await self.on_event(NodeResult(node_name=node.name, status=NodeStatus.RUNNING))
-                
-            result = await self._execute_with_retry(node)
+                await self.on_event(NodeResult(node_name=node.name, status=NodeStatus.RUNNING, inputs=resolved_inputs))
+
+            result = await self._execute_with_retry(node, resolved_inputs)
 
         except asyncio.CancelledError:
-            result = NodeResult(node_name=node.name, status=NodeStatus.CANCELLED)
+            result = NodeResult(node_name=node.name, status=NodeStatus.CANCELLED, inputs=locals().get("resolved_inputs"))
         except Exception as exc:
             logger.exception("Unexpected error in executor for %s", node.name)
-            result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc))
+            result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc), inputs=locals().get("resolved_inputs"))
         finally:
             results[result.node_name] = result
             if result.output:
@@ -140,7 +141,7 @@ class PipeLineExecutor:
                 await self.on_event(result)
             events[node.name].set()
 
-    async def _execute_with_retry(self, node: Node) -> NodeResult:
+    async def _execute_with_retry(self, node: Node, resolved_inputs: dict[str, Any]) -> NodeResult:
         """Run a node through its retry loop; returns the final ``NodeResult``."""
         retry = node.retry if isinstance(node.retry, RetryPolicy) else RetryPolicy(max_retries=node.retry or 0)
 
@@ -151,13 +152,13 @@ class PipeLineExecutor:
             try:
                 async with self._semaphore or nullcontext():
                     start = time.monotonic()
-                    output = await self._call(node)
+                    output = await self._call(node, resolved_inputs)
                     duration_ms = (time.monotonic() - start) * 1000
 
                 logger.info("[%s] OK (attempt %d/%d, %.0f ms)", node.name, attempt + 1, retry.max_retries + 1, duration_ms)
                 return NodeResult(
                     node_name=node.name, status=NodeStatus.COMPLETED,
-                    output=output, attempts=attempt + 1, duration_ms=duration_ms,
+                    output=output, inputs=resolved_inputs, attempts=attempt + 1, duration_ms=duration_ms,
                     retry_history=retry_history or None,
                 )
 
@@ -178,18 +179,17 @@ class PipeLineExecutor:
         logger.error("[%s] FAILED after %d attempt(s): %s", node.name, attempt + 1, last_error)
         return NodeResult(
             node_name=node.name, status=NodeStatus.FAILED,
-            error=last_error, attempts=attempt + 1, retry_history=retry_history or None,
+            error=last_error, inputs=resolved_inputs, attempts=attempt + 1, retry_history=retry_history or None,
         )
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    async def _call(self, node: Node) -> BaseModel:
+    async def _call(self, node: Node, resolved_inputs: dict[str, Any]) -> BaseModel:
         func_def = REGISTRY[node.type]
-        resolved = wired_ctx(self.ctx, node.inputs or {})
 
-        coro = func_def.func(func_def.input_schema(**resolved)) if func_def.input_schema else func_def.func()
+        coro = func_def.func(func_def.input_schema(**resolved_inputs)) if func_def.input_schema else func_def.func()
 
         if node.timeout is not None:
             output = await asyncio.wait_for(coro, timeout=node.timeout)

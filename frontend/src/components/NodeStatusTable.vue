@@ -46,6 +46,16 @@ function isCellError(row: Row): boolean {
 <template>
   <el-table :data="rows" size="small" max-height="420">
     <el-table-column prop="displayLabel" label="节点" min-width="120" />
+    <el-table-column label="类型" width="90">
+      <template #default="{ row }">
+        <el-tag v-if="row.type_label" size="small" type="info" disable-transitions>{{ row.type_label }}</el-tag>
+      </template>
+    </el-table-column>
+    <el-table-column label="输入参数" min-width="160">
+      <template #default="{ row }">
+        <pre v-if="row.inputs && Object.keys(row.inputs).length" class="cell-pre">{{ JSON.stringify(row.inputs, null, 1) }}</pre>
+      </template>
+    </el-table-column>
     <el-table-column label="状态" width="110">
       <template #default="{ row }">
         <el-tag :type="statusTagType(row.status)" size="small" disable-transitions>{{ statusLabel(row.status) }}</el-tag>
