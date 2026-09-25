@@ -62,23 +62,22 @@ async def get_run(run_id: int) -> RunDetail:
     record = await run_service.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
+
     data = record.model_dump()
-    data["pipeline"] = record.pipeline_name
-    # 从 definition 实时生成 mermaid（渲染格式改进后存量 run 自动跟上）
-    if record.definition:
-        try:
-            config = yaml.safe_load(record.definition)
-            if isinstance(config, dict):
-                data["mermaid"] = Pipeline.model_validate(config).to_mermaid()
-        except Exception:
-            data["mermaid"] = ""
-    cfg = yaml.safe_load(record.definition) if record.definition else {}
-    nodes_cfg = cfg.get("nodes") or {}
+
+    # 解析 definition（只解析一次）
+    cfg = yaml.safe_load(record.definition)
+    pipeline = Pipeline.model_validate(cfg)
+    data["mermaid"] = pipeline.to_mermaid()
+
+    # 节点 label/description 补全
+    nodes_cfg = {n["name"]: n for n in cfg.get("nodes", []) if isinstance(n, dict) and "name" in n}
     for name, node in data.get("nodes", {}).items():
         spec = nodes_cfg.get(name)
         if isinstance(spec, dict) and isinstance(node, dict):
             node["label"] = spec.get("label") or name
             node["description"] = spec.get("description")
+
     return RunDetail(**data)
 
 
