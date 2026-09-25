@@ -32,7 +32,7 @@ class NodeResult(BaseModel):
 
     node_name: str
     status: NodeStatus
-    output: BaseModel | None = None
+    output: Any = None
     error: str | None = None
     attempts: int = 0
     duration_ms: float = 0.0
