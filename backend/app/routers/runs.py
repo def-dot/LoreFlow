@@ -70,13 +70,13 @@ async def get_run(run_id: int) -> RunDetail:
     pipeline = Pipeline.model_validate(cfg)
     data["mermaid"] = pipeline.to_mermaid()
 
-    # 节点 label/description 补全
-    nodes_cfg = {n["name"]: n for n in cfg.get("nodes", []) if isinstance(n, dict) and "name" in n}
-    for name, node in data.get("nodes", {}).items():
-        spec = nodes_cfg.get(name)
-        if isinstance(spec, dict) and isinstance(node, dict):
-            node["label"] = spec.get("label") or name
-            node["description"] = spec.get("description")
+    # # 节点 label/description 补全
+    # nodes_cfg = {n["name"]: n for n in cfg.get("nodes", []) if isinstance(n, dict) and "name" in n}
+    # for name, node in data.get("nodes", {}).items():
+    #     spec = nodes_cfg.get(name)
+    #     if isinstance(spec, dict) and isinstance(node, dict):
+    #         node["label"] = spec.get("label") or name
+    #         node["description"] = spec.get("description")
 
     return RunDetail(**data)
 
