@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.models.run import RunStatus
+
 
 class RunCreateRequest(BaseModel):
     pipeline_id: int
@@ -32,10 +34,11 @@ class RunListResponse(BaseModel):
 class RunDetail(BaseModel):
     id: int
     name: str = ""
-    pipeline: str = ""
+    pipeline_id: int = 0
+    pipeline_name: str = ""
     created_at: datetime | None = None
     finished_at: datetime | None = None
-    status: str = "pending"
+    status: RunStatus = RunStatus.PENDING
     error: str | None = None
     nodes: dict[str, Any] = Field(default_factory=dict)
     inputs: dict[str, Any] = Field(default_factory=dict)
