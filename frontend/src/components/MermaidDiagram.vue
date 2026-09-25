@@ -97,7 +97,7 @@ let pendingId = 0
 
 /** 去掉 mermaid 节点标签中的 HTML 标签（<br/> <i> 等），避免 mermaid 计算 viewBox 时虚高 */
 function stripHtml(source: string): string {
-  return source.replace(/<br\s*\/?>/gi, '\n').replace(/<\/?i>/gi, '')
+  return source.replace(/<br\s*\/?>/gi, '\n')
 }
 
 async function render() {
