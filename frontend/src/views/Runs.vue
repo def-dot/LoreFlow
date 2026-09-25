@@ -595,7 +595,7 @@ onUnmounted(() => {
           <span class="muted">{{ previewError }}</span>
           <el-button size="small" plain @click="loadPreview">重试</el-button>
         </div>
-        <PipelineDetailPanel v-else-if="previewDetail" :detail="previewDetail" />
+        <PipelineDetailPanel v-else-if="previewDetail" :detail="previewDetail" :mermaid-scale="1.6" />
       </div>
     </el-drawer>
 

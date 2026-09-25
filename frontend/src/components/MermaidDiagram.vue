@@ -15,6 +15,8 @@ const props = defineProps<{
   source: string
   /** 节点名 → 状态（来自 RunDetail.nodes），用于给图里的节点按状态上色。 */
   statuses?: Record<string, string>
+  /** viewBox 缩放倍数，>1 时节点更大（用于 drawer 等窄容器场景）。 */
+  scale?: number
 }>()
 
 const graphEl = ref<HTMLElement>()
@@ -125,8 +127,9 @@ async function render() {
           const origW = vb?.width || bbox.width
           // 只在 viewBox 明显大于实际内容时修正（容差 2 倍）
           if (origW > bbox.width * 2) {
-            const w = Math.ceil(bbox.width * 6.5 + pad * 2)
-            const h = Math.ceil(bbox.height * 1.6 + pad * 2)
+            const s = props.scale ?? 1
+            const w = Math.ceil((bbox.width * 6.5 + pad * 2) / s)
+            const h = Math.ceil((bbox.height * 1.6 + pad * 2) / s)
             svgEl.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${w} ${h}`)
           }
         }

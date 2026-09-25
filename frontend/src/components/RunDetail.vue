@@ -145,7 +145,7 @@ async function openDefinition() {
       </template>
       <div v-loading="definitionLoading" class="definition-body">
         <div v-if="definitionError" class="muted">{{ definitionError }}</div>
-        <PipelineDetailPanel v-else-if="definitionDetail" :detail="definitionDetail" />
+        <PipelineDetailPanel v-else-if="definitionDetail" :detail="definitionDetail" :mermaid-scale="1.6" />
       </div>
     </el-drawer>
   </div>

@@ -5,7 +5,7 @@ import type { PipelineDetail } from '@/api/pipelines'
 import type { JsonSchema } from '@/api/nodeTypes'
 import MermaidDiagram from './MermaidDiagram.vue'
 
-const props = defineProps<{ detail: PipelineDetail }>()
+const props = defineProps<{ detail: PipelineDetail; mermaidScale?: number }>()
 
 const paramsRows = computed(() => {
   const p = props.detail.params
@@ -142,7 +142,7 @@ async function copySource() {
     <div class="panels">
       <section class="panel">
         <h2>工作流</h2>
-        <MermaidDiagram :key="detail.name" :source="detail.mermaid" />
+        <MermaidDiagram :key="detail.name" :source="detail.mermaid" :scale="mermaidScale" />
       </section>
       <section class="panel">
         <h2>节点</h2>
