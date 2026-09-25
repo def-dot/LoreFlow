@@ -66,7 +66,6 @@ export const useRunsStore = defineStore('runs', {
 
     async select(id: number) {
       this.selectedId = id
-      this.detail = null
       await this.fetchDetail()
     },
 

@@ -33,7 +33,7 @@ const STATUS_OPTIONS = ['running', 'reviewing', 'completed', 'failed', 'cancelle
 
 // 从 runs 列表中提取不重复的工作流名称作为筛选选项
 const pipelineOptions = computed(() => {
-  const names = new Set(props.runs.map((r) => r.pipeline).filter(Boolean))
+  const names = new Set(props.runs.map((r) => r.pipeline_name).filter(Boolean))
   return [...names].sort()
 })
 

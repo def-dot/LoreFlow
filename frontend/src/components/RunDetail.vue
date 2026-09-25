@@ -5,6 +5,7 @@ import { getRunConfig } from '@/api/runs'
 import type { ParamSpec, PipelineDetail } from '@/api/pipelines'
 import { statusLabel, statusTagType } from '@/utils/status'
 import MermaidDiagram from './MermaidDiagram.vue'
+
 import NodeStatusTable from './NodeStatusTable.vue'
 import ReviewCards from './ReviewCards.vue'
 import FieldValues, { type FieldValue } from './FieldValues.vue'
@@ -114,7 +115,7 @@ async function openDefinition() {
     </div>
     <div class="panels">
       <section class="panel">
-        <h2>流水线（{{ detail.pipeline }}）</h2>
+        <h2>流水线（{{ detail.pipeline_name }}）</h2>
         <MermaidDiagram :source="detail.mermaid" :statuses="nodeStatuses" />
       </section>
       <section class="panel">
@@ -133,9 +134,9 @@ async function openDefinition() {
 
     <!-- 工作流定义 drawer -->
     <el-drawer v-model="definitionVisible" size="min(920px, 94vw)">
-      <template #title>
+      <template #header>
         <div class="drawer-title">
-          <span class="name">{{ definitionDetail?.name ?? detail.pipeline }}</span>
+          <span class="name">{{ definitionDetail?.name ?? detail.pipeline_name }}</span>
           <el-tag size="small" type="info">运行 #{{ detail.id }} · 配置快照</el-tag>
         </div>
       </template>

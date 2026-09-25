@@ -76,10 +76,10 @@ const paramSpecs = computed(() => {
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
 const runPipelineDetail = ref<PipelineDetail | null>(null)
 watch(
-  () => store.detail?.pipeline,
-  async (name) => {
-    if (!name) { runPipelineDetail.value = null; return }
-    try { runPipelineDetail.value = await getPipeline(name) } catch { runPipelineDetail.value = null }
+  () => store.detail?.pipeline_id,
+  async (id) => {
+    if (!id) { runPipelineDetail.value = null; return }
+    try { runPipelineDetail.value = await getPipeline(id) } catch { runPipelineDetail.value = null }
   },
   { immediate: true },
 )
@@ -584,7 +584,7 @@ onUnmounted(() => {
       <div v-else class="muted">选择或创建一条运行查看执行状态。</div>
     </main>
     <el-drawer v-model="previewOpen" size="min(920px, 94vw)">
-      <template #title>
+      <template #header>
         <div class="drawer-title">
           <span class="name">{{ previewDetail?.name ?? previewItem?.name ?? '流水线详情' }}</span>
           <span class="muted file">{{ previewItem?.name ?? previewId }}</span>

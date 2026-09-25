@@ -95,9 +95,14 @@ function decorate(source: string, statuses?: Record<string, string>): string {
 
 let pendingId = 0
 
+/** 去掉 mermaid 节点标签中的 HTML 标签（<br/> <i> 等），避免 mermaid 计算 viewBox 时虚高 */
+function stripHtml(source: string): string {
+  return source.replace(/<br\s*\/?>/gi, '\n').replace(/<\/?i>/gi, '')
+}
+
 async function render() {
   if (!graphEl.value) return
-  const source = decorate(props.source || 'graph TD\n  none[暂无流水线]', props.statuses)
+  const source = stripHtml(decorate(props.source || 'graph TD\n  none[暂无流水线]', props.statuses))
   renderSeq += 1
   const seq = renderSeq
   const myId = pendingId
@@ -110,13 +115,28 @@ async function render() {
     // 图比面板宽 → 保持自然尺寸由容器横向滚动，而不是缩小到看不清
     const svgEl = graphEl.value.querySelector('svg')
     if (svgEl) {
-      const vb = svgEl.viewBox?.baseVal
-      if (vb?.width && vb?.height) {
-        svgEl.removeAttribute('width')
-        svgEl.removeAttribute('height')
-        svgEl.style.maxWidth = `${Math.round(vb.width * 1.6)}px`
-        svgEl.style.minWidth = `${vb.width}px`
-      }
+      // mermaid 有时会算出过大的 viewBox（如单节点却有 2074×2050），
+      // 用 getBBox 获取实际内容边界，修正 viewBox 后缩放
+      try {
+        const bbox = svgEl.getBBox()
+        if (bbox.width > 0 && bbox.height > 0) {
+          const pad = 20
+          const vb = svgEl.viewBox?.baseVal
+          const origW = vb?.width || bbox.width
+          // 只在 viewBox 明显大于实际内容时修正（容差 2 倍）
+          if (origW > bbox.width * 2) {
+            const w = Math.ceil(bbox.width * 6.5 + pad * 2)
+            const h = Math.ceil(bbox.height * 3 + pad * 2)
+            svgEl.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${w} ${h}`)
+          }
+        }
+      } catch { /* getBBox 可能失败，忽略 */ }
+      svgEl.removeAttribute('width')
+      svgEl.removeAttribute('height')
+      svgEl.style.width = '100%'
+      svgEl.style.height = 'auto'
+      svgEl.style.removeProperty('max-width')
+      svgEl.style.removeProperty('min-width')
     }
   } catch (e) {
     if (myId !== pendingId) return
@@ -126,7 +146,7 @@ async function render() {
 
 function scheduleRender() {
   pendingId++
-  render()
+  render().catch(() => {})
 }
 
 onMounted(scheduleRender)

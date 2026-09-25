@@ -8,7 +8,8 @@ export interface RunListItem {
   finished_at: string | null
   status: string
   error: string | null
-  pipeline: string
+  pipeline_id: number
+  pipeline_name: string
 }
 
 export interface NodeSnapshot {

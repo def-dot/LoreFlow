@@ -40,9 +40,9 @@ class RunDetail(BaseModel):
     finished_at: datetime | None = None
     status: RunStatus = RunStatus.PENDING
     error: str | None = None
-    nodes: dict[str, Any] = Field(default_factory=dict)
-    inputs: dict[str, Any] = Field(default_factory=dict)
-    output: dict[str, Any] = Field(default_factory=dict)
+    nodes: dict[str, Any] | None = Field(default_factory=dict)
+    inputs: dict[str, Any] | None = Field(default_factory=dict)
+    output: dict[str, Any] | None = Field(default_factory=dict)
     definition: str | None = None
     mermaid: str | None = None
 
