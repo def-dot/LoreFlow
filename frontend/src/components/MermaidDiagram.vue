@@ -105,6 +105,19 @@ async function render() {
     const { svg } = await mermaid.render(`mermaid-${seq}`, source)
     if (myId !== pendingId) return // 新的渲染已经启动，丢弃旧结果
     graphEl.value.innerHTML = svg
+    // mermaid 给 svg 根节点写死 px 的 width/height 与 inline max-width，
+    // 改写为：面板比图宽 → 放大填满（至多 1.6×，防止小图被吹得过大）；
+    // 图比面板宽 → 保持自然尺寸由容器横向滚动，而不是缩小到看不清
+    const svgEl = graphEl.value.querySelector('svg')
+    if (svgEl) {
+      const vb = svgEl.viewBox?.baseVal
+      if (vb?.width && vb?.height) {
+        svgEl.removeAttribute('width')
+        svgEl.removeAttribute('height')
+        svgEl.style.maxWidth = `${Math.round(vb.width * 1.6)}px`
+        svgEl.style.minWidth = `${vb.width}px`
+      }
+    }
   } catch (e) {
     if (myId !== pendingId) return
     if (graphEl.value) graphEl.value.textContent = String(e)
@@ -143,7 +156,8 @@ watch(
   overflow-x: auto;
 }
 .mermaid-graph :deep(svg) {
-  max-width: 100%;
+  width: 100%;
+  height: auto;
 }
 /* 节点小字行（<i>：类型键 · label）—— 缩小字号、弱化颜色（与图例一致） */
 .mermaid-graph :deep(.nodeLabel i) {

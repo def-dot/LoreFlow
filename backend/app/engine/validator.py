@@ -1,5 +1,5 @@
 """校验层（构造期，pydantic 校验之后）。
-
+    ~a`
 - ``validate_dag(nodes)`` — 图结构：节点名去重、依赖存在性、环检测。
 - ``validate_ref(nodes)`` — inputs / condition 中 $引用的来源合法性。
 

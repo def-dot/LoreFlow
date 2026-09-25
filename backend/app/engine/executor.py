@@ -202,15 +202,4 @@ class PipeLineExecutor:
             output = await asyncio.wait_for(coro, timeout=node.timeout)
         else:
             output = await coro
-        return self._validate_output(node, output)
-
-    @staticmethod
-    def _validate_output(node: Node, output: Any) -> Any:
-        if output is None:
-            return output
-        schema = node.resolve_output_schema()
-        if schema is not None:
-            if isinstance(output, schema):
-                return output.model_dump()
-            return schema.model_validate(output).model_dump()
         return output

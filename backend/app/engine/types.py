@@ -96,15 +96,6 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
             return [_resolve(v) for v in obj]
         return obj
 
-    def _resolve(obj: Any) -> Any:
-        if isinstance(obj, str) and obj.startswith("$"):
-            return _deref(obj)
-        if isinstance(obj, dict):
-            return {k: _resolve(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_resolve(v) for v in obj]
-        return obj
-
     if not wiring:
         return {}
     return {k: _resolve(v) for k, v in wiring.items()}
