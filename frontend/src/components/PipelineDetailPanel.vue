@@ -141,7 +141,7 @@ async function copySource() {
     </section>
     <div class="panels">
       <section class="panel">
-        <h2>流水线</h2>
+        <h2>工作流</h2>
         <MermaidDiagram :key="detail.name" :source="detail.mermaid" />
       </section>
       <section class="panel">

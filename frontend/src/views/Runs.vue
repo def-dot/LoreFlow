@@ -286,7 +286,7 @@ const missingRequiredText = computed(() =>
 const jsonPlaceholder = computed(() => {
   const keys = [...requiredInputs.value, ...Object.keys(defaultInputs.value)]
   if (keys.length) return `JSON 对象，键取自参数声明，如 {"${keys[0]}": ...}`
-  return 'JSON 对象（该流水线未声明参数，一般无需填写）'
+  return 'JSON 对象（该工作流未声明参数，一般无需填写）'
 })
 
 // 参数字段的 placeholder：只放「默认值预览」——留空的后果是唯一别处没有的信息；
@@ -383,7 +383,7 @@ async function loadPreview() {
   try {
     previewDetail.value = await getPipeline(previewId.value)
   } catch {
-    previewError.value = '加载流水线失败，请检查后端是否可用。'
+    previewError.value = '加载工作流失败，请检查后端是否可用。'
   } finally {
     previewLoading.value = false
   }
@@ -555,7 +555,7 @@ onUnmounted(() => {
     <header class="page-head">
       <div class="head-info">
         <h1>运行</h1>
-        <span class="muted">查看和管理流水线运行</span>
+        <span class="muted">查看和管理工作流运行</span>
       </div>
       <el-button type="primary" @click="createDrawerOpen = true">▶ 新建运行</el-button>
     </header>
@@ -586,7 +586,7 @@ onUnmounted(() => {
     <el-drawer v-model="previewOpen" size="min(920px, 94vw)">
       <template #header>
         <div class="drawer-title">
-          <span class="name">{{ previewDetail?.name ?? previewItem?.name ?? '流水线详情' }}</span>
+          <span class="name">{{ previewDetail?.name ?? previewItem?.name ?? '工作流详情' }}</span>
           <span class="muted file">{{ previewItem?.name ?? previewId }}</span>
         </div>
       </template>
@@ -603,13 +603,13 @@ onUnmounted(() => {
     <el-drawer v-model="createDrawerOpen" title="新建运行" size="min(480px, 90vw)">
       <div class="create-form">
         <div class="create-field">
-          <label class="create-label">流水线</label>
+          <label class="create-label">工作流</label>
           <div class="create-select-group">
             <el-select
               v-model="configId"
               :disabled="!pipelinesStore.pipelines.length"
               filterable
-              placeholder="选择流水线"
+              placeholder="选择工作流"
               style="flex: 1"
             >
               <el-option
@@ -620,7 +620,7 @@ onUnmounted(() => {
               />
             </el-select>
             <el-button plain :disabled="configId == null" @click="openPreview(configId)">
-              👁 预览
+              ⚙️ 工作流配置
             </el-button>
           </div>
         </div>

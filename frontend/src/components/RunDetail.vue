@@ -98,7 +98,7 @@ async function openDefinition() {
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
         {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
-      <span class="run-workflow" @click="openDefinition">⚙️ 查看流水线配置</span>
+      <span class="run-workflow" @click="openDefinition">⚙️ 工作流配置</span>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
     <div class="panels">
@@ -112,7 +112,7 @@ async function openDefinition() {
         <span v-else class="muted">暂无输出</span>
       </section>
       <section class="panel">
-        <h2>流水线（{{ detail.pipeline_name }}）</h2>
+        <h2>工作流（{{ detail.pipeline_name }}）</h2>
         <MermaidDiagram :source="detail.mermaid" :statuses="nodeStatuses" />
       </section>
       <section class="panel">

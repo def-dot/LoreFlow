@@ -91,11 +91,11 @@ async function handleSave() {
     if (editingId.value != null) {
       await updatePipeline(editingId.value, { definition: editorDefinition.value })
       await fetchAll()
-      ElMessage.success('流水线已更新')
+      ElMessage.success('工作流已更新')
       await selectPipeline(editingId.value)
     } else {
       const { id } = await createPipeline({ definition: editorDefinition.value })
-      ElMessage.success('流水线已创建')
+      ElMessage.success('工作流已创建')
       await fetchAll()
       await selectPipeline(id)
     }
@@ -115,15 +115,15 @@ async function handleDelete(id?: number) {
   const item = store.pipelines.find((p) => p.id === targetId)
   try {
     await ElMessageBox.confirm(
-      `删除流水线「${item?.name ?? targetId}」？删除后不可恢复。`,
-      '删除流水线',
+      `删除工作流「${item?.name ?? targetId}」？删除后不可恢复。`,
+      '删除工作流',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
   } catch {
     return
   }
   await deletePipeline(targetId)
-  ElMessage.success(`已删除流水线「${item?.name ?? targetId}」`)
+  ElMessage.success(`已删除工作流「${item?.name ?? targetId}」`)
   if (store.selectedId === targetId) {
     store.selectedId = null
     store.selectedName = ''

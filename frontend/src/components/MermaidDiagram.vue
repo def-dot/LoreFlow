@@ -102,7 +102,7 @@ function stripHtml(source: string): string {
 
 async function render() {
   if (!graphEl.value) return
-  const source = stripHtml(decorate(props.source || 'graph TD\n  none[暂无流水线]', props.statuses))
+  const source = stripHtml(decorate(props.source || 'graph TD\n  none[暂无工作流]', props.statuses))
   renderSeq += 1
   const seq = renderSeq
   const myId = pendingId
