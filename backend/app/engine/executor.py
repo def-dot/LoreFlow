@@ -21,10 +21,9 @@ from pydantic import BaseModel
 
 from app.registry import REGISTRY
 from .condition import eval_condition
-from .types import wired_ctx
+from .types import wired_ctx, ACTIVE_STATUSES
 from .pipeline import Node, RetryPolicy
 from .types import (
-    PipeLineExecutionError,
     NodeEventFunc,
     NodeResult,
     NodeStatus,
@@ -67,11 +66,11 @@ class PipeLineExecutor:
 
         for node in self.nodes.values():
             saved = self._resume.get(node.name)
-            if saved is not None and saved.get("status") in ("completed", "failed", "skipped", "upstream_skipped"):
+            if saved is not None and saved.get("status") not in ACTIVE_STATUSES:
                 events[node.name].set()
                 results[node.name] = NodeResult.model_validate(saved)
-                if saved["status"] == "completed":
-                    self.ctx[node.name] = saved.get("output")
+                if saved.get("output"):
+                    self.ctx[node.name] = saved["output"]
             else:
                 tasks.append(asyncio.create_task(self._run_node(node, events, results)))
 
@@ -83,7 +82,7 @@ class PipeLineExecutor:
             for name in failed:
                 if results[name].error:
                     lines.append(f"  {name}: {results[name].error}")
-            raise PipeLineExecutionError("\n".join(lines), results)
+            raise Exception("\n".join(lines))
 
         return results
 

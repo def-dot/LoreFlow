@@ -24,6 +24,9 @@ class NodeStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+ACTIVE_STATUSES = (NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.RETRYING)
+
+
 class NodeResult(BaseModel):
     """The result of executing a single DAG node."""
 
@@ -39,14 +42,6 @@ class NodeResult(BaseModel):
 
 #: Signature for a node event listener: receives the finished NodeResult, returns nothing.
 NodeEventFunc = Callable[[NodeResult], Awaitable[None]]
-
-
-class PipeLineExecutionError(Exception):
-    """Raised when the DAG execution fails (one or more nodes failed)."""
-
-    def __init__(self, message: str, results: dict[str, NodeResult]):
-        super().__init__(message)
-        self.results = results
 
 
 class SuspendExecution(BaseException):

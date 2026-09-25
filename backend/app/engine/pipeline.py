@@ -281,7 +281,7 @@ class Pipeline(BaseModel):
 
         output = None
         if self.end_node and results.get(self.end_node.name):
-            output = results[self.end_node.name].output
+            output = results[self.end_node.name].output.model_dump()
 
         return results, output
 

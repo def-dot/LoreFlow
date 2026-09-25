@@ -19,7 +19,6 @@ Quick start::
 from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
 from .validator import validate_dag, validate_ref
 from .types import (
-    PipeLineExecutionError,
     NodeResult,
     NodeStatus,
     SuspendExecution,
@@ -27,7 +26,6 @@ from .types import (
 )
 
 __all__ = [
-    "PipeLineExecutionError",
     "Node",
     "NodeResult",
     "NodeStatus",
