@@ -132,6 +132,12 @@ async function openDefinition() {
       </section>
     </div>
 
+    <!-- 运行配置 YAML -->
+    <section v-if="detail.definition" class="yaml-section">
+      <h2>运行配置</h2>
+      <pre class="yaml-block">{{ detail.definition }}</pre>
+    </section>
+
     <!-- 工作流定义 drawer -->
     <el-drawer v-model="definitionVisible" size="min(920px, 94vw)">
       <template #header>
@@ -216,6 +222,8 @@ async function openDefinition() {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 16px;
+  max-height: 450px;
+  overflow-y: auto;
 }
 /* 人工审核节标题用琥珀刻度条（与审核卡同语义） */
 h2.review-title::before {
@@ -223,6 +231,23 @@ h2.review-title::before {
 }
 .review-title {
   margin-top: 16px;
+}
+/* 运行配置 YAML */
+.yaml-section {
+  margin-top: 18px;
+}
+.yaml-block {
+  margin: 0;
+  padding: 16px;
+  background: rgba(10, 14, 27, 0.65);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-x: auto;
+  max-height: 400px;
 }
 /* 工作流定义 drawer */
 :deep(.el-drawer__header) {

@@ -126,7 +126,7 @@ async function render() {
           // 只在 viewBox 明显大于实际内容时修正（容差 2 倍）
           if (origW > bbox.width * 2) {
             const w = Math.ceil(bbox.width * 6.5 + pad * 2)
-            const h = Math.ceil(bbox.height * 3 + pad * 2)
+            const h = Math.ceil(bbox.height * 1.6 + pad * 2)
             svgEl.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${w} ${h}`)
           }
         }
