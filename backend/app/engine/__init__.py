@@ -20,7 +20,6 @@ from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
 from .validator import validate_dag, validate_ref
 from .types import (
     PipeLineExecutionError,
-    HumanRejected,
     NodeResult,
     NodeStatus,
     SuspendExecution,
@@ -29,7 +28,6 @@ from .types import (
 
 __all__ = [
     "PipeLineExecutionError",
-    "HumanRejected",
     "Node",
     "NodeResult",
     "NodeStatus",

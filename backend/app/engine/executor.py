@@ -17,9 +17,11 @@ from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 
+from pydantic import BaseModel
+
 from app.registry import REGISTRY
 from .condition import eval_condition
-from .types import HumanRejected, wired_ctx
+from .types import wired_ctx
 from .pipeline import Node, RetryPolicy
 from .types import (
     PipeLineExecutionError,
@@ -132,12 +134,11 @@ class PipeLineExecutor:
             logger.exception("Unexpected error in executor for %s", node.name)
             result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc))
         finally:
-            if result is not None:
-                results[result.node_name] = result
-                if result.status == NodeStatus.COMPLETED:
-                    self.ctx[result.node_name] = result.output
-                if self.on_event is not None:
-                    await self.on_event(result)
+            results[result.node_name] = result
+            if result.output:
+                self.ctx[result.node_name] = result.output.model_dump()
+            if self.on_event is not None:
+                await self.on_event(result)
             events[node.name].set()
 
     async def _execute_with_retry(self, node: Node) -> NodeResult:
@@ -158,13 +159,6 @@ class PipeLineExecutor:
                 return NodeResult(
                     node_name=node.name, status=NodeStatus.COMPLETED,
                     output=output, attempts=attempt + 1, duration_ms=duration_ms,
-                    retry_history=retry_history or None,
-                )
-
-            except HumanRejected as exc:
-                return NodeResult(
-                    node_name=node.name, status=NodeStatus.FAILED,
-                    output=exc.output, error=str(exc), attempts=attempt + 1,
                     retry_history=retry_history or None,
                 )
 
@@ -192,7 +186,7 @@ class PipeLineExecutor:
     # Helpers
     # ------------------------------------------------------------------
 
-    async def _call(self, node: Node) -> Any:
+    async def _call(self, node: Node) -> BaseModel:
         func_def = REGISTRY[node.type]
         resolved = wired_ctx(self.ctx, node.inputs or {})
 

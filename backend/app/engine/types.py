@@ -29,7 +29,7 @@ class NodeResult(BaseModel):
 
     node_name: str
     status: NodeStatus
-    output: Any = None
+    output: BaseModel | None = None
     error: str | None = None
     attempts: int = 0
     duration_ms: float = 0.0
@@ -99,15 +99,3 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
     if not wiring:
         return {}
     return {k: _resolve(v) for k, v in wiring.items()}
-
-
-class HumanRejected(Exception):
-    """Raised by a human review node when the reviewer rejects the payload.
-
-    Carries the rejection details as ``output``; the executor special-cases
-    it (终局决策，不进重试循环) and records them in the FAILED node result.
-    """
-
-    def __init__(self, reason: str, output: Any = None):
-        super().__init__(reason)
-        self.output = output
