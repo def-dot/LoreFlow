@@ -99,21 +99,18 @@ async function openDefinition() {
         {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
       <span class="run-workflow" @click="openDefinition">⚙️ 查看流水线配置</span>
-      <el-popover v-if="inputCount" placement="bottom-start" :width="360" trigger="click">
-        <template #reference>
-          <span class="run-inputs">⚙ 参数 × {{ inputCount }}</span>
-        </template>
-        <FieldValues :fields="inputFields" />
-      </el-popover>
-      <el-popover v-if="outputCount" placement="bottom-start" :width="360" trigger="click">
-        <template #reference>
-          <span class="run-output">📤 输出 × {{ outputCount }}</span>
-        </template>
-        <FieldValues :fields="outputFields" />
-      </el-popover>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
     <div class="panels">
+      <section v-if="inputCount" class="panel">
+        <h2>输入参数</h2>
+        <FieldValues :fields="inputFields" />
+      </section>
+      <section class="panel">
+        <h2>输出</h2>
+        <FieldValues v-if="outputCount" :fields="outputFields" />
+        <span v-else class="muted">暂无输出</span>
+      </section>
       <section class="panel">
         <h2>流水线（{{ detail.pipeline_name }}）</h2>
         <MermaidDiagram :source="detail.mermaid" :statuses="nodeStatuses" />
@@ -190,17 +187,6 @@ async function openDefinition() {
 .run-workflow:hover {
   border-color: var(--ink-3);
   color: var(--ink);
-}
-/* 运行时输入快照 chip：与 run-meta 同级弱化展示，点击弹层逐字段查看 */
-.run-inputs,
-.run-output {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-3);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: default;
 }
 .run-error {
   color: #ffc9c7;

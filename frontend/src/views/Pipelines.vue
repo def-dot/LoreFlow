@@ -224,7 +224,7 @@ onMounted(async () => {
     </main>
 
     <!-- 新建/编辑 drawer -->
-    <el-drawer v-model="editorOpen" :title="editingName ? '编辑工作流' : '新建工作流'" size="min(720px, 94vw)" class="editor-drawer">
+    <el-drawer v-model="editorOpen" :title="editingId != null ? '编辑工作流' : '新建工作流'" size="min(720px, 94vw)" class="editor-drawer">
       <div class="editor-form">
         <div class="editor-field editor-field-grow">
           <label class="editor-label">YAML 定义</label>
@@ -238,7 +238,7 @@ onMounted(async () => {
         <div class="editor-actions">
           <el-button @click="editorOpen = false">取消</el-button>
           <el-button type="primary" :loading="saving" @click="handleSave">
-            {{ editingName ? '保存修改' : '创建' }}
+            {{ editingId != null ? '保存修改' : '创建' }}
           </el-button>
         </div>
       </div>
