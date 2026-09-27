@@ -97,6 +97,7 @@ class PipeLineExecutor:
         results: dict[str, NodeResult],
     ) -> None:
         result: NodeResult | None = None
+        resolved_inputs: dict[str, Any] | None = None
         try:
             # ---- 1. Wait for dependencies ----
             for dep in node.depends_on:
@@ -129,14 +130,19 @@ class PipeLineExecutor:
             result = await self._execute_with_retry(node, resolved_inputs)
 
         except asyncio.CancelledError:
-            result = NodeResult(node_name=node.name, status=NodeStatus.CANCELLED, inputs=locals().get("resolved_inputs"))
+            result = NodeResult(node_name=node.name, status=NodeStatus.CANCELLED)
+        except SuspendExecution as exc:
+            result = NodeResult(node_name=node.name, status=NodeStatus.REVIEWING, output=exc.results)
+            raise
         except Exception as exc:
             logger.exception("Unexpected error in executor for %s", node.name)
-            result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc), inputs=locals().get("resolved_inputs"))
+            result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc))
         finally:
+            if result is not None and resolved_inputs is not None:
+                result.inputs = resolved_inputs
             results[result.node_name] = result
-            if result.output:
-                self.ctx[result.node_name] = result.output.model_dump()
+            if result.output is not None:
+                self.ctx[result.node_name] = result.output.model_dump() if hasattr(result.output, 'model_dump') else result.output
             if self.on_event is not None:
                 await self.on_event(result)
             events[node.name].set()
@@ -153,7 +159,7 @@ class PipeLineExecutor:
                 async with self._semaphore or nullcontext():
                     start = time.monotonic()
                     output = await self._call(node, resolved_inputs)
-                    duration_ms = (time.monotonic() - start) * 1000
+                    duration_ms = int((time.monotonic() - start) * 1000)
 
                 logger.info("[%s] OK (attempt %d/%d, %.0f ms)", node.name, attempt + 1, retry.max_retries + 1, duration_ms)
                 return NodeResult(

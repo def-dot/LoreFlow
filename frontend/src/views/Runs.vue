@@ -440,6 +440,8 @@ function startDetailPolling() {
   detailTimer = setInterval(async () => {
     try {
       await store.fetchDetail()
+      // 同步 summary（驱动 top-nav flowing / hasRunning 等全局状态）
+      await store.fetchRuns()
       if (store.detail && store.detail.status !== 'running') {
         stopDetailPolling()
         await refreshRunsIfTerminal()
