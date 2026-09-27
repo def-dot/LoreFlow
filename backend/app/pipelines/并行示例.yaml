@@ -1,0 +1,24 @@
+name: 并行示例
+description: 两个节点同时执行，互不依赖。
+nodes:
+- name: task_a
+  type: code
+  label: 任务A
+  inputs:
+    script: "def main():\n    return '我是A'\n"
+  timeout: 5
+- name: task_b
+  type: code
+  label: 任务B
+  inputs:
+    script: "def main():\n    return '我是B'\n"
+  timeout: 5
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  - task_b
+  type: end
+  inputs:
+    a: $task_a.result
+    b: $task_b.result

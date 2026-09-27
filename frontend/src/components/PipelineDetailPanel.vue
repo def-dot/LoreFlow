@@ -124,9 +124,9 @@ async function copySource() {
 <template>
   <div>
     <!-- 无自身头部：仅用于 Runs 页 drawer，名称/文件名由 drawer 标题展示 -->
-    <section v-if="detail.params && Object.keys(detail.params).length" class="panel params-panel">
+    <section class="panel params-panel">
       <h2>参数</h2>
-      <el-table :data="paramsRows" size="small" max-height="200">
+      <el-table v-if="paramsRows.length" :data="paramsRows" size="small" max-height="200">
         <el-table-column prop="name" label="参数名" width="120" />
         <el-table-column prop="label" label="标签" width="120" />
         <el-table-column prop="type" label="类型" width="80" />
@@ -138,6 +138,7 @@ async function copySource() {
           <template #default="{ row }">{{ row.required ? '✓' : '—' }}</template>
         </el-table-column>
       </el-table>
+      <span v-else class="muted">无输入参数</span>
     </section>
     <div class="panels">
       <section class="panel">

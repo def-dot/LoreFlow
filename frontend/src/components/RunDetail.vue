@@ -102,9 +102,10 @@ async function openDefinition() {
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
     <div class="panels">
-      <section v-if="inputCount" class="panel">
+      <section class="panel">
         <h2>输入参数</h2>
-        <FieldValues :fields="inputFields" />
+        <FieldValues v-if="inputCount" :fields="inputFields" />
+        <span v-else class="muted">无输入参数</span>
       </section>
       <section class="panel">
         <h2>输出</h2>

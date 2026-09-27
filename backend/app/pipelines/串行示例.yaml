@@ -1,0 +1,24 @@
+name: 串行示例
+description: 三个节点依次执行，演示 depends_on 串联用法。
+nodes:
+- name: task_a
+  type: code
+  label: 任务A
+  inputs:
+    script: "def main():\n    return '我是A'\n"
+  timeout: 5
+- name: task_b
+  type: code
+  label: 任务B
+  depends_on:
+  - task_a
+  inputs:
+    script: "def main():\n    return '我是B'\n"
+  timeout: 5
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_b
+  type: end
+  inputs:
+    result: $task_b.result

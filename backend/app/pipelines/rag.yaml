@@ -1,4 +1,4 @@
-name: 串行
+name: rag
 description: RAG文档入库串行执行：上传文档 → 切块 → 向量化 → 写入向量库。
 nodes:
 - name: load
