@@ -1,0 +1,28 @@
+name: 人工示例
+description: 演示人工审核节点：生成内容 → 人工审批 → 输出结果。
+nodes:
+- name: task_a
+  type: code
+  label: 生成内容
+  inputs:
+    script: "def main():\n    return 'hello world'\n"
+  timeout: 5
+- name: review
+  type: human
+  label: 人工审核
+  depends_on:
+  - task_a
+  description: 请审核内容是否通过
+  inputs:
+    payload:
+    - key: content
+      label: 内容
+      value: $task_a.result
+- name: __end__
+  label: 输出
+  depends_on:
+  - review
+  type: end
+  inputs:
+    approved: $review.approve
+    result: $review.result

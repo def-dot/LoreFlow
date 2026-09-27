@@ -112,9 +112,30 @@ async function render() {
     const { svg } = await mermaid.render(`mermaid-${seq}`, source)
     if (myId !== pendingId) return // 新的渲染已经启动，丢弃旧结果
     graphEl.value.innerHTML = svg
+    // 统一节点块最小高度：rect 向上扩展，label 整组上移保持居中
+    const MIN_NODE_H = 50
+    for (const g of graphEl.value.querySelectorAll<SVGGElement>('.node')) {
+      const rect = g.querySelector<SVGRectElement>('rect')
+      if (!rect) continue
+      const h = parseFloat(rect.getAttribute('height') ?? '0')
+      if (h > 0 && h < MIN_NODE_H) {
+        const dy = (MIN_NODE_H - h) / 2
+        rect.setAttribute('height', String(MIN_NODE_H))
+        rect.setAttribute('y', String(parseFloat(rect.getAttribute('y') ?? '0') - dy))
+        // .label 是 foreignObject 或 g，整体下移 dy 保持视觉居中
+        const label = g.querySelector<HTMLElement>('.label, foreignObject')
+        if (label) {
+          const cur = parseFloat(label.getAttribute('y') ?? label.style.marginTop ?? '0')
+          if (label.hasAttribute('y')) {
+            label.setAttribute('y', String(cur + dy))
+          } else {
+            label.style.marginTop = `${cur + dy}px`
+          }
+        }
+      }
+    }
     // mermaid 给 svg 根节点写死 px 的 width/height 与 inline max-width，
-    // 改写为：面板比图宽 → 放大填满（至多 1.6×，防止小图被吹得过大）；
-    // 图比面板宽 → 保持自然尺寸由容器横向滚动，而不是缩小到看不清
+    // CSS width:100% 让图按面板宽度等比缩放，不再手动限制放大倍数
     const svgEl = graphEl.value.querySelector('svg')
     if (svgEl) {
       // mermaid 有时会算出过大的 viewBox（如单节点却有 2074×2050），
@@ -127,9 +148,9 @@ async function render() {
           const origW = vb?.width || bbox.width
           // 只在 viewBox 明显大于实际内容时修正（容差 2 倍）
           if (origW > bbox.width * 2) {
-            const s = props.scale ?? 1
-            const w = Math.ceil((bbox.width * 6.5 + pad * 2) / s)
-            const h = Math.ceil((bbox.height * 1.6 + pad * 2) / s)
+            const MIN_VB_W = 600
+            const w = Math.ceil(Math.max(bbox.width, MIN_VB_W) + pad * 2)
+            const h = Math.ceil(bbox.height + pad * 2)
             svgEl.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${w} ${h}`)
           }
         }
