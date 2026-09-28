@@ -25,7 +25,7 @@ class NodeStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-ACTIVE_STATUSES = (NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.RETRYING)
+ACTIVE_STATUSES = (NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.RETRYING, NodeStatus.UPSTREAM_REVIEWING)
 
 
 class NodeResult(BaseModel):
