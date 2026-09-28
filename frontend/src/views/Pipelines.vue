@@ -147,9 +147,9 @@ nodes:
   label: LLM 回复
   description: 调用 LLM 直接回答
   inputs:
-    prompt: $input.prompt
+    prompt: $params.prompt
   timeout: 300
-- name: end
+- name: __end__
   type: end
   label: 最终输出
   depends_on:
@@ -264,9 +264,9 @@ nodes:
   type: llm_chat
   label: LLM 回复
   inputs:
-    prompt: $input.prompt
+    prompt: $params.prompt
   timeout: 300
-- name: end
+- name: __end__
   type: end
   label: 最终输出
   depends_on:
@@ -275,9 +275,9 @@ nodes:
     reply: $reply.content</pre>
 
         <h4>输入参数 (params)</h4>
-        <p class="guide-desc">params 定义工作流的全局输入参数，支持文本、文件上传、下拉选择等类型。运行时由用户填写，任意节点通过 <code>$input.xxx</code> 引用填写的参数值。</p>
+        <p class="guide-desc">params 定义工作流的全局输入参数，支持文本、文件上传、下拉选择等类型。运行时由用户填写，任意节点通过 <code>$params.xxx</code> 引用填写的参数值。</p>
         <pre class="guide-code">params:
-  prompt:                      # 参数名（必填），即 $input.prompt
+  prompt:                      # 参数名（必填），即 $params.prompt
     required: true             # [可选] 是否必填，默认 false
     label: 提示词               # [可选] 表单显示名称
     description: 用户输入的问题  # [可选] 表单提示说明
@@ -310,7 +310,7 @@ nodes:
   #   - node_b
   inputs:                    # [可选] 定义 type 函数的输入参数，key 须匹配 type 的输入 schema，
                          # 值通过 $ 引用全局参数或上游节点输出，也可以是字符串面量
-    prompt: $input.prompt
+    prompt: $params.prompt
     system: 你是一个助手
   condition: $classify.intent == chat   # [可选] 布尔值或条件表达式，为 false 时跳过，
                                      # 支持 $ 引用全局参数或上游节点输出，表达式示例见下表
@@ -352,7 +352,7 @@ nodes:
 
         <h4>数据引用语法</h4>
         <ul class="guide-rules">
-          <li><code>$input.xxx</code> — 引用用户填写的输入参数</li>
+          <li><code>$params.xxx</code> — 引用用户填写的输入参数</li>
           <li><code>$节点名.字段</code> — 引用上游节点的输出，如 <code>$reply.content</code></li>
         </ul>
 

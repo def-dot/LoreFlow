@@ -27,7 +27,7 @@ class ReadDocumentOutput(BaseModel):
 @func(
     label="读取文档",
     description="读取上传文档内容",
-    metadata={"group": "文件", "order": 10},
+    metadata={"group": "基础", "order": 12},
 )
 async def read_document(params: ReadDocumentParams) -> ReadDocumentOutput:
     """从上传目录读取 params 声明的 document 文件"""
