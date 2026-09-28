@@ -1,24 +1,22 @@
 name: 基础测试-重试（成功）
-description: 前三次失败，第四次成功，演示重试机制。
+description: 随机失败触发重试，最终成功。
 nodes:
 - name: task_a
   type: code
-  label: 三次失败
+  label: 随机失败
   inputs:
     script: |
-      counter = 0
+      import random
       def main():
-          global counter
-          counter += 1
-          if counter <= 3:
-              raise Exception(f"第 {counter} 次调用失败")
-          return {"status": "success", "attempt": counter}
+          if random.random() < 0.7:
+              raise Exception("服务暂时不可用")
+          return {"status": "success"}
   retry:
     max_retries: 5
     backoff_base: 1
     backoff_factor: 2
     backoff_max: 10
-    jitter: false
+    jitter: true
 - name: __end__
   label: 输出
   depends_on:
