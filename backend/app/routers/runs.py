@@ -139,12 +139,15 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
 
     # 写入决策：通过 → completed（下游继续），拒绝 → failed（workflow 停止）
     entry = record.nodes.setdefault(node_name, {})
-    entry["status"] = "completed" if body.approve else "failed"
-    entry["output"] = {
-        "approve": body.approve,
-        "reason": body.reason or "",
-        "result": body.values or {},
-    }
+    if body.approve:
+        entry["status"] = "completed"
+        entry["output"] = {
+            "approve": True,
+            "result": body.values or {},
+        }
+    else:
+        entry["status"] = "failed"
+        entry["error"] = f"审核拒绝：{body.reason}" if body.reason else "审核拒绝"
     async with database.AsyncSessionLocal() as session:
         await session.execute(
             sa_update(RunRecord).where(RunRecord.id == record.id).values(nodes=record.nodes)
