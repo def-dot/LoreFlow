@@ -1,0 +1,34 @@
+name: 基础测试-自定义插件
+description: 使用自定义插件发送邮件通知。
+nodes:
+- name: task_a
+  type: send_email
+  label: 发送邮件
+  inputs:
+    to: $params.to
+    subject: $params.subject
+    body: $params.body
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  type: end
+  inputs:
+    result: $task_a.result
+params:
+  to:
+    required: true
+    type: text
+    label: 收件人
+    description: 收件人邮箱地址
+    default: user@example.com
+  subject:
+    required: false
+    type: text
+    label: 邮件主题
+    default: 测试邮件
+  body:
+    required: false
+    type: paragraph
+    label: 邮件正文
+    default: 这是一封测试邮件

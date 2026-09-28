@@ -9,8 +9,8 @@ from app.registry import func
 
 class SendEmailInput(BaseModel):
     to: str = Field(description="收件人邮箱")
-    subject: str = Field(default="(无主题)", description="邮件主题")
-    body: str = Field(default="", description="邮件正文")
+    subject: str | None = Field(default="(无主题)", description="邮件主题")
+    body: str | None = Field(default="", description="邮件正文")
 
 
 class SendEmailOutput(BaseModel):

@@ -103,15 +103,15 @@ const defaultsJson = computed(() => JSON.stringify(defaultInputs.value, null, 2)
 // （前者提交时不解析 JSON 会把值变字符串，后者预填文本 "null" 同样变味，
 // 留空 = 不传 = 后端按声明默认执行）。
 watch(
-  () => selectedPipeline.value?.name ?? '',
+  paramSpecs,
   () => {
     paramValues.value = Object.fromEntries(
       paramSpecs.value
         .filter((s) => {
           if (s.default == null) return false
           const t = resolveParamType(s)
-          // paragraph / file / file_list / checkbox / number 的非字符串默认值不预填文本
-          if (t === 'paragraph' || t === 'file' || t === 'file_list' || t === 'checkbox' || t === 'number') return false
+          // file / file_list / checkbox / number 的非字符串默认值不预填文本
+          if (t === 'file' || t === 'file_list' || t === 'checkbox' || t === 'number') return false
           return typeof s.default === 'string'
         })
         .map((s) => [s.name, defaultToText(s.default)]),
@@ -189,7 +189,7 @@ function parseFieldValue(raw: string, multiline: boolean): unknown {
   return raw
 }
 
-// 表单模式实际提交的参数：只收非空字段（留空 = 用默认值或不传）
+// 表单模式实际提交的参数：所有字段都传，没填的传 null
 const formInputs = computed(() => {
   const value: Record<string, unknown> = {}
   for (const spec of paramSpecs.value) {
@@ -197,47 +197,36 @@ const formInputs = computed(() => {
     switch (type) {
       case 'file': {
         const ref = uploadRefs.value[spec.name]
-        if (!ref) continue
-        value[spec.name] = { stored_name: ref.stored_name, filename: ref.filename }
+        value[spec.name] = ref ? { stored_name: ref.stored_name, filename: ref.filename } : null
         break
       }
       case 'file_list': {
         const refs = multiUploadRefs.value[spec.name]
-        if (!refs?.length) continue
-        value[spec.name] = refs.map((r) => ({ stored_name: r.stored_name, filename: r.filename }))
+        value[spec.name] = refs?.length ? refs.map((r) => ({ stored_name: r.stored_name, filename: r.filename })) : null
         break
       }
       case 'number': {
-        const n = numberValues.value[spec.name]
-        if (n == null) continue
-        value[spec.name] = n
+        value[spec.name] = numberValues.value[spec.name] ?? null
         break
       }
       case 'checkbox': {
-        const b = checkboxValues.value[spec.name]
-        // checkbox 始终提交（false 也是有意义的值），除非未初始化
-        if (b == null) continue
-        value[spec.name] = b
+        value[spec.name] = checkboxValues.value[spec.name] ?? null
         break
       }
       case 'select': {
         const selected = selectedOptions.value[spec.name]
-        if (!selected?.length) continue
-        value[spec.name] = selected
+        value[spec.name] = selected?.length ? selected : null
         break
       }
       case 'paragraph': {
         const raw = (paramValues.value[spec.name] ?? '').trim()
-        if (raw === '') continue
-        // paragraph 是纯文本语义，不做 JSON 启发式
-        value[spec.name] = raw
+        value[spec.name] = raw || null
         break
       }
       default: {
         // text
         const raw = (paramValues.value[spec.name] ?? '').trim()
-        if (raw === '') continue
-        value[spec.name] = parseFieldValue(raw, false)
+        value[spec.name] = raw ? parseFieldValue(raw, false) : null
         break
       }
     }
@@ -257,7 +246,10 @@ const submitInputs = computed<{ value?: Record<string, unknown>; error: string |
 // 必填键缺失：JSON 无效时视为全部缺失（无法确认已提供）；提交前拦截 + 后端兜底 400
 const missingRequired = computed(() => {
   const provided = submitInputs.value.error ? {} : (submitInputs.value.value ?? {})
-  return requiredInputs.value.filter((k) => !(k in provided))
+  return requiredInputs.value.filter((k) => {
+    const v = provided[k]
+    return v === null || v === undefined || v === ''
+  })
 })
 
 // 表单模式 = 声明了参数且未切 JSON：弹层主体按声明渲染字段
@@ -289,12 +281,9 @@ const jsonPlaceholder = computed(() => {
   return 'JSON 对象（该工作流未声明参数，一般无需填写）'
 })
 
-// 参数字段的 placeholder：只放「默认值预览」——留空的后果是唯一别处没有的信息；
-// 必填/可选已在 label 行（*/可选）、说明在字段下方常驻，不再重复进 placeholder
+// 参数字段的 placeholder：使用 description
 function paramPlaceholder(spec: ParamSpec): string {
-  if (spec.default == null) return ''
-  const text = JSON.stringify(spec.default) ?? ''
-  return `默认: ${text.length > 32 ? `${text.slice(0, 32)}…` : text}`
+  return spec.description ?? ''
 }
 
 function fillDefaults() {
@@ -776,7 +765,6 @@ onUnmounted(() => {
                   :placeholder="paramPlaceholder(spec)"
                 />
 
-                <div v-if="spec.description" class="param-desc">{{ spec.description }}</div>
               </div>
               <div v-if="missingRequired.length" class="inputs-error">
                 缺少必填参数: {{ missingRequiredText }}
