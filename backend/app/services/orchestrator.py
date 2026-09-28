@@ -57,8 +57,13 @@ async def run_pipeline(record: RunRecord) -> None:
             outcome = RunStatus.REVIEWING
         elif failed := {name: results[name].error for name, r in results.items() if r.status == NodeStatus.FAILED}:
             outcome = RunStatus.FAILED
-            error = f"{len(failed)} 个节点失败: {', '.join(failed)}"
-            error += "".join(f"\n  {name}: {err}" for name, err in failed.items() if err)
+            # 用 label 替代 name，更易读
+            node_labels = {n.name: n.label or n.name for n in pipeline.nodes}
+            failed_parts = []
+            for name, err in failed.items():
+                label = node_labels.get(name, name)
+                failed_parts.append(f"{label}: {err}" if err else label)
+            error = f"{len(failed)} 个节点失败: {'；'.join(failed_parts)}"
         else:
             outcome = RunStatus.COMPLETED
     except asyncio.CancelledError:
