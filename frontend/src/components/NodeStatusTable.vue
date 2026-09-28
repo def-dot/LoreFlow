@@ -67,10 +67,10 @@ function isCellError(row: Row): boolean {
       <template #default="{ row }">
         <pre class="cell-pre" :class="{ err: isCellError(row) }">{{ cellText(row) }}</pre>
         <!-- 重试历史：成功/失败都显示，说明「为什么尝试了 N 次」 -->
-        <div v-if="row.attempts_log?.length" class="retry-log">
-          <div v-for="a in row.attempts_log" :key="`${a.attempt}-${a.at}`">
+        <div v-if="row.retry_history?.length" class="retry-log">
+          <div v-for="a in row.retry_history" :key="`${a.attempt}-${a.at}`">
             <span class="retry-no">#{{ a.attempt }}</span>{{ a.error }}
-            <span class="retry-at">{{ a.at }}</span>
+            <span class="retry-at">{{ a.at?.replace('T', ' ') }}</span>
           </div>
         </div>
       </template>

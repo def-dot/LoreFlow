@@ -1,0 +1,28 @@
+name: 基础测试-重试（成功）
+description: 前三次失败，第四次成功，演示重试机制。
+nodes:
+- name: task_a
+  type: code
+  label: 三次失败
+  inputs:
+    script: |
+      counter = 0
+      def main():
+          global counter
+          counter += 1
+          if counter <= 3:
+              raise Exception(f"第 {counter} 次调用失败")
+          return {"status": "success", "attempt": counter}
+  retry:
+    max_retries: 5
+    backoff_base: 1
+    backoff_factor: 2
+    backoff_max: 10
+    jitter: false
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  type: end
+  inputs:
+    result: $task_a.result

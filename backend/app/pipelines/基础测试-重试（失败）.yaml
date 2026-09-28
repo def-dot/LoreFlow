@@ -1,0 +1,23 @@
+name: 基础测试-重试（失败）
+description: 节点持续失败，重试耗尽后最终失败。
+nodes:
+- name: task_a
+  type: code
+  label: 永远失败
+  inputs:
+    script: |
+      def main():
+          raise Exception("服务持续不可用")
+  retry:
+    max_retries: 3
+    backoff_base: 1
+    backoff_factor: 2
+    backoff_max: 10
+    jitter: false
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  type: end
+  inputs:
+    result: $task_a.result
