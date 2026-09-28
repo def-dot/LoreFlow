@@ -1,0 +1,21 @@
+name: 基础测试-文件上传
+description: 上传文件，读取文件内容。
+nodes:
+- name: load
+  type: read_document
+  label: 读取文件
+  inputs:
+    document: $input.file
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  type: end
+  inputs:
+    result: $load.text
+params:
+  file:
+    required: true
+    type: file
+    label: 上传文件
+    description: 上传 txt/md 等文本文件

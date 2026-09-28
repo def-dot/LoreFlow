@@ -1,0 +1,35 @@
+name: 基础测试-人工（多级）
+description: 输入内容 → 初审  → 终审 → 输出审核结果。
+nodes:
+- name: task_a
+  type: human
+  label: 初审
+  description: 请审核内容是否正确
+  inputs:
+    payload:
+    - key: content
+      label: 内容
+      value: $input.content
+- name: task_b
+  type: human
+  label: 终审
+  depends_on:
+  - task_a
+  description: 请最终确定内容是否正确
+  inputs:
+    payload:
+    - key: content
+      label: 内容
+      value: $task_a.result.content
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_b
+  type: end
+  inputs:
+    result: $task_b.result
+params:
+  content:
+    required: true
+    type: paragraph
+    label: 内容

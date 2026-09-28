@@ -1,0 +1,27 @@
+name: 基础测试-代码
+description: 输入两个数字 → 加法计算 → 输出结果。
+nodes:
+- name: task_a
+  type: code
+  label: 加法计算器
+  inputs:
+    script: "def main(a:int, b:int):\n    return a+b\n"
+    params:
+      a: $input.a
+      b: $input.b
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  type: end
+  inputs:
+    result: $task_a.result
+params:
+  a:
+    required: true
+    label: a
+    type: number
+  b:
+    required: true
+    label: b
+    type: number
