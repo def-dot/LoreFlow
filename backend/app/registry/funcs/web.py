@@ -96,17 +96,17 @@ async def _fetch_page(url: str) -> dict[str, str]:
     return {"url": url, "text": " ".join(text.split())[:_MAX_CHARS]}
 
 
-@func(
-    label="抓取链接正文",
-    description="抓取一个或多个网页正文，返回 [{url, text}]",
-    metadata={"group": "基础", "order": 21},
-)
-async def web_fetch(params: WebFetchInput) -> WebFetchOutput:
-    urls = [params.url] if isinstance(params.url, str) else list(params.url)
-    if not urls:
-        return WebFetchOutput(result=[])
+# @func(
+#     label="抓取链接正文",
+#     description="抓取一个或多个网页正文，返回 [{url, text}]",
+#     metadata={"group": "基础", "order": 21},
+# )
+# async def web_fetch(params: WebFetchInput) -> WebFetchOutput:
+#     urls = [params.url] if isinstance(params.url, str) else list(params.url)
+#     if not urls:
+#         return WebFetchOutput(result=[])
 
-    return WebFetchOutput(result=list(await asyncio.gather(*(_fetch_page(u) for u in urls))))
+#     return WebFetchOutput(result=list(await asyncio.gather(*(_fetch_page(u) for u in urls))))
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ async def web_fetch(params: WebFetchInput) -> WebFetchOutput:
 # ---------------------------------------------------------------------------
 
 @func(
-    label="HTTP 请求",
+    label="网络请求",
     description="发送 HTTP 请求，返回状态码、响应头和响应体",
     metadata={"group": "基础", "order": 22},
 )
