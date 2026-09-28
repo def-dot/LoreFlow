@@ -21,7 +21,6 @@ params:
     type: text
     label: 收件人
     description: 收件人邮箱地址
-    default: user@example.com
   subject:
     required: false
     type: text
