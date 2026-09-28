@@ -101,6 +101,16 @@ async function openDefinition() {
       <span class="run-workflow" @click="openDefinition">⚙️ 工作流配置</span>
       <div v-if="detail.error" class="run-error">{{ detail.error }}</div>
     </div>
+    <!-- 人工审核：置顶醒目区域 -->
+    <section v-if="reviewing.length" class="review-section">
+      <h2 class="review-title">⚠ 人工审核</h2>
+      <ReviewCards
+        :reviewing="reviewing"
+        :deciding="deciding"
+        @decide="(node, ok, reason, values) => emit('decide', node, ok, reason, values)"
+      />
+    </section>
+
     <div class="panels">
       <section class="panel">
         <h2>输入参数</h2>
@@ -119,14 +129,6 @@ async function openDefinition() {
       <section class="panel">
         <h2>节点</h2>
         <NodeStatusTable :detail="detail" />
-        <template v-if="reviewing.length">
-          <h2 class="review-title">人工审核</h2>
-          <ReviewCards
-            :reviewing="reviewing"
-            :deciding="deciding"
-            @decide="(node, ok, reason, values) => emit('decide', node, ok, reason, values)"
-          />
-        </template>
       </section>
     </div>
 
@@ -212,12 +214,23 @@ async function openDefinition() {
   max-height: 450px;
   overflow-y: auto;
 }
+/* 人工审核：置顶醒目区域 */
+.review-section {
+  margin-bottom: 18px;
+  padding: 16px;
+  background: rgba(16, 21, 42, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
 /* 人工审核节标题用琥珀刻度条（与审核卡同语义） */
 h2.review-title::before {
   background: var(--amber);
 }
 .review-title {
-  margin-top: 16px;
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
 }
 /* 运行配置 YAML */
 .yaml-section {
