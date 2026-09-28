@@ -48,9 +48,9 @@ class RunDetail(BaseModel):
 
 
 class ApproveRequest(BaseModel):
-    model_config = {"extra": "allow"}
-
     approve: bool
+    reason: str | None = ""
+    values: dict[str, Any] | None = None
 
 
 class ApproveResponse(BaseModel):

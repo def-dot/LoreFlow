@@ -24,6 +24,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         errors = exc.errors()
         detail = "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}" for e in errors)
+        logger.warning("422 %s %s: %s", request.method, request.url.path, detail)
         return JSONResponse(
             status_code=422,
             content={"code": 422, "msg": "参数校验失败", "data": {"detail": detail}},

@@ -100,6 +100,5 @@ export function approve(
   reason: string | null,
   values?: Record<string, string>,
 ): Promise<{ status: string; run_id: number; node: string; approve: boolean }> {
-  // 卡片字段平铺在 body 顶层（与协议键 approve/reason 同级）
-  return api.post(`/runs/${runId}/approve/${node}`, { approve: ok, reason, ...values })
+  return api.post(`/runs/${runId}/approve/${node}`, { approve: ok, reason, values: values || null })
 }
