@@ -5,7 +5,7 @@ nodes:
   type: read_document
   label: 读取文件
   inputs:
-    document: $input.file
+    document: $params.file
 - name: end
   type: end
   label: 结束

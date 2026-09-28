@@ -7,8 +7,8 @@ nodes:
   inputs:
     script: "def main(a:int, b:int):\n    return a+b\n"
     params:
-      a: $input.a
-      b: $input.b
+      a: $params.a
+      b: $params.b
 - name: __end__
   label: 输出
   depends_on:

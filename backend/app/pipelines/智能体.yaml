@@ -12,10 +12,10 @@ nodes:
       调用工具。 - 禁止在回复文本中模拟工具调用，必须使用 function calling。 - 工具执行出错时，分析原因并重试，不要放弃。 - 有可用技能时，先读取技能文件获取指令，再按指令执行。
 
       '
-    prompt: $input.prompt
-    tools: $input.tools
-    skills: $input.skills
-    file_names: $input.file
+    prompt: $params.prompt
+    tools: $params.tools
+    skills: $params.skills
+    file_names: $params.file
     max_iterations: 10
   timeout: 300
 - name: __end__

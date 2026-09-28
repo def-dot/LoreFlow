@@ -71,7 +71,7 @@ async def test_wiring_feeds_condition_true() -> None:
 
 
 async def test_wiring_feeds_condition_false_skips() -> None:
-    """$input.flag 引用流水线参数：空串 → 条件 False → 节点跳过。"""
+    """$params.flag 引用流水线参数：空串 → 条件 False → 节点跳过。"""
     cfg = {
         "name": "wiring_condition_false",
         "inputs": {"flag": {"required": False, "default": ""}},
@@ -80,7 +80,7 @@ async def test_wiring_feeds_condition_false_skips() -> None:
             "跳过条件": {
                 "type": "wire_probe",
                 "depends_on": ["生产者"],
-                "condition": "$input.flag",      # 流水线 inputs flag = "" → False
+                "condition": "$params.flag",      # 流水线 inputs flag = "" → False
             },
         },
     }

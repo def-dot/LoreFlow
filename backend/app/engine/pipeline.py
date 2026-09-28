@@ -237,7 +237,7 @@ class Pipeline(BaseModel):
     def _validate_pipeline(self) -> Pipeline:
         """构造期校验（图结构 + $引用）。"""
         errors = validate_dag(self.nodes)
-        errors.extend(validate_ref(self.nodes, param_keys=set(self.params) if self.params else None))
+        errors.extend(validate_ref(self.nodes))
         if errors:
             raise ValueError("\n".join(errors))
         return self
@@ -273,7 +273,7 @@ class Pipeline(BaseModel):
         from .executor import PipeLineExecutor
 
         executor = PipeLineExecutor(
-            nodes=self.nodes, ctx={"input": inputs or {}},
+            nodes=self.nodes, ctx={"params": inputs or {}},
             concurrency=concurrency, on_event=on_event,
             resume=resume,
         )

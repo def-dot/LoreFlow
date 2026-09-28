@@ -9,7 +9,7 @@ nodes:
     payload:
     - key: content
       label: 内容
-      value: $input.content
+      value: $params.content
 - name: __end__
   label: 输出
   depends_on:

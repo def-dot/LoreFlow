@@ -8,7 +8,7 @@ nodes:
   label: 生活管家小助手
   description: LLM 自动调用工具回答问题
   inputs:
-    prompt: $input.prompt
+    prompt: $params.prompt
     system: 你是一个智能助手。你可以使用提供的工具来回答问题。 如果问题不需要工具就能回答，直接回复即可。
     tools:
     - web_search

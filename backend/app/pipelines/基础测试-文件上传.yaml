@@ -1,18 +1,18 @@
 name: 基础测试-文件上传
 description: 上传文件，读取文件内容。
 nodes:
-- name: load
+- name: task_a
   type: read_document
   label: 读取文件
   inputs:
-    document: $input.file
+    document: $params.file
 - name: __end__
   label: 输出
   depends_on:
   - task_a
   type: end
   inputs:
-    result: $load.text
+    result: $task_a.text
 params:
   file:
     required: true

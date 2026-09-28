@@ -9,7 +9,7 @@ nodes:
     payload:
     - key: content
       label: 内容
-      value: $input.content
+      value: $params.content
 - name: task_b
   type: human
   label: 终审
