@@ -76,6 +76,10 @@ class PipeLineExecutor:
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
+        if any(r.status == NodeStatus.REVIEWING for r in results.values()):
+            reviewing = {name: r.output for name, r in results.items() if r.status == NodeStatus.REVIEWING}
+            raise SuspendExecution("等待人工审批", reviewing)
+
         failed = [name for name, r in results.items() if r.status == NodeStatus.FAILED]
         if failed:
             lines = [f"PipeLine 执行完成，{len(failed)} 个节点失败: {', '.join(failed)}"]
@@ -133,7 +137,6 @@ class PipeLineExecutor:
             result = NodeResult(node_name=node.name, status=NodeStatus.CANCELLED)
         except SuspendExecution as exc:
             result = NodeResult(node_name=node.name, status=NodeStatus.REVIEWING, output=exc.results)
-            raise
         except Exception as exc:
             logger.exception("Unexpected error in executor for %s", node.name)
             result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc))
@@ -145,7 +148,7 @@ class PipeLineExecutor:
                 self.ctx[result.node_name] = result.output.model_dump() if hasattr(result.output, 'model_dump') else result.output
             if self.on_event is not None:
                 await self.on_event(result)
-            events[node.name].set()
+            events[node.name].set()  # 所有终态统一 set
 
     async def _execute_with_retry(self, node: Node, resolved_inputs: dict[str, Any]) -> NodeResult:
         """Run a node through its retry loop; returns the final ``NodeResult``."""
@@ -167,9 +170,6 @@ class PipeLineExecutor:
                     output=output, inputs=resolved_inputs, attempts=attempt + 1, duration_ms=duration_ms,
                     retry_history=retry_history or None,
                 )
-
-            except SuspendExecution:
-                raise
 
             except Exception as exc:
                 last_error = str(exc)
