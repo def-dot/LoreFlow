@@ -99,7 +99,7 @@ async def _fetch_page(url: str) -> dict[str, str]:
 @func(
     label="抓取链接正文",
     description="抓取一个或多个网页正文，返回 [{url, text}]",
-    metadata={"group": "网络", "order": 10},
+    metadata={"group": "基础", "order": 21},
 )
 async def web_fetch(params: WebFetchInput) -> WebFetchOutput:
     urls = [params.url] if isinstance(params.url, str) else list(params.url)
@@ -116,7 +116,7 @@ async def web_fetch(params: WebFetchInput) -> WebFetchOutput:
 @func(
     label="HTTP 请求",
     description="发送 HTTP 请求，返回状态码、响应头和响应体",
-    metadata={"group": "网络", "order": 20},
+    metadata={"group": "基础", "order": 22},
 )
 async def http_request(params: HttpRequestInput) -> HttpRequestOutput:
     method = (params.method or "GET").upper()
@@ -149,7 +149,7 @@ async def http_request(params: HttpRequestInput) -> HttpRequestOutput:
 @func(
     label="网络搜索",
     description="搜索互联网获取最新信息，返回搜索结果列表",
-    metadata={"group": "网络", "order": 30},
+    metadata={"group": "基础", "order": 23},
 )
 async def web_search(params: WebSearchInput) -> WebSearchOutput:
     api_key = os.environ.get("TAVILY_API_KEY")

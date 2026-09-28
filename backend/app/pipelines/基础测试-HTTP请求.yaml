@@ -1,0 +1,23 @@
+name: 基础测试-HTTP请求
+description: 发送 HTTP 请求 → 获取响应 → 输出结果。
+nodes:
+- name: task_a
+  type: http_request
+  label: HTTP 请求
+  inputs:
+    url: $params.url
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  type: end
+  inputs:
+    status_code: $task_a.status_code
+    body: $task_a.body
+params:
+  url:
+    required: true
+    type: text
+    label: 请求 URL
+    description: 例如 https://www.example.com
+
