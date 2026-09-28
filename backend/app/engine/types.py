@@ -21,6 +21,7 @@ class NodeStatus(StrEnum):
     UPSTREAM_FAILED = "upstream_failed"
     SKIPPED = "skipped"
     UPSTREAM_SKIPPED = "upstream_skipped"
+    UPSTREAM_REVIEWING = "upstream_reviewing"
     CANCELLED = "cancelled"
 
 

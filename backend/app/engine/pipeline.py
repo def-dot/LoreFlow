@@ -279,9 +279,11 @@ class Pipeline(BaseModel):
         )
         results = await executor.execute()
 
-        output = None
-        if self.end_node and results.get(self.end_node.name):
-            output = results[self.end_node.name].output.model_dump()
+        output = (
+            r.output.model_dump()
+            if self.end_node and (r := results.get(self.end_node.name)) and r.output
+            else None
+        )
 
         return results, output
 

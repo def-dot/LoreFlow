@@ -18,7 +18,7 @@ from app.core.logging import get_logger
 from app.engine import (
     Pipeline,
     NodeResult,
-    SuspendExecution,
+    NodeStatus,
 )
 from app.engine.pipeline import validate_inputs
 from app.models.run import RunRecord, RunStatus
@@ -47,17 +47,23 @@ async def run_pipeline(record: RunRecord) -> None:
     error: str | None = None
     output: dict[str, Any] | None = None
     try:
-        _, output = await pipeline.run(
+        results, output = await pipeline.run(
             inputs=record.inputs,
             on_event=on_event,
             resume=record.nodes,
         )
-        outcome = RunStatus.COMPLETED
+
+        if any(r.status == NodeStatus.REVIEWING for r in results.values()):
+            outcome = RunStatus.REVIEWING
+        elif failed := {name: results[name].error for name, r in results.items() if r.status == NodeStatus.FAILED}:
+            outcome = RunStatus.FAILED
+            error = f"{len(failed)} 个节点失败: {', '.join(failed)}"
+            error += "".join(f"\n  {name}: {err}" for name, err in failed.items() if err)
+        else:
+            outcome = RunStatus.COMPLETED
     except asyncio.CancelledError:
         outcome = RunStatus.CANCELLED
         error = "用户手动取消"
-    except SuspendExecution:
-        outcome = RunStatus.REVIEWING
     except Exception as exc:
         outcome = RunStatus.FAILED
         error = str(exc)
