@@ -9,7 +9,7 @@ from app.registry.types import func
 
 class PayloadItem(BaseModel):
     key: str = Field(description="字段标识（英文）")
-    label: str = Field(description="显示名称（中文）")
+    label: str | None = Field(default=None, description="显示名称（中文）")
     value: Any = Field(description="字段值")
 
 

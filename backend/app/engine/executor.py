@@ -163,7 +163,7 @@ class PipeLineExecutor:
                 )
 
             except Exception as exc:
-                last_error = str(exc)
+                last_error = str(exc) or f"{type(exc).__name__}"
                 if not retry.should_retry(exc, attempt):
                     logger.error("[%s] FAIL non-retryable: %s", node.name, last_error)
                     break

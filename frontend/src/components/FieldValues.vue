@@ -27,8 +27,9 @@ const rendered = computed<RenderedField[]>(() =>
     if (value === null || value === undefined) {
       return { ...field, kind: 'empty', text: '' }
     }
-    if (typeof value === 'string') {
-      return { ...field, kind: 'text', text: value }
+    // 简单值直接显示：字符串、数字、布尔
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return { ...field, kind: 'text', text: String(value) }
     }
     return { ...field, kind: 'json', text: JSON.stringify(value, null, 2) }
   }),

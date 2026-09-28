@@ -17,6 +17,14 @@ const emit = defineEmits<{
   decide: [node: string, approve: boolean, reason: string | null, values: Record<string, string> | null]
 }>()
 
+// 耗时计算：finished_at - created_at，单位毫秒
+const durationMs = computed(() => {
+  if (!props.detail.created_at) return null
+  const start = new Date(props.detail.created_at).getTime()
+  const end = props.detail.finished_at ? new Date(props.detail.finished_at).getTime() : Date.now()
+  return end - start
+})
+
 // 节点名 → 状态，供 MermaidDiagram 按状态给图里的节点上色
 const nodeStatuses = computed(() =>
   Object.fromEntries(Object.entries(props.detail.nodes).map(([name, node]) => [name, node.status])),
@@ -94,7 +102,9 @@ async function openDefinition() {
   <div class="detail">
     <div class="detail-head">
       <span class="run-name">{{ detail.name }}</span>
-      <span class="run-meta">#{{ detail.id }}<template v-if="detail.created_at"> · {{ detail.created_at }}</template></span>
+      <span class="run-meta">
+        #{{ detail.id }}<template v-if="durationMs != null"> · <span class="duration">耗时 {{ durationMs }}ms</span></template>
+      </span>
       <el-tag :type="statusTagType(detail.status)" size="small" disable-transitions>
         {{ detail.status === 'running' ? '运行中…' : statusLabel(detail.status) }}
       </el-tag>
@@ -171,6 +181,10 @@ async function openDefinition() {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-3);
+}
+.run-meta .duration {
+  color: var(--ink-2);
+  font-weight: 500;
 }
 /* 工作流名称（可点击） */
 .run-workflow {
