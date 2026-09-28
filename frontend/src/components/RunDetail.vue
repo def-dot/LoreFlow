@@ -23,7 +23,7 @@ const nodeStatuses = computed(() =>
 )
 
 // 待审批节点：run 状态为 reviewing 时，从节点快照筛出 status == "reviewing"
-// 的，payload（挂在 output 下）供审核卡片展示。状态门槛与后端 approve 路由
+// 的，payload（挂在 inputs 下）供审核卡片展示。状态门槛与后端 approve 路由
 // 对齐——挂起落库窗口期（节点已 reviewing、run 仍 running）不出可点卡片
 const reviewing = computed(() => {
   if (props.detail.status !== 'reviewing') return []
@@ -33,7 +33,7 @@ const reviewing = computed(() => {
       name,
       label: node.label || name,
       description: node.description ?? null,
-      payload: (node.output as { payload?: unknown } | null)?.payload,
+      payload: (node.inputs as { payload?: unknown } | null)?.payload,
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
 })

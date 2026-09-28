@@ -8,6 +8,7 @@ const STATUS_TAG_TYPE: Record<string, 'success' | 'warning' | 'danger' | 'info' 
   upstream_failed: 'danger', // 失败的爆炸半径：归失败色系
   skipped: 'info',
   upstream_skipped: 'info', // 跳过的级联半径：与条件跳过同为跳过色系
+  upstream_reviewing: 'warning', // 上游待审核：归审核色系
   cancelled: 'info',
   pending: 'info',
 }
@@ -26,6 +27,7 @@ const STATUS_LABEL: Record<string, string> = {
   upstream_failed: '上游失败',
   skipped: '已跳过',
   upstream_skipped: '上游跳过',
+  upstream_reviewing: '上游待审核',
   cancelled: '已取消',
   pending: '待执行',
 }

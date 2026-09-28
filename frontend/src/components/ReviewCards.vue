@@ -47,17 +47,34 @@ const cards = computed<ReviewCardModel[]>(() =>
     const payload = item.payload
     const raw = payloadText(payload)
     if (!isRecord(payload)) {
+      // human 节点：payload 直接是 [{key, label, value}, ...]
+      if (Array.isArray(payload) && payload.every((p: any) => isRecord(p) && 'key' in p)) {
+        return {
+          name: item.name, label: item.label, prompt: item.description,
+          fields: payload.map((p: any) => ({ key: p.key, label: p.label ?? p.key, value: p.value })),
+          raw, editable: false, source: payload,
+        }
+      }
       return { name: item.name, label: item.label, prompt: item.description, fields: null, raw, editable: false, source: payload }
     }
     const prompt = item.description
-    const labels = isRecord(payload._review) ? payload._review : {}
-    const fields: FieldValue[] = Object.keys(payload)
-      .filter((key) => key !== '_review')
-      .map((key) => ({
-        key,
-        label: labelOf(labels, key),
-        value: payload[key],
-      }))
+    let fields: FieldValue[] | null = null
+    let src: Record<string, unknown> = payload
+    // human 节点：payload.payload 是 [{key, label, value}, ...]
+    if (Array.isArray(payload.payload) && payload.payload.every((p: any) => isRecord(p) && 'key' in p)) {
+      fields = payload.payload.map((p: any) => ({ key: p.key, label: p.label ?? p.key, value: p.value }))
+    } else {
+      // 其他节点：平铺字段 + 可选 _review
+      src = isRecord(payload.payload) && isRecord(payload.labels) ? payload.payload : payload
+      const labels = isRecord(payload._review) ? payload._review : isRecord(payload.labels) ? payload.labels : {}
+      fields = Object.keys(src)
+        .filter((key) => key !== '_review')
+        .map((key) => ({
+          key,
+          label: labelOf(labels, key),
+          value: src[key],
+        }))
+    }
     return {
       name: item.name,
       label: item.label,
@@ -108,7 +125,7 @@ function approveCard(card: ReviewCardModel) {
     <!-- 非对象 payload 兜底：整体 JSON -->
     <pre v-else class="payload">{{ card.raw }}</pre>
 
-    <el-input v-model="reasons[card.name]" placeholder="拒绝原因（可选）" size="small" />
+    <el-input v-model="reasons[card.name]" placeholder="拒绝原因（可选）" type="textarea" :rows="2" size="small" class="reason-input" />
     <div class="buttons">
       <el-button
         type="success"
@@ -168,6 +185,9 @@ function approveCard(card: ReviewCardModel) {
   font-size: 11.5px;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+.reason-input {
+  margin-top: 10px;
 }
 .buttons {
   margin-top: 10px;

@@ -35,10 +35,4 @@ logger = logging.getLogger(__name__)
 )
 async def human(params: HumanParams) -> HumanOutput:
     """挂起等待人工审批。决策由 approve 端点直接写入节点快照。"""
-    payload_dict = {item.key: item.value for item in params.payload}
-    payload_display = {item.key: item.label for item in params.payload}
-
-    raise SuspendExecution(
-        "等待人工审批",
-        {"payload": payload_dict, "labels": payload_display},
-    )
+    raise SuspendExecution("等待人工审批")

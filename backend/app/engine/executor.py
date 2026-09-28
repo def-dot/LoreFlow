@@ -126,8 +126,8 @@ class PipeLineExecutor:
 
         except asyncio.CancelledError:
             result = NodeResult(node_name=node.name, status=NodeStatus.CANCELLED)
-        except SuspendExecution as exc:
-            result = NodeResult(node_name=node.name, status=NodeStatus.REVIEWING, output=exc.results)
+        except SuspendExecution:
+            result = NodeResult(node_name=node.name, status=NodeStatus.REVIEWING)
         except Exception as exc:
             logger.exception("Unexpected error in executor for %s", node.name)
             result = NodeResult(node_name=node.name, status=NodeStatus.FAILED, error=str(exc))
