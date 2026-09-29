@@ -194,10 +194,10 @@ class PipeLineExecutor:
     # Helpers
     # ------------------------------------------------------------------
 
-    async def _call(self, node: Node, resolved_inputs: dict[str, Any]) -> BaseModel:
+    async def _call(self, node: Node, resolved_inputs: dict[str, Any]) -> Any:
         func_def = REGISTRY[node.type]
 
-        coro = func_def.func(func_def.input_schema(**resolved_inputs)) if func_def.input_schema else func_def.func()
+        coro = func_def.invoke(resolved_inputs)
 
         if node.timeout is not None:
             output = await asyncio.wait_for(coro, timeout=node.timeout)

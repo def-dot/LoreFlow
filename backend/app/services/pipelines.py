@@ -45,8 +45,8 @@ def detail_from_config(raw: str) -> dict[str, Any]:
         node_type = REGISTRY.get(node_cfg.type)
         row["type_label"] = node_type.label if node_type else None
         row["type_description"] = node_type.description if node_type else None
-        row["type_input_schema"] = node_type.input_schema.model_json_schema() if node_type and node_type.input_schema else None
-        row["type_output_schema"] = node_type.output_schema.model_json_schema() if node_type and node_type.output_schema else None
+        row["type_input_schema"] = node_type.json_input_schema() if node_type else None
+        row["type_output_schema"] = node_type.json_output_schema() if node_type else None
         rows.append(row)
 
     return {

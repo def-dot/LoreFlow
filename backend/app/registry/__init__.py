@@ -1,6 +1,4 @@
 """
-app.registry
-~~~~~~~~~~~~
 统一注册表，提供 FuncDef 数据类和两个顶层 Registry。
 
 设计原则

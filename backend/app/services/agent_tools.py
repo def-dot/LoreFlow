@@ -34,7 +34,7 @@ async def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
 
 def _tooldef_to_openai(td: FuncDef) -> dict[str, Any]:
     """FuncDef → OpenAI function calling 格式。"""
-    schema = td.input_schema.model_json_schema() if td.input_schema else {"type": "object", "properties": {}}
+    schema = td.json_input_schema() or {"type": "object", "properties": {}}
     return {
         "type": "function",
         "function": {"name": td.name, "description": td.description, "parameters": schema},
@@ -87,7 +87,7 @@ async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
     status = "success"
     if td is not None:
         try:
-            output = await td.func(td.input_schema(**args))
+            output = await td.invoke(args)
         except Exception as exc:
             output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
             status = "error"

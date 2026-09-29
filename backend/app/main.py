@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
+
 from app.registry.plugins import load_plugins
 from app.registry.skills import discover_skills
 from app.routers import (
@@ -41,6 +43,7 @@ from app.services import orchestrator
 from app.services.mcp_client import init_mcp, shutdown_mcp
 from app.services.project_assistant import ensure_project_assistant
 
+load_dotenv()
 setup_logging()
 logger = get_logger(__name__)
 

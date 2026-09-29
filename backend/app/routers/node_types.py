@@ -21,8 +21,8 @@ async def list_node_types() -> list[NodeTypeOut]:
             label=t.label,
             description=t.description,
             metadata=t.metadata,
-            input_schema=t.input_schema.model_json_schema() if t.input_schema else None,
-            output_schema=t.output_schema.model_json_schema() if t.output_schema else None,
+            input_schema=t.json_input_schema(),
+            output_schema=t.json_output_schema(),
         )
         for t in sorted_types
     ]

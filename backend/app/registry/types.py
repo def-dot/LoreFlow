@@ -27,15 +27,46 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FuncDef:
-    """一个可被 YAML 引用或 LLM 调用的函数定义。"""
+    """一个可被 YAML 引用或 LLM 调用的函数定义。
+
+    ``input_schema`` / ``output_schema`` 二选一（一份签名，只取一种形态）：
+    - ``type[BaseModel]`` — 本地 ``@func`` 从签名推导的模型
+    - ``dict[str, Any]`` — JSON Schema 原文（如 MCP ``inputSchema`` / ``outputSchema``），无损透传
+    """
 
     name: str
     func: Callable[..., Any]
     label: str = ""
     description: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
-    input_schema: type[BaseModel] | None = None
-    output_schema: type[BaseModel] | None = None
+    input_schema: type[BaseModel] | dict[str, Any] | None = None
+    output_schema: type[BaseModel] | dict[str, Any] | None = None
+
+    def json_input_schema(self) -> dict[str, Any] | None:
+        """对外 JSON Schema（LLM tools / 前端表单）。无输入声明时返回 ``None``。
+
+        dict 形态原样透传（无损）；模型形态由 pydantic 导出。
+        """
+        s = self.input_schema
+        if isinstance(s, dict):
+            return s
+        return s.model_json_schema() if s is not None else None
+
+    def json_output_schema(self) -> dict[str, Any] | None:
+        """对外输出 JSON Schema。无输出声明时返回 ``None``。"""
+        s = self.output_schema
+        if isinstance(s, dict):
+            return s
+        return s.model_json_schema() if s is not None else None
+
+    async def invoke(self, args: dict[str, Any]) -> Any:
+        """统一调用入口：模型形态传实例，dict 形态拆 kwargs，无声明则无参调用。"""
+        s = self.input_schema
+        if isinstance(s, dict):
+            return await self.func(**args)
+        if s is not None:
+            return await self.func(s(**args))
+        return await self.func()
 
 
 # ---------------------------------------------------------------------------

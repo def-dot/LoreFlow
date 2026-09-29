@@ -156,48 +156,33 @@ class Node(BaseModel):
 
     @model_validator(mode="after")
     def _validate_and_coerce_inputs(self) -> Node:
-        """inputs 校验（必填 + 未知参数检查，$引用不做类型校验）。"""
+        """inputs 校验（必填 + 未知参数检查）。"""
         if self.inputs is None:
             return self
 
-        schema = self.resolve_input_schema()
+        func_def = REGISTRY.get(self.type)
+        if func_def is None:
+            return self
+
+        schema = func_def.json_input_schema()
         if schema is None:
             return self
 
-        fields = schema.model_fields
-        missing = [k for k, f in fields.items() if f.is_required() and k not in self.inputs]
+        required = schema.get("required") or []
+        known = set(schema.get("properties") or {})
+        allow_extra = bool(schema.get("additionalProperties", True))
+
         msgs = []
+        missing = [k for k in required if k not in self.inputs]
         if missing:
             msgs.append(f"缺少必填参数 {missing}")
-        if schema.model_config.get("extra") != "allow":
-            unknown = set(self.inputs) - set(fields)
+        if not allow_extra:
+            unknown = set(self.inputs) - known
             if unknown:
                 msgs.append(f"包含未知参数 {unknown}")
         if msgs:
             raise ValueError("inputs " + ", ".join(msgs))
         return self
-
-    def resolve_input_schema(self) -> type[BaseModel] | None:
-        """返回本节点的输入 schema（来自 REGISTRY）。"""
-        func_def = REGISTRY.get(self.type)
-        return func_def.input_schema if func_def else None
-
-    def resolve_output_schema(self) -> type[BaseModel] | None:
-        """返回本节点的输出 schema。
-
-        优先用 REGISTRY 中的 ``output_schema``；
-        没有则从 ``self.inputs`` 的 key 动态生成；
-        都没有返回 ``None``（不校验字段）。
-        """
-        from pydantic import create_model
-
-        func_def = REGISTRY.get(self.type)
-        if func_def and func_def.output_schema is not None:
-            return func_def.output_schema
-        if self.inputs:
-            fields: dict[str, Any] = {k: (Any, None) for k in self.inputs}
-            return create_model(f"DynamicOutput_{self.type}", **fields)
-        return None
 
     def __repr__(self) -> str:
         deps = ",".join(self.depends_on) if self.depends_on else "root"

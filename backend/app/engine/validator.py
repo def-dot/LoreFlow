@@ -148,9 +148,13 @@ def _iter_ref_errors(
     if not field:
         yield f"引用 {root!r} 缺少字段名"
         return
-    up_node = nodes_dict.get(root)
-    out_schema = up_node.resolve_output_schema()
+    from app.registry import REGISTRY
+
+    node = nodes_dict.get(root)
+    func_def = REGISTRY.get(node.type) if node else None
+    out_schema = func_def.json_output_schema() if func_def else None
     if out_schema is not None:
         top_field = field.split(".")[0]
-        if top_field not in out_schema.model_fields:
+        known = set(out_schema.get("properties") or {})
+        if known and top_field not in known:
             yield f"引用的 {root!r} 输出中没有字段 {top_field!r}"
