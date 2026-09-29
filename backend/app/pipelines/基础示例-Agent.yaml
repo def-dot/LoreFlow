@@ -26,4 +26,4 @@ params:
     required: true
     type: paragraph
     label: 用户问题
-    description: 例如「今天北京天气怎么样」「帮我算 123 * 456」
+    description: 例如「今天北京天气怎么样」

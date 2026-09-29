@@ -1,23 +1,27 @@
 name: 基础示例-HTTP请求
-description: 发送 HTTP 请求 → 获取响应 → 输出结果。
+description: LLM 根据问题自动决定是否调用搜索或计算工具。
 nodes:
-- name: task_a
-  type: http_request
-  label: HTTP 请求
+- name: chat
+  type: llm_chat
+  label: 智能回答
   inputs:
-    url: $params.url
+    prompt: $params.prompt
+    system: '你是一个简洁的助手。
+
+      不需要工具就能回答的问题直接回复；需要搜索或计算时调用工具，拿到结果后再总结回答。
+      '
+    tools:
+    - web_search
+    - run_code
 - name: __end__
   label: 输出
   depends_on:
-  - task_a
+  - chat
   type: end
   inputs:
-    status_code: $task_a.status_code
-    body: $task_a.body
+    answer: $chat.content
 params:
-  url:
+  prompt:
     required: true
-    type: text
-    label: 请求 URL
-    description: 例如 https://www.example.com
-
+    type: paragraph
+    label: 问题

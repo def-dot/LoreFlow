@@ -54,9 +54,12 @@ async def agent(params: AgentParams) -> AgentOutput:
     messages.append({"role": "user", "content": "\n\n".join(parts)})
 
     # --- 技能目录 + system prompt 注入首条 ---
-    if params.system or params.skills:
+    system_content = params.system or ""
+    if params.skills:
         skill_prompt = build_skill_prompt(params.skills) or ""
-        system_content = (params.system or "") + "\n\n" + skill_prompt
+        system_content += "\n\n" + skill_prompt
+    
+    if system_content:
         messages.insert(0, {"role": "system", "content": system_content.strip()})
 
     # --- 构建工具列表（有 skills 时自动注入 load_skill）---
@@ -82,6 +85,8 @@ async def agent(params: AgentParams) -> AgentOutput:
             break
 
         tool_results = [await execute_tool_call(tc) for tc in tool_calls]
+        for tr in tool_results:
+            logger.info("[agent] tool %s -> %s: %s", tr["tool_name"], tr["status"], tr["output"])
 
         messages.append({
             "role": "assistant",
@@ -92,7 +97,7 @@ async def agent(params: AgentParams) -> AgentOutput:
             messages.append({
                 "role": "tool",
                 "tool_call_id": tr["tool_call_id"],
-                "content": f"[{tr['tool_name']}] {tr['output']}",
+                "content": tr["output"],
             })
     else:
         logger.warning("[agent] max iterations (%d) reached", max_iter)

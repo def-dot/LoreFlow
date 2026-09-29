@@ -3,14 +3,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any
-
-import yaml
-
-from pydantic import Field, create_model
 
 from app.registry.types import TOOL_REGISTRY, FuncDef
 from app.registry.skills import SKILL_REGISTRY
@@ -18,107 +13,23 @@ from app.registry.skills import SKILL_REGISTRY
 
 logger = logging.getLogger(__name__)
 
-# Pipeline 轮询等待参数
-_PIPELINE_POLL_INTERVAL = 2.0   # 秒
-_PIPELINE_POLL_TIMEOUT = 300.0  # 5 分钟
-
 
 async def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
-    """构建 OpenAI 格式工具列表。['*'] → 全部，[] → 无。
-
-    Pipeline 名称不在 TOOL_REGISTRY 中时，动态包装为工具。
-    '*' 通配符不包含 pipeline（需显式选择）。
-    """
+    """构建 OpenAI 格式工具列表。['*'] → 全部，[] → 无。"""
     select_all = "*" in tools_input
     tool_names = list(TOOL_REGISTRY) if select_all else tools_input
     if not tool_names and not select_all:
         return None
 
     result: list[dict[str, Any]] = []
-
     for name in tool_names:
         td = TOOL_REGISTRY.get(name)
         if td is not None:
             result.append(_tooldef_to_openai(td))
-            continue
-        # 尝试 pipeline
-        ptd = await _resolve_pipeline_tool(name)
-        if ptd is not None:
-            result.append(_tooldef_to_openai(ptd))
         else:
             logger.warning("未知工具：%s", name)
 
     return result or None
-
-
-# ---------------------------------------------------------------------------
-# Pipeline → FuncDef 动态包装
-# ---------------------------------------------------------------------------
-
-
-async def _resolve_pipeline_tool(name: str) -> FuncDef | None:
-    """如果 name 匹配一个 pipeline，返回包装后的 FuncDef；否则 None。"""
-    from app.services import pipelines as pipelines_service
-
-    rec = await pipelines_service.get_pipeline_by_name(name)
-    if rec is None:
-        return None
-    config = yaml.safe_load(rec.definition)
-
-    description = config.get("description") or f"执行工作流 {name}"
-    description = f"[workflow] {description}"
-    params_cfg: dict[str, Any] = config.get("inputs") or {}
-
-    _TYPE_MAP = {"string": str, "integer": int, "number": float, "boolean": bool, "list": list, "object": dict}
-    fields: dict[str, Any] = {}
-    for pname, spec in params_cfg.items():
-        if not isinstance(spec, dict):
-            continue
-        ann = _TYPE_MAP.get(spec.get("type", "string"), str)
-        desc = spec.get("description", "")
-        if spec.get("required", True):
-            fields[pname] = (ann, Field(description=desc))
-        else:
-            fields[pname] = (ann, Field(default=None, description=desc))
-    input_model = create_model(f"{name}Input", **fields) if fields else None
-
-    async def _pipeline_wrapper(**kwargs: Any) -> str:
-        return await _execute_pipeline(name, kwargs)
-
-    _pipeline_wrapper.__name__ = name
-    return FuncDef(name=name, func=_pipeline_wrapper, description=description, input_schema=input_model)
-
-
-async def _execute_pipeline(pipeline_name: str, inputs: dict[str, Any]) -> str:
-    """执行一个 pipeline 并等待结果，返回摘要文本。"""
-    from app.models.run import RunStatus
-    from app.services import runs
-    from app.services.orchestrator import create_run
-
-    run_id = await create_run(pipeline=pipeline_name, inputs=inputs)
-    logger.info("[pipeline-tool] started run %d for %s", run_id, pipeline_name)
-
-    elapsed = 0.0
-    while elapsed < _PIPELINE_POLL_TIMEOUT:
-        await asyncio.sleep(_PIPELINE_POLL_INTERVAL)
-        elapsed += _PIPELINE_POLL_INTERVAL
-        record = await runs.get_run(run_id)
-        if record is None:
-            return json.dumps({"run_id": run_id, "error": "运行记录不存在"}, ensure_ascii=False)
-        if record.status in runs.TERMINAL_STATUSES:
-            if record.status == RunStatus.COMPLETED:
-                output = record.output if record.output else "(无输出)"
-                if isinstance(output, dict):
-                    output = json.dumps(output, ensure_ascii=False, default=str)
-                return str(output)
-            else:
-                return json.dumps({
-                    "run_id": run_id,
-                    "status": record.status.value,
-                    "error": record.error or "未知错误",
-                }, ensure_ascii=False)
-
-    return json.dumps({"run_id": run_id, "error": "执行超时（5分钟）"}, ensure_ascii=False)
 
 
 def _tooldef_to_openai(td: FuncDef) -> dict[str, Any]:
@@ -176,26 +87,18 @@ async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
     status = "success"
     if td is not None:
         try:
-            output = await td.func(**args)
+            output = await td.func(td.input_schema(**args))
         except Exception as exc:
             output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
             status = "error"
     else:
-        ptd = await _resolve_pipeline_tool(name)
-        if ptd is not None:
-            try:
-                output = await ptd.func(**args)
-            except Exception as exc:
-                output = f"工作流 {name} 执行失败：{type(exc).__name__}: {exc}"
-                status = "error"
-        else:
-            output = f"未知工具：{name}"
-            status = "error"
+        output = f"未知工具：{name}"
+        status = "error"
 
     return {
         "tool_call_id": tc.get("id", ""),
         "tool_name": name,
         "arguments": args,
-        "output": str(output),
+        "output": json.dumps(output.model_dump(), ensure_ascii=False) if hasattr(output, 'model_dump') else str(output),
         "status": status,
     }
