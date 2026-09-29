@@ -1,0 +1,47 @@
+name: 基础测试-条件
+description: 演示 condition 条件表达式
+nodes:
+- name: router
+  type: code
+  label: 路由
+  inputs:
+    script: |
+      def main(level: str):
+          return {"level": level}
+    params:
+      level: $params.level
+- name: vip_flow
+  type: code
+  label: VIP分支
+  depends_on:
+  - router
+  condition: $router.result.level == vip
+  inputs:
+    script: |
+      def main():
+          return "走 VIP 通道"
+- name: normal_flow
+  type: code
+  label: 普通分支
+  depends_on:
+  - router
+  condition: $router.result.level != vip
+  inputs:
+    script: |
+      def main():
+          return "走普通通道"
+- name: __end__
+  label: 输出
+  depends_on:
+  - vip_flow
+  - normal_flow
+  type: end
+  inputs:
+    vip: $vip_flow.result
+    normal: $normal_flow.result
+params:
+  level:
+    required: true
+    label: 用户等级
+    type: text
+    description: 填 vip 走 VIP 分支，其他值走普通分支
