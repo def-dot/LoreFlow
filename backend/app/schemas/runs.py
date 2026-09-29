@@ -34,7 +34,7 @@ class RunListResponse(BaseModel):
 class RunDetail(BaseModel):
     id: int
     name: str = ""
-    pipeline_id: int = 0
+    pipeline_id: int | None = None
     pipeline_name: str = ""
     created_at: datetime | None = None
     finished_at: datetime | None = None

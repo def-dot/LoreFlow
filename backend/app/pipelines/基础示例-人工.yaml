@@ -1,4 +1,4 @@
-name: 基础测试-人工
+name: 基础示例-人工
 description: 输入内容 → 人工审批 → 输出审核结果。
 nodes:
 - name: task_a

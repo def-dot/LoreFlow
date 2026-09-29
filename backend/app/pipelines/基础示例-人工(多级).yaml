@@ -1,4 +1,4 @@
-name: 基础测试-人工（多级）
+name: 基础示例-人工（多级）
 description: 输入内容 → 初审  → 终审 → 输出审核结果。
 nodes:
 - name: task_a

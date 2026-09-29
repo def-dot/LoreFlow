@@ -1,4 +1,4 @@
-name: 基础测试-条件
+name: 基础示例-条件
 description: 演示 condition 条件表达式
 nodes:
 - name: router

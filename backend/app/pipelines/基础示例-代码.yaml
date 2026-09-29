@@ -1,4 +1,4 @@
-name: 基础测试-代码
+name: 基础示例-代码
 description: 输入两个数字 → 加法计算 → 输出结果。
 nodes:
 - name: task_a

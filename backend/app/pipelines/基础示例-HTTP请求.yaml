@@ -1,4 +1,4 @@
-name: 基础测试-HTTP请求
+name: 基础示例-HTTP请求
 description: 发送 HTTP 请求 → 获取响应 → 输出结果。
 nodes:
 - name: task_a

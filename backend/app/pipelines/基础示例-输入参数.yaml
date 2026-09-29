@@ -46,7 +46,9 @@ params:
     type: paragraph
     label: 多行文本
     description: type=paragraph，提交字符串（textarea）
-    default: 第一行
+    default: |-
+      第一行
+      第二行
   number:
     type: number
     label: 数字

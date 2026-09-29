@@ -1,4 +1,4 @@
-name: 基础测试-重试（失败）
+name: 基础示例-重试（失败）
 description: 节点持续失败，重试耗尽后最终失败。
 nodes:
 - name: task_a

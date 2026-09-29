@@ -1,4 +1,4 @@
-name: 基础测试-并行
+name: 基础示例-并行
 description: 两个节点同时执行，互不依赖。
 nodes:
 - name: task_a

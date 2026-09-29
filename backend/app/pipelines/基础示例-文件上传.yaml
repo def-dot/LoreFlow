@@ -1,4 +1,4 @@
-name: 基础测试-文件上传
+name: 基础示例-文件上传
 description: 上传文件，读取文件内容。
 nodes:
 - name: task_a

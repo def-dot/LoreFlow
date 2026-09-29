@@ -1,4 +1,4 @@
-name: 基础测试-自定义插件
+name: 基础示例-自定义插件
 description: 使用自定义插件发送邮件通知。
 nodes:
 - name: task_a

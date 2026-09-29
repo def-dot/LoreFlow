@@ -1,4 +1,4 @@
-name: 基础测试-LLM-CLASSIFY
+name: 基础示例-LLM-CLASSIFY
 description: llm_classify 意图识别示例：将用户输入分类为 praise / complaint / question，输出对应标签。
 nodes:
 - name: classify

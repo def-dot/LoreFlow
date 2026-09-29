@@ -1,4 +1,4 @@
-name: 基础测试-串行
+name: 基础示例-串行
 description: 三个节点依次执行，演示 depends_on 串联用法。
 nodes:
 - name: task_a
