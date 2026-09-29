@@ -1,0 +1,28 @@
+name: 基础测试-输入参数(选项)
+description: 下拉选项输入参数示例，按所选语言输出对应问候语。
+nodes:
+- name: greet
+  type: code
+  label: 生成问候
+  inputs:
+    script: "def main(lang):\n    texts = {'中文': '你好！', 'English': 'Hello!', '日本語': 'こんにちは！'}\n    return texts.get(lang, f'未知选项: {lang}')\n"
+    params:
+      lang: $params.lang
+- name: __end__
+  label: 输出
+  depends_on:
+  - greet
+  type: end
+  inputs:
+    result: $greet.result
+params:
+  lang:
+    required: true
+    type: select
+    label: 语言
+    description: 选择问候语使用的语言
+    options:
+    - 中文
+    - English
+    - 日本語
+    default: 中文

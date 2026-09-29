@@ -7,7 +7,7 @@ nodes:
   inputs:
     script: |
       def main(level: str):
-          return {"level": level}
+          return level
     params:
       level: $params.level
 - name: vip_flow
@@ -15,7 +15,7 @@ nodes:
   label: VIP分支
   depends_on:
   - router
-  condition: $router.result.level == vip
+  condition: $router.result == vip
   inputs:
     script: |
       def main():
@@ -25,7 +25,7 @@ nodes:
   label: 普通分支
   depends_on:
   - router
-  condition: $router.result.level != vip
+  condition: $router.result != vip
   inputs:
     script: |
       def main():
