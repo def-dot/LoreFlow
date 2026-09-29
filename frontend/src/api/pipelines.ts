@@ -27,7 +27,7 @@ export interface ParamSpec {
   default?: unknown
   required?: boolean
   type?: ParamType        // 参数类型（未声明时退化为 text）
-  options?: string[]      // type=select 时的选项列表
+  options?: string[]      // type=select/checkbox 时的选项列表
   multiline?: boolean     // 多行文本（渲染 textarea，如文章正文）— 旧版兼容
   file?: boolean          // 文件上传（渲染上传控件）— 旧版兼容
 }

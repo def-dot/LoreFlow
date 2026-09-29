@@ -1,0 +1,21 @@
+name: 基础测试-LLM-CHAT
+description: 最简单的 llm_chat 用法：用户提问，LLM 直接回答。
+nodes:
+- name: answer
+  type: llm_chat
+  label: LLM回答
+  inputs:
+    prompt: $params.prompt
+    system: 你是一个 helpful assistant，用简洁的中文回答。
+- name: __end__
+  label: 输出
+  depends_on:
+  - answer
+  type: end
+  inputs:
+    result: $answer.content
+params:
+  prompt:
+    required: true
+    type: paragraph
+    label: 用户问题

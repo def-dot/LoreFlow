@@ -283,7 +283,7 @@ nodes:
     description: 用户输入的问题  # [可选] 表单提示说明
     type: text                 # [可选] 参数类型，默认 text，见下表
     default: 你好               # [可选] 默认值
-    options:                   # [可选] type=select 时的可选值
+    options:                   # [可选] type=select/checkbox 时的可选值
       - 选项1
       - 选项2</pre>
         <span class="type-label">参数类型</span>
@@ -291,8 +291,8 @@ nodes:
           <span class="cond-item"><code>text</code> 单行文本</span>
           <span class="cond-item"><code>paragraph</code> 多行文本</span>
           <span class="cond-item"><code>number</code> 数字</span>
-          <span class="cond-item"><code>select</code> 下拉选项</span>
-          <span class="cond-item"><code>checkbox</code> 复选框</span>
+          <span class="cond-item"><code>select</code> 下拉单选</span>
+          <span class="cond-item"><code>checkbox</code> 多选选项</span>
           <span class="cond-item"><code>file</code> 单文件上传</span>
           <span class="cond-item"><code>file_list</code> 多文件上传</span>
         </div>

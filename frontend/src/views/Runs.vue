@@ -41,11 +41,12 @@ const multiFileNames = ref<Record<string, string[]>>({})
 const uploading = ref<Record<string, boolean>>({})
 // number 参数的原始值（el-input-number 需要 number | undefined）
 const numberValues = ref<Record<string, number | undefined>>({})
-// checkbox 参数的布尔值
-const checkboxValues = ref<Record<string, boolean>>({})
+// select 参数的单选值（标量字符串）
+const selectValues = ref<Record<string, string | null>>({})
+// checkbox 参数的多选值（已选选项名列表）
+const checkboxValues = ref<Record<string, string[]>>({})
 // 动态选项（按参数名自动从 API 加载）
 const dynamicOptions = ref<Record<string, { name: string; description: string }[]>>({})
-const selectedOptions = ref<Record<string, string[]>>({})
 // 声明了 params 的流水线默认表单模式；未声明的只有 JSON 文本
 const jsonMode = ref(false)
 
@@ -122,17 +123,25 @@ watch(
         .filter((s) => resolveParamType(s) === 'number' && s.default != null && typeof s.default === 'number')
         .map((s) => [s.name, s.default as number]),
     )
-    // checkbox 参数预填
+    // checkbox 参数预填（数组原样；标量包成单元素）
     checkboxValues.value = Object.fromEntries(
       paramSpecs.value
-        .filter((s) => resolveParamType(s) === 'checkbox' && s.default != null && typeof s.default === 'boolean')
-        .map((s) => [s.name, s.default as boolean]),
+        .filter((s) => resolveParamType(s) === 'checkbox')
+        .map((s) => {
+          const d = s.default
+          const val = d == null ? [] : Array.isArray(d) ? d.map(String) : [String(d)]
+          return [s.name, val]
+        }),
     )
-    // select 参数预填（单选取第一个 default，多选取 default 数组）
-    selectedOptions.value = Object.fromEntries(
+    // select 参数预填（标量；误写成数组时取第一个）
+    selectValues.value = Object.fromEntries(
       paramSpecs.value
-        .filter((s) => resolveParamType(s) === 'select' && s.default != null)
-        .map((s) => [s.name, Array.isArray(s.default) ? s.default : [s.default]]),
+        .filter((s) => resolveParamType(s) === 'select')
+        .map((s) => {
+          const d = s.default
+          const val = d == null ? null : Array.isArray(d) ? (d[0] == null ? null : String(d[0])) : String(d)
+          return [s.name, val]
+        }),
     )
     fileNames.value = {}
     uploadRefs.value = {}
@@ -142,10 +151,10 @@ watch(
   },
 )
 
-// 已知的动态选项源：参数名 → fetcher
+// 已知的动态选项源：参数名 → fetcher（前置「*」= 全部，与 agent 的通配语义一致）
 const DYNAMIC_OPTION_FETCHERS: Record<string, () => Promise<{ items: { name: string; description: string }[] }>> = {
-  skills: async () => ({ items: await listSkills() }),
-  tools: async () => ({ items: await listTools() }),
+  skills: async () => ({ items: [{ name: '*', description: '全部' }, ...(await listSkills())] }),
+  tools: async () => ({ items: [{ name: '*', description: '全部' }, ...(await listTools())] }),
 }
 
 // 按参数名自动匹配：名字命中的自动拉取选项列表
@@ -210,12 +219,12 @@ const formInputs = computed(() => {
         break
       }
       case 'checkbox': {
-        value[spec.name] = checkboxValues.value[spec.name] ?? null
+        const selected = checkboxValues.value[spec.name]
+        value[spec.name] = selected?.length ? selected : null
         break
       }
       case 'select': {
-        const selected = selectedOptions.value[spec.name]
-        value[spec.name] = selected?.length ? selected : null
+        value[spec.name] = selectValues.value[spec.name] ?? null
         break
       }
       case 'paragraph': {
@@ -703,14 +712,12 @@ onUnmounted(() => {
                   style="width: 100%"
                 />
 
-                <!-- select: 下拉选项 -->
+                <!-- select: 下拉单选 -->
                 <el-select
                   v-else-if="resolveParamType(spec) === 'select'"
-                  v-model="selectedOptions[spec.name]"
-                  multiple
+                  v-model="selectValues[spec.name]"
+                  clearable
                   filterable
-                  collapse-tags
-                  collapse-tags-tooltip
                   placeholder="请选择"
                   size="small"
                   style="width: 100%"
@@ -738,12 +745,36 @@ onUnmounted(() => {
                   </template>
                 </el-select>
 
-                <!-- checkbox: 复选框 -->
-                <el-checkbox
+                <!-- checkbox: 多选选项 -->
+                <el-checkbox-group
                   v-else-if="resolveParamType(spec) === 'checkbox'"
                   v-model="checkboxValues[spec.name]"
-                  size="small"
-                />
+                  class="param-checkbox-group"
+                >
+                  <!-- 动态选项（skills/tools） -->
+                  <template v-if="spec.name in DYNAMIC_OPTION_FETCHERS">
+                    <el-checkbox
+                      v-for="opt in (dynamicOptions[spec.name] ?? [])"
+                      :key="opt.name"
+                      :value="opt.name"
+                      size="small"
+                    >
+                      <span>{{ opt.name }}</span>
+                      <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
+                    </el-checkbox>
+                  </template>
+                  <!-- 静态选项（YAML options 声明） -->
+                  <template v-else>
+                    <el-checkbox
+                      v-for="opt in (spec.options ?? [])"
+                      :key="opt"
+                      :value="opt"
+                      size="small"
+                    >
+                      {{ opt }}
+                    </el-checkbox>
+                  </template>
+                </el-checkbox-group>
 
                 <!-- paragraph: 多行文本 -->
                 <el-input
@@ -988,6 +1019,15 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+/* checkbox 参数：选项过多时纵向滚动，避免撑爆弹层 */
+.param-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
 }
 .option-desc {
   display: inline-block;

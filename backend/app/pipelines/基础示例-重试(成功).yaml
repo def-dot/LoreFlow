@@ -1,4 +1,4 @@
-name: 基础测试-重试（成功）
+name: 基础示例-重试（成功）
 description: 随机失败触发重试，最终成功。
 nodes:
 - name: task_a

@@ -1,0 +1,26 @@
+name: 基础测试-LLM-CLASSIFY
+description: llm_classify 意图识别示例：将用户输入分类为 praise / complaint / question，输出对应标签。
+nodes:
+- name: classify
+  type: llm_classify
+  label: 意图识别
+  inputs:
+    prompt: $params.prompt
+    classify_labels:
+    - praise
+    - complaint
+    - question
+    classify_system: 你是意图分类器，只允许输出 praise、complaint、question 三个单词之一，禁止输出其他内容。
+- name: __end__
+  label: 输出
+  depends_on:
+  - classify
+  type: end
+  inputs:
+    intent: $classify.intent
+    raw: $classify.raw
+params:
+  prompt:
+    required: true
+    type: paragraph
+    label: 待分类文本

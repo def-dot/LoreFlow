@@ -32,8 +32,8 @@ class ParamType(str, enum.Enum):
     TEXT = "text"            # 单行文本
     PARAGRAPH = "paragraph"  # 多行文本（textarea）
     NUMBER = "number"        # 数字
-    SELECT = "select"        # 下拉选项
-    CHECKBOX = "checkbox"    # 复选框
+    SELECT = "select"        # 下拉单选（提交标量字符串）
+    CHECKBOX = "checkbox"    # 多选选项（提交字符串列表）
     FILE = "file"            # 单文件
     FILE_LIST = "file_list"  # 文件列表
 
@@ -48,7 +48,7 @@ class InputParamDef(BaseModel):
     label: str | None = None
     description: str | None = None
     type: ParamType = ParamType.TEXT
-    options: list[str] | None = None  # type=select 时的选项列表
+    options: list[str] | None = None  # type=select/checkbox 时的选项列表
 
 
 def validate_inputs(

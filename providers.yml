@@ -1,4 +1,4 @@
-default_model: mimo:mimo-v2.5-pro
+default_model: mimo:mimo-v2.6-pro
 
 embedding:
   provider: ollama
@@ -17,5 +17,6 @@ mimo:
   base_url: https://token-plan-cn.xiaomimimo.com/v1
   api_key: tp-ca8urd0ekskqst4n95vd1l2p06ldbth4f8okziv2ha9ltmgv
   models:
+    - mimo-v2.6-pro
     - mimo-v2.5-pro
     - mimo-v2-lite

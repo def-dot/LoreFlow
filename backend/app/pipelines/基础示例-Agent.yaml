@@ -1,0 +1,29 @@
+name: 基础测试-Agent
+description: 演示 agent 节点最简用法 —— LLM 根据问题自主决定是否调用工具，循环执行直到给出答案。
+nodes:
+- name: agent
+  type: agent
+  label: 智能代理
+  description: 自主判断是否调用工具，闲聊直接回复，需要时调用工具后再总结
+  inputs:
+    system: '你是一个简洁的助手。
+
+      不需要工具就能回答的问题直接回复；需要搜索或计算时调用工具，拿到结果后再总结回答。'
+    prompt: $params.prompt
+    tools:
+    - web_search
+    max_iterations: 5
+  timeout: 120
+- name: __end__
+  label: 最终输出
+  depends_on:
+  - agent
+  type: end
+  inputs:
+    answer: $agent.content
+params:
+  prompt:
+    required: true
+    type: paragraph
+    label: 用户问题
+    description: 例如「今天北京天气怎么样」「帮我算 123 * 456」
