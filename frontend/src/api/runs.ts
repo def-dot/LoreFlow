@@ -56,7 +56,7 @@ export interface RunFilters {
   pipeline: string
 }
 
-export function listRuns(offset = 0, limit = 50, filters?: RunFilters): Promise<RunListPage> {
+export function listRuns(offset = 0, limit = 5, filters?: RunFilters): Promise<RunListPage> {
   const params: Record<string, string> = { offset: String(offset), limit: String(limit) }
   if (filters?.status) params.status = filters.status
   if (filters?.pipeline) params.pipeline = filters.pipeline

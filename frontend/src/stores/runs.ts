@@ -6,10 +6,15 @@ import type { RunDetail, RunListItem } from '@/api/runs'
  * run 列表与详情状态。轮询定时器由视图层管理（Runs.vue），
  * 这里只负责取数（沿用旧 index.html 的两路 1s 轮询语义）。
  */
+const PAGE_SIZE = 50
+
 export const useRunsStore = defineStore('runs', {
   state: () => ({
     runs: [] as RunListItem[],
     total: 0,
+    // 下一页 offset：独立于 runs.length —— 翻页间隙有新 run 插入时，
+    // 去重后 length 不涨，若拿它当 offset 会反复请求同一页
+    offset: 0,
     // 列表筛选（'' = 不筛）；total 语义为筛选后总数
     filters: { status: '', pipeline: '' },
     // 全局执行计数（后端 summary，不受筛选影响）：轮询与电流的真值来源
@@ -30,23 +35,24 @@ export const useRunsStore = defineStore('runs', {
 
   actions: {
     async fetchRuns() {
-      // 刷新（含 1s 轮询）：按已加载数量取数，避免每次只拿第一页
-      // 把「加载更多」拿到的旧页冲掉；500 为后端单次 limit 上限
-      const limit = Math.min(Math.max(50, this.runs.length), 500)
-      const data = await listRuns(0, limit, this.filters)
-      // 原地更新避免数组引用变化导致整个列表重新渲染（闪烁）
+      // 刷新（含 1s 轮询）：固定取第一页 PAGE_SIZE；已滚出的后续页
+      // 由「加载更多」按钮再拉。原地更新避免数组引用变化导致整个列表重新渲染（闪烁）
+      const data = await listRuns(0, PAGE_SIZE, this.filters)
       this.runs.splice(0, this.runs.length, ...data.items)
+      this.offset = data.items.length
       this.total = data.total
       this.summary = data.summary
     },
 
-    /** 追加下一页（列表底部「加载更多」）。按 id 去重：翻页间隙有新
-     * run 插入时，offset 边界处的旧项会在两页各出现一次。 */
+    /** 追加下一页（列表底部「加载更多」按钮触发）。按 id 去重：翻页间隙
+     * 有新 run 插入时，offset 边界处的旧项会在两页各出现一次。offset 按
+     * 返回条数推进（不能用 runs.length，去重后不涨会卡死在同一页）。 */
     async loadMoreRuns() {
-      if (this.loadingMore || this.runs.length >= this.total) return
+      if (this.loadingMore || this.offset >= this.total) return
       this.loadingMore = true
       try {
-        const data = await listRuns(this.runs.length, 50, this.filters)
+        const data = await listRuns(this.offset, PAGE_SIZE, this.filters)
+        this.offset += data.items.length
         const seen = new Set(this.runs.map((r) => r.id))
         this.runs.push(...data.items.filter((r) => !seen.has(r.id)))
         this.total = data.total
@@ -56,11 +62,11 @@ export const useRunsStore = defineStore('runs', {
       }
     },
 
-    /** 切换筛选：清空已加载页回到第一页（顺带让 fetchRuns 的自适应
-     * limit 归零），再按新条件取数。 */
+    /** 切换筛选：清空已加载页回到第一页，再按新条件取数。 */
     async setFilters(partial: Partial<{ status: string; pipeline: string }>) {
       this.filters = { ...this.filters, ...partial }
       this.runs = []
+      this.offset = 0
       await this.fetchRuns()
     },
 

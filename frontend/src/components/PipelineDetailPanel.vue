@@ -123,7 +123,11 @@ async function copySource() {
 
 <template>
   <div>
-    <!-- 无自身头部：仅用于 Runs 页 drawer，名称/文件名由 drawer 标题展示 -->
+    <!-- 工作流基本信息 -->
+    <div class="info-header">
+      <h2 class="info-name">{{ detail.name }}</h2>
+      <span v-if="detail.description" class="info-desc">{{ detail.description }}</span>
+    </div>
     <section class="panel params-panel">
       <h2>参数</h2>
       <el-table v-if="paramsRows.length" :data="paramsRows" size="small" max-height="200">
@@ -280,6 +284,29 @@ async function copySource() {
 }
 .params-panel {
   margin-bottom: 18px;
+}
+/* 工作流信息 */
+.info-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.info-name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+.info-name::before {
+  display: none;
+}
+.info-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1.6;
 }
 .source-panel {
   margin-top: 18px;

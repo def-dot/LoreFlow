@@ -11,6 +11,8 @@ const props = defineProps<{
   /** 筛选值（'' = 全部），由 store 持有 */
   status: string
   pipeline: string
+  /** 全量工作流名称列表（来自 pipelines 接口，不受 runs 筛选影响） */
+  pipelineNames: string[]
 }>()
 
 const emit = defineEmits<{
@@ -31,11 +33,8 @@ const STATUS_OPTIONS = ['running', 'reviewing', 'completed', 'failed', 'cancelle
   label: statusLabel(v),
 }))
 
-// 从 runs 列表中提取不重复的工作流名称作为筛选选项
-const pipelineOptions = computed(() => {
-  const names = new Set(props.runs.map((r) => r.pipeline_name).filter(Boolean))
-  return [...names].sort()
-})
+// 工作流筛选选项：直接用 pipelines 接口返回的全量名称，不从 runs 派生
+const pipelineOptions = computed(() => props.pipelineNames)
 
 // 有筛选时空态文案不同：不是"没有运行"，是"没有匹配的运行"
 const hasFilter = computed(() => props.status !== '' || props.pipeline !== '')
@@ -54,6 +53,12 @@ function fmtFull(iso: string | null): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
+
+// 分页手动加载：点「加载更多」再拉下一页（不用滚动哨兵，避免连发请求）
+function onLoadMore() {
+  if (props.loadingMore) return
+  emit('more')
+}
 </script>
 
 <template>
@@ -66,18 +71,21 @@ function fmtFull(iso: string | null): string {
       <el-select
         :model-value="status"
         size="small"
+        clearable
+        placeholder="全部状态"
         @update:model-value="emit('set-status', $event ?? '')"
       >
-        <el-option label="全部状态" value="" />
         <el-option v-for="o in STATUS_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
       <el-select
         :model-value="pipeline"
         size="small"
+        filterable
+        clearable
+        placeholder="搜索工作流"
         :disabled="!pipelineOptions.length"
         @update:model-value="emit('set-pipeline', $event ?? '')"
       >
-        <el-option label="全部工作流" value="" />
         <el-option v-for="name in pipelineOptions" :key="name" :label="name" :value="name" />
       </el-select>
     </div>
@@ -136,11 +144,12 @@ function fmtFull(iso: string | null): string {
       <div v-if="!runs.length" class="muted empty">
         {{ hasFilter ? '没有符合筛选的运行记录。' : '暂无运行记录 — 点击「新建运行」发起一个。' }}
       </div>
-    </div>
-    <!-- 截断修复：还有更早的 run 时提供翻页入口，并明示已加载进度 -->
-    <div v-if="runs.length < total" class="load-more">
-      <span class="muted count">{{ runs.length }} / {{ total }}</span>
-      <el-button size="small" plain :loading="loadingMore" @click="emit('more')">加载更多</el-button>
+      <!-- 手动加载下一页：点击才发请求 -->
+      <div v-if="runs.length < total" class="load-more">
+        <button class="more-btn" :disabled="loadingMore" @click="onLoadMore">
+          {{ loadingMore ? '加载中…' : '加载更多' }}
+        </button>
+      </div>
     </div>
   </aside>
 </template>
@@ -207,18 +216,36 @@ function fmtFull(iso: string | null): string {
   font-size: 12px;
   line-height: 1.6;
 }
-/* 加载更多钉在面板底部，不随列表滚走 */
+/* 列表末尾：手动「加载更多」（整行居中） */
 .load-more {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--line);
+  align-self: stretch;
+  padding: 10px 2px;
+  flex: none;
+  text-align: center;
 }
-.load-more .count {
-  font-family: var(--font-mono);
-  font-size: 11px;
+.more-btn {
+  margin: 0 auto;
+  padding: 3px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(16, 21, 42, 0.5);
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.more-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.more-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .run-item {
   position: relative;

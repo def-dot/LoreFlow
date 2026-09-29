@@ -11,6 +11,9 @@ const store = usePipelinesStore()
 const loading = ref(false)
 const loadError = ref(false)
 
+// 工作流数量
+const pipelineCount = computed(() => store.pipelines.length)
+
 // 编写指南 drawer
 const guideOpen = ref(false)
 
@@ -172,6 +175,7 @@ onMounted(async () => {
       <div class="head-info">
         <h1>工作流</h1>
         <span class="muted">管理预置和自定义的 YAML 工作流定义</span>
+        <span class="pipeline-count">共 {{ pipelineCount }} 个工作流</span>
       </div>
       <span v-if="loadError" class="load-error">加载失败，请检查后端是否可用</span>
       <el-button plain :loading="loading" @click="fetchAll">↻ 刷新</el-button>
@@ -398,6 +402,14 @@ nodes:
 .load-error {
   color: #f87171;
   font-size: 12px;
+}
+.pipeline-count {
+  font-size: 12px;
+  color: var(--ink-3);
+  background: rgba(77, 196, 178, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 /* 编写指南链接 */
 .guide-link {

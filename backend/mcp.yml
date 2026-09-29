@@ -6,6 +6,9 @@
 #   http  — Streamable HTTP 远程服务（url 必填，如 http://localhost:8080/mcp）
 #   stdio — 本地子进程（command + args 必填）
 #
+# env（可选，仅 stdio）— 传给子进程的环境变量，值支持 ${VAR} 引用当前进程环境变量。
+# timeout（可选）— 单次工具调用超时秒数，默认 60；设为 null 可禁用。
+#
 servers:
   - name: 系统监控MCP
     transport: stdio
@@ -27,3 +30,12 @@ servers:
       - "stdio"
       - "--dsn"
       - "postgresql://postgres:postgres@localhost:5432/loreflow?sslmode=disable"
+
+  # Notion — 在 https://www.notion.so/profile/integrations 创建 internal integration，
+  # 把 ntn_ 开头的 token 写入环境变量 NOTION_TOKEN，并把目标页面/数据库接入该 integration。
+  - name: NotionMCP
+    transport: stdio
+    command: npx
+    args: ["-y", "@notionhq/notion-mcp-server"]
+    env:
+      NOTION_TOKEN: ${NOTION_TOKEN}

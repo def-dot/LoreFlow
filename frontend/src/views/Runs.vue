@@ -4,8 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
-import type { ParamSpec, PipelineDetail, ParamType } from '@/api/pipelines'
-import { getPipeline, toParamSpecs, resolveParamType } from '@/api/pipelines'
+import type { ParamSpec, PipelineDetail, PipelineListItem, ParamType } from '@/api/pipelines'
+import { getPipeline, listPipelines, toParamSpecs, resolveParamType } from '@/api/pipelines'
 import { listSkills, listTools } from '@/api/registry'
 import { uploadFile, type UploadRecord } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
@@ -14,8 +14,11 @@ import { usePipelinesStore } from '@/stores/pipelines'
 const store = useRunsStore()
 const pipelinesStore = usePipelinesStore()
 
-// 新建 run 时运行的流水线（下拉来自 /pipelines，值为 id）
+// 新建 run 时运行的流水线（下拉可输入匹配，值为 id）
 const configId = ref<number | null>(null)
+// 工作流下拉的候选列表：remote 搜索 /pipelines?q=…，与侧栏分页列表解耦
+const workflowOptions = ref<PipelineListItem[]>([])
+const workflowLoading = ref(false)
 // 任务名称（可选，不传则用配置文件名）
 const runName = ref('')
 // 防止「新建运行」按钮重复点击导致并发创建
@@ -66,9 +69,33 @@ const parsedInputs = computed<{ value?: Record<string, unknown>; error: string |
 
 // 所选流水线的参数声明
 const selectedPipeline = computed(() =>
-  configId.value != null ? pipelinesStore.pipelines.find((p) => p.id === configId.value) : undefined,
+  configId.value != null ? findWorkflow(configId.value) : undefined,
 )
 watch(configId, (id) => { if (id != null) pipelinesStore.select(id) }, { immediate: true })
+
+/** 在下拉候选与侧栏列表里按 id 找工作流（搜索命中的不一定在侧栏已加载页里） */
+function findWorkflow(id: number): PipelineListItem | undefined {
+  return workflowOptions.value.find((p) => p.id === id)
+    ?? pipelinesStore.pipelines.find((p) => p.id === id)
+}
+
+/** 工作流下拉远程搜索：按名称/描述模糊匹配 */
+async function searchWorkflows(q: string) {
+  workflowLoading.value = true
+  try {
+    const items = await listPipelines(q.trim() || undefined)
+    // 当前选中项保留在候选里，避免搜索后 label 丢失
+    if (configId.value != null && !items.some((p) => p.id === configId.value)) {
+      const cur = findWorkflow(configId.value)
+      if (cur) items.unshift(cur)
+    }
+    workflowOptions.value = items
+  } catch {
+    // 保持旧候选，错误由拦截器提示
+  } finally {
+    workflowLoading.value = false
+  }
+}
 const paramSpecs = computed(() => {
   const d = pipelinesStore.detail
   if (!d) return []
@@ -369,7 +396,7 @@ const previewId = ref<number | null>(null)
 
 // 标题里的流水线中文名：详情未加载时从列表兜底，打开即可见
 const previewItem = computed(() =>
-  previewId.value != null ? pipelinesStore.pipelines.find((p) => p.id === previewId.value) : undefined,
+  previewId.value != null ? findWorkflow(previewId.value) : undefined,
 )
 
 // 抽屉实际渲染的详情
@@ -535,10 +562,12 @@ onMounted(async () => {
   } catch {
     // 后端未启动时静默，等用户刷新
   }
+  // 只打一次 /pipelines：侧栏筛选项与工作流下拉候选共用这份结果
   pipelinesStore
     .fetchPipelines()
     .then(() => {
-      if (configId.value == null || !pipelinesStore.pipelines.some((p) => p.id === configId.value)) {
+      workflowOptions.value = [...pipelinesStore.pipelines]
+      if (configId.value == null || !findWorkflow(configId.value)) {
         configId.value = pipelinesStore.pipelines[0]?.id ?? null
       }
     })
@@ -568,6 +597,7 @@ onUnmounted(() => {
         :loading-more="store.loadingMore"
         :status="store.filters.status"
         :pipeline="store.filters.pipeline"
+        :pipeline-names="pipelinesStore.pipelines.map((p) => p.name).sort()"
         @set-status="store.setFilters({ status: $event })"
         @set-pipeline="store.setFilters({ pipeline: $event })"
         @select="select"
@@ -608,13 +638,16 @@ onUnmounted(() => {
           <div class="create-select-group">
             <el-select
               v-model="configId"
-              :disabled="!pipelinesStore.pipelines.length"
               filterable
-              placeholder="选择工作流"
+              remote
+              clearable
+              :remote-method="searchWorkflows"
+              :loading="workflowLoading"
+              placeholder="输入名称搜索工作流"
               style="flex: 1"
             >
               <el-option
-                v-for="p in pipelinesStore.pipelines"
+                v-for="p in workflowOptions"
                 :key="p.id"
                 :value="p.id"
                 :label="p.name"
