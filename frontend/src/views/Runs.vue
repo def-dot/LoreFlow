@@ -327,9 +327,10 @@ function clearFile(spec: ParamSpec) {
 // file_list 参数选择文件（追加模式）
 async function onMultiFilePicked(spec: ParamSpec, event: Event) {
   const input = event.target as HTMLInputElement
-  const files = input.files
+  // input.files 是活的 FileList：先拷贝再清 value，否则清空后 length=0 直接返回
+  const files = input.files ? Array.from(input.files) : []
   input.value = ''
-  if (!files?.length) return
+  if (!files.length) return
   uploading.value[spec.name] = true
   try {
     const refs: UploadRecord[] = [...(multiUploadRefs.value[spec.name] ?? [])]
