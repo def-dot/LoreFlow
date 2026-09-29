@@ -1,0 +1,82 @@
+name: 基础示例-输入参数
+description: 输入参数全类型示例：text / paragraph / number / select / checkbox / file / file_list。
+nodes:
+- name: summary
+  type: code
+  label: 汇总参数
+  inputs:
+    script: |
+      def main(text, paragraph, number, lang, tags, file, file_list):
+          def fmt_file(f):
+              return f["filename"] if isinstance(f, dict) else str(f)
+
+          files = [fmt_file(f) for f in (file_list or [])] if isinstance(file_list, list) else []
+          lines = [
+              f"text（单行文本）: {text!r}",
+              f"paragraph（多行文本）: {paragraph!r}",
+              f"number（数字）: {number!r}",
+              f"select（单选）: {lang!r}",
+              f"checkbox（多选）: {tags!r}",
+              f"file（单文件）: {fmt_file(file) if file else '（未上传）'}",
+              f"file_list（多文件）: {', '.join(files) if files else '（未上传）'}",
+          ]
+          return "\n".join(lines)
+    params:
+      text: $params.text
+      paragraph: $params.paragraph
+      number: $params.number
+      lang: $params.lang
+      tags: $params.tags
+      file: $params.file
+      file_list: $params.file_list
+- name: __end__
+  label: 输出
+  depends_on:
+  - summary
+  type: end
+  inputs:
+    result: $summary.result
+params:
+  text:
+    type: text
+    label: 单行文本
+    description: type=text，提交字符串
+    default: 你好
+  paragraph:
+    type: paragraph
+    label: 多行文本
+    description: type=paragraph，提交字符串（textarea）
+    default: 第一行
+  number:
+    type: number
+    label: 数字
+    description: type=number，提交数字
+    default: 3
+  lang:
+    type: select
+    label: 单选
+    description: type=select，提交标量字符串
+    options:
+    - 中文
+    - English
+    - 日本語
+    default: 中文
+  tags:
+    type: checkbox
+    label: 多选
+    description: type=checkbox，提交字符串列表
+    options:
+    - 问候
+    - 正式
+    - 随意
+    - 紧急
+    default:
+    - 问候
+  file:
+    type: file
+    label: 单文件
+    description: type=file，提交 {stored_name, filename}
+  file_list:
+    type: file_list
+    label: 多文件
+    description: type=file_list，提交 {stored_name, filename} 列表
