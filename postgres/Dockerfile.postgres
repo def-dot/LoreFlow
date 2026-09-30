@@ -1,0 +1,47 @@
+# ========================================================
+# Stage 1: Build scws and zhparser
+# ========================================================
+FROM pgvector/pgvector:pg16 AS builder
+
+USER root
+
+# 换清华源 + 重试/超时，避免阿里源 Ign: 卡死；BuildKit 缓存 apt，二次构建秒过
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's|security.debian.org|mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources && \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "15";\nAcquire::https::Timeout "15";\n' \
+        > /etc/apt/apt.conf.d/80-retries && \
+    rm -f /etc/apt/apt.conf.d/docker-clean
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        postgresql-server-dev-16
+
+COPY postgres/pg-ext/scws-1.2.3.tar.bz2 /tmp/
+COPY postgres/pg-ext/scws-dict-chs-utf8.tar.bz2 /tmp/
+COPY postgres/pg-ext/zhparser-2.3.tar.gz /tmp/
+
+RUN cd /tmp \
+    && tar -xjf scws-1.2.3.tar.bz2 && cd scws-1.2.3 && ./configure && make && make install \
+    && cd /tmp && tar -xjf scws-dict-chs-utf8.tar.bz2 \
+    && cp dict.utf8.xdb /usr/local/etc/dict.utf8.xdb \
+    && cd /tmp && tar -xf zhparser-2.3.tar.gz && cd zhparser* && make && make install
+
+# ========================================================
+# Stage 2: Final image
+# ========================================================
+FROM pgvector/pgvector:pg16
+
+USER root
+
+COPY --from=builder /usr/local/lib/libscws* /usr/local/lib/
+COPY --from=builder /usr/local/etc/dict.utf8.xdb /usr/share/postgresql/16/tsearch_data/dict.utf8.xdb
+COPY --from=builder /usr/local/etc/rules*.ini /usr/local/etc/
+
+COPY --from=builder /usr/share/postgresql/16/extension/zhparser* /usr/share/postgresql/16/extension/
+COPY --from=builder /usr/lib/postgresql/16/lib/zhparser.so /usr/lib/postgresql/16/lib/
+
+COPY postgres/pg-ext/chinese.stop /usr/share/postgresql/16/tsearch_data/
+
+RUN ldconfig

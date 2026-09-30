@@ -160,6 +160,13 @@ def discover_skills(*dirs: str | Path) -> None:
     logger.info("发现 %d 个技能", count)
 
 
+def rescan_skills(*dirs: str | Path) -> int:
+    """清空后重新扫描，返回发现的技能数量。供 API 热刷新，免重启。"""
+    SKILL_REGISTRY.clear()
+    discover_skills(*dirs)
+    return len(SKILL_REGISTRY)
+
+
 def _scan_dir(root: Path) -> list[SkillDef]:
     """递归扫描目录，返回发现的 SkillDef 列表。"""
     results: list[SkillDef] = []

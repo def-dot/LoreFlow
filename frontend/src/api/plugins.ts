@@ -4,6 +4,7 @@ export interface PluginInfo {
   filename: string
   module: string
   node_names: string[]
+  tool_names: string[]
   loaded_at: string
   error: string | null
 }

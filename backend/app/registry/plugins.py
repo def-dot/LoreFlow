@@ -3,21 +3,21 @@
 - :func:`load_plugins` 启动时（lifespan）调用一次；坏文件跳过并记录
   error（本次加载全部撤销）
 
-插件文件只需用 ``@func`` 装饰器定义函数：导入即注册进 ``REGISTRY``。
-只扫描目录顶层的 *.py（下划线前缀跳过），不支持子包。
+插件文件只需用 ``@func`` 装饰器定义函数：导入即注册进 ``REGISTRY`` /
+``TOOL_REGISTRY``。只扫描目录顶层的 *.py（下划线前缀跳过），不支持子包。
 """
 
 from __future__ import annotations
 
-import importlib.util
 import sys
+import types
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.registry import REGISTRY, unregister
+from app.registry import REGISTRY, TOOL_REGISTRY, unregister, unregister_tool
 
 logger = get_logger(__name__)
 plugins_dir = Path(settings.PLUGINS_DIR)
@@ -27,6 +27,7 @@ class PluginInfo:
     filename: str
     module: str
     node_names: list[str]
+    tool_names: list[str]
     loaded_at: datetime
     error: str | None = None
 
@@ -41,6 +42,8 @@ def load_plugins() -> None:
     for info in _LOADED.values():
         for name in info.node_names:
             unregister(name)
+        for name in info.tool_names:
+            unregister_tool(name)
     _LOADED.clear()
     for path in sorted(p for p in plugins_dir.glob("*.py") if not p.name.startswith("_")):
         _load(path)
@@ -51,43 +54,83 @@ def list_plugins() -> list[PluginInfo]:
     return sorted(_LOADED.values(), key=lambda p: p.filename)
 
 
+def plugin_owner_index() -> dict[str, str]:
+    """注册名（节点或工具）→ 插件文件名，用于区分 builtin / plugin 来源。"""
+    idx: dict[str, str] = {}
+    for info in _LOADED.values():
+        for name in info.node_names + info.tool_names:
+            idx[name] = info.filename
+    return idx
+
+
 def _load(path: Path) -> None:
     """加载单个插件文件（调用前注册表已被 load_plugins 清空）。
 
-    不变量：node_names 精确等于本文件最终注册——异常/冲突时为空集。
+    不变量：node_names / tool_names 精确等于本文件最终注册——异常/冲突时为空集。
+    跨注册表撞名（节点名占用已有工具名或反之）同样视为冲突。
+
+    始终从源码编译执行，绕开 ``__pycache__``：热加载要求立即读到新内容，
+    pyc 的秒级 mtime 校验会让同秒内重写的文件命中旧字节码。
     """
     module_name = f"{plugins_dir.name}.{path.stem}"
     existed_nodes = dict(REGISTRY)
-    module = None
+    existed_tools = dict(TOOL_REGISTRY)
     new_nodes: set[str] = set()
+    new_tools: set[str] = set()
     error: str | None = None
 
+    def rollback() -> None:
+        REGISTRY.clear()
+        REGISTRY.update(existed_nodes)
+        TOOL_REGISTRY.clear()
+        TOOL_REGISTRY.update(existed_tools)
+
     try:
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        module = importlib.util.module_from_spec(spec)
+        source = path.read_text(encoding="utf-8")
+        code = compile(source, str(path), "exec")
+        module = types.ModuleType(module_name)
+        module.__file__ = str(path)
         sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+        exec(code, module.__dict__)
 
         new_nodes = {
             k for k, v in REGISTRY.items()
             if existed_nodes.get(k) is not v
         }
-        conflicts = set(new_nodes) & set(existed_nodes)
+        new_tools = {
+            k for k, v in TOOL_REGISTRY.items()
+            if existed_tools.get(k) is not v
+        }
+        conflicts = (
+            (set(new_nodes) & set(existed_nodes))
+            | (set(new_tools) & set(existed_tools))
+            | (set(new_nodes) & set(existed_tools))
+            | (set(new_tools) & set(existed_nodes))
+        )
         if conflicts:
-            logger.error("Plugin %s conflicts on nodes: %s", path.name, ", ".join(sorted(conflicts)))
-            error = f"节点冲突：{', '.join(sorted(conflicts))} 已被内置节点或其他插件占用"
-            REGISTRY.clear()
-            REGISTRY.update(existed_nodes)
+            names = ", ".join(sorted(conflicts))
+            logger.error("Plugin %s conflicts on names: %s", path.name, names)
+            error = f"名称冲突：{names} 已被内置或其他插件占用"
+            rollback()
+            new_nodes = set()
+            new_tools = set()
         else:
-            logger.info("Loaded plugin %s (registered %d: %s)", path.name, len(new_nodes), ", ".join(sorted(new_nodes)))
+            logger.info(
+                "Loaded plugin %s (nodes: %d, tools: %d)",
+                path.name, len(new_nodes), len(new_tools),
+            )
     except Exception as exc:
         logger.error("Plugin %s error: %s", path.name, exc)
         error = str(exc)
+        rollback()
+        new_nodes = set()
+        new_tools = set()
 
     _LOADED[module_name] = PluginInfo(
         filename=path.name,
         module=module_name,
         node_names=sorted(new_nodes),
+        tool_names=sorted(new_tools),
         loaded_at=datetime.now(timezone.utc),
         error=error,
     )

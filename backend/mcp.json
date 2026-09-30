@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "系统监控(MCP)": {
+      "command": "uv",
+      "args": ["run", "python", "app/mcps/system_monitor.py"]
+    },
+    "文件系统(MCP)": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/rag/LoreFlow"]
+    },
+    "数据库(MCP)": {
+      "command": "npx",
+      "args": ["-y", "@bytebase/dbhub@latest", "--transport", "stdio", "--dsn", "postgresql://postgres:postgres@localhost:5432/loreflow?sslmode=disable"]
+    },
+    "Notion(MCP)": {
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": {
+        "NOTION_TOKEN": "${NOTION_TOKEN}"
+      }
+    }
+  }
+}

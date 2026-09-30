@@ -2,6 +2,38 @@ services:
   db:
     ports: !override []
 
+  redis:
+    ports: !override []
+
+  arq-parse:
+    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
+    command: arq app.arq_worker.ParseWorkerSettings
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      redis:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/parsed:/app/parsed
+
+  arq-default:
+    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
+    command: arq app.arq_worker.DefaultWorkerSettings
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      redis:
+        condition: service_healthy
+        restart: true
+
   backend:
     image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
     env_file: .env
@@ -10,6 +42,12 @@ services:
       db:
         condition: service_healthy
         restart: true
+      redis:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/parsed:/app/parsed
     healthcheck:
       test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
       interval: 10s

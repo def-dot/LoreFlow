@@ -1,93 +1,88 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  UploadFilled, Delete, Refresh, RefreshRight,
+  VideoPause, Document, View, Search,
+} from '@element-plus/icons-vue'
+import type { UploadFile } from 'element-plus'
 import {
   listAllDocuments,
   deleteDocument,
-  listKnowledgeBases,
-  createKnowledgeBase,
-  uploadDocument,
-  type KnowledgeBase,
+  uploadDocumentDirect,
+  cancelDocument,
+  retryDocument,
   type DocumentItem,
 } from '@/api/knowledge'
 
+const router = useRouter()
+
 const documents = ref<DocumentItem[]>([])
-const kbs = ref<KnowledgeBase[]>([])
+const loading = ref(false)
 const uploading = ref(false)
-const fileInput = ref<HTMLInputElement | null>(null)
-const showUpload = ref(false)
+const searchFileName = ref('')
+const filterStatus = ref('')
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
-// 上传弹窗状态
-const selectedFiles = ref<File[]>([])
-const kbInput = ref('')
-const matchedKbId = ref<number | null>(null)
+const page = ref(1)
+const pageSize = 20
+const total = ref(0)
 
-onMounted(loadData)
+const hasPending = computed(() =>
+  documents.value.some(d => d.status === 'pending' || d.status === 'processing')
+)
 
-async function loadData() {
-  const [docs, kbList] = await Promise.all([listAllDocuments(), listKnowledgeBases()])
-  documents.value = docs
-  kbs.value = kbList
+const statusMap: Record<string, { label: string; type: '' | 'success' | 'warning' | 'danger' | 'info' }> = {
+  pending:    { label: '排队中', type: 'info' },
+  processing: { label: '解析中', type: 'warning' },
+  completed:  { label: '已完成', type: 'success' },
+  failed:     { label: '失败',   type: 'danger' },
+  cancelled:  { label: '已取消', type: '' },
 }
 
-function openUpload() {
-  selectedFiles.value = []
-  kbInput.value = ''
-  matchedKbId.value = null
-  showUpload.value = true
-}
-
-function fetchKbSuggestions(query: string, cb: (results: { value: string; id: number }[]) => void) {
-  const q = query.trim().toLowerCase()
-  const matches = kbs.value
-    .filter((kb) => kb.name.toLowerCase().includes(q))
-    .map((kb) => ({ value: kb.name, id: kb.id }))
-  cb(matches)
-}
-
-function onKbSelect(item: { value: string; id: number }) {
-  matchedKbId.value = item.id
-}
-
-function onKbInput() {
-  matchedKbId.value = null
-}
-
-function onFileChange(e: Event) {
-  const input = e.target as HTMLInputElement
-  selectedFiles.value = input.files ? Array.from(input.files) : []
-}
-
-async function handleUpload() {
-  if (!selectedFiles.value.length) {
-    ElMessage.warning('请选择文件')
-    return
+async function fetchDocuments() {
+  loading.value = true
+  try {
+    const res = await listAllDocuments({
+      limit: pageSize,
+      offset: (page.value - 1) * pageSize,
+      status: filterStatus.value || undefined,
+    })
+    // 前端按文件名过滤（后端暂不支持文件名搜索）
+    const q = searchFileName.value.trim().toLowerCase()
+    documents.value = q
+      ? res.items.filter(d => d.filename.toLowerCase().includes(q))
+      : res.items
+    total.value = res.total
+  } finally {
+    loading.value = false
   }
+}
 
-  let kbId = matchedKbId.value
-  if (!kbId) {
-    const name = kbInput.value.trim()
-    if (!name) {
-      ElMessage.warning('请选择或输入知识库名称')
-      return
-    }
-    const existing = kbs.value.find((k) => k.name === name)
-    if (existing) {
-      kbId = existing.id
-    } else {
-      const created = await createKnowledgeBase({ name })
-      kbId = created.id
-    }
-  }
+function onSearchChange() {
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    page.value = 1
+    fetchDocuments()
+  }, 300)
+}
+
+function onStatusChange() {
+  page.value = 1
+  fetchDocuments()
+}
+
+async function handleUpload(uploadFile: UploadFile) {
+  const file = uploadFile.raw
+  if (!file) return
 
   uploading.value = true
   try {
-    for (const file of selectedFiles.value) {
-      await uploadDocument(kbId, file)
-      ElMessage.success(`${file.name} 已入库`)
-    }
-    showUpload.value = false
-    await loadData()
+    await uploadDocumentDirect(file)
+    ElMessage.success(`${file.name} 已上传，后台正在处理`)
+    await fetchDocuments()
   } catch (err: any) {
     ElMessage.error(err.message || '上传失败')
   } finally {
@@ -95,179 +90,452 @@ async function handleUpload() {
   }
 }
 
-async function handleDelete(doc: DocumentItem) {
+async function handleCancel(row: DocumentItem) {
   try {
-    await ElMessageBox.confirm(`确定删除文档「${doc.filename}」？`, '确认', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(`确定要取消「${row.filename}」的解析吗？`, '取消解析', {
+      confirmButtonText: '确定',
+      cancelButtonText: '返回',
       type: 'warning',
     })
-    await deleteDocument(doc.id)
-    ElMessage.success('已删除')
-    documents.value = documents.value.filter((d) => d.id !== doc.id)
-  } catch {
-    // 取消
-  }
+    await cancelDocument(row.id)
+    ElMessage.success('已取消')
+    await fetchDocuments()
+  } catch { /* 用户取消 */ }
 }
 
-function statusLabel(s: string) {
-  return s === 'ready' ? '就绪' : s === 'error' ? '失败' : '处理中'
+async function handleRetry(row: DocumentItem) {
+  try {
+    await retryDocument(row.id)
+    ElMessage.success('已重新加入队列')
+    await fetchDocuments()
+  } catch { /* interceptor handles */ }
 }
 
-function statusType(s: string) {
-  return s === 'ready' ? 'success' : s === 'error' ? 'danger' : 'warning'
+async function handleDelete(row: DocumentItem) {
+  await ElMessageBox.confirm(`确定删除文档「${row.filename}」及其所有切片？`, '删除确认', {
+    type: 'warning',
+  })
+  try {
+    await deleteDocument(row.id)
+    ElMessage.success('删除成功')
+    await fetchDocuments()
+  } catch { /* interceptor handles */ }
 }
+
+function openChunks(row: DocumentItem) {
+  if (!row.chunk_count) return
+  router.push({ name: 'Chunks', params: { id: row.id }, query: { name: row.filename } })
+}
+
+function formatFileSize(bytes: number | null): string {
+  if (!bytes) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatDuration(ms: number | null): string {
+  if (!ms) return '-'
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function formatTime(value: string | null): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function startPolling() {
+  pollTimer = setInterval(async () => {
+    if (!hasPending.value) return
+    try {
+      const res = await listAllDocuments({
+        limit: pageSize,
+        offset: (page.value - 1) * pageSize,
+        status: filterStatus.value || undefined,
+      })
+      documents.value = res.items
+    } catch { /* silent */ }
+  }, 10000)
+}
+
+onMounted(async () => {
+  await fetchDocuments()
+  startPolling()
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  if (searchDebounce) clearTimeout(searchDebounce)
+})
 </script>
 
 <template>
   <div class="knowledge-page">
-    <div class="page-header">
-      <h2>知识库</h2>
-      <el-button type="primary" size="small" @click="openUpload">上传文档</el-button>
-    </div>
-
-    <div v-if="!documents.length" class="empty-hint">暂无文档，点击「上传文档」开始</div>
-
-    <div class="doc-list">
-      <div v-for="doc in documents" :key="doc.id" class="doc-item">
-        <div class="doc-info">
-          <span class="doc-name">{{ doc.filename }}</span>
-          <span class="doc-kb">{{ doc.kb_name }}</span>
-          <el-tag :type="statusType(doc.status)" size="small">{{ statusLabel(doc.status) }}</el-tag>
-          <span v-if="doc.status === 'ready'" class="doc-meta">{{ doc.chunk_count }} 个切块</span>
-          <span v-if="doc.status === 'error' && doc.error" class="doc-error">{{ doc.error }}</span>
-        </div>
-        <button class="delete-btn" @click="handleDelete(doc)" title="删除">×</button>
-      </div>
-    </div>
-
-    <!-- 上传弹窗 -->
-    <el-dialog v-model="showUpload" title="上传文档" width="420px">
-      <el-form label-position="top">
-        <el-form-item label="知识库">
-          <el-autocomplete
-            v-model="kbInput"
-            :fetch-suggestions="fetchKbSuggestions"
-            placeholder="选择已有知识库或输入新名称"
-            style="width: 100%"
-            @select="onKbSelect"
-            @input="onKbInput"
-          />
-          <div v-if="kbInput && !matchedKbId" class="new-kb-hint">
-            将新建知识库「{{ kbInput.trim() }}」
+    <!-- 上传区 -->
+    <el-card class="upload-card" shadow="never">
+      <el-upload
+        drag
+        :auto-upload="false"
+        :show-file-list="false"
+        :on-change="handleUpload"
+        accept=".txt,.md,.pdf"
+        :disabled="uploading"
+      >
+        <div class="upload-content">
+          <div class="upload-icon-wrap">
+            <el-icon :size="26"><UploadFilled /></el-icon>
           </div>
-        </el-form-item>
-        <el-form-item label="文件">
-          <input
-            ref="fileInput"
-            type="file"
-            multiple
-            accept=".txt,.md,.pdf"
-            @change="onFileChange"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showUpload = false">取消</el-button>
-        <el-button type="primary" :loading="uploading" @click="handleUpload">上传</el-button>
+          <p class="upload-text">拖拽文件到此处，或 <em>点击上传</em></p>
+          <div class="upload-formats">
+            <span class="fmt">TXT</span>
+            <span class="fmt">MD</span>
+            <span class="fmt">PDF</span>
+          </div>
+        </div>
+      </el-upload>
+    </el-card>
+
+    <!-- 文档列表 -->
+    <el-card shadow="never" class="table-card">
+      <template #header>
+        <div class="card-header">
+          <div class="card-title">
+            <span class="title-text">已入库文档</span>
+            <span class="count-chip">{{ total }}</span>
+          </div>
+          <div class="card-filters">
+            <el-input
+              v-model="searchFileName"
+              placeholder="搜索文件名…"
+              :prefix-icon="Search"
+              clearable
+              size="small"
+              class="filter-input"
+              @input="onSearchChange"
+              @clear="onSearchChange"
+            />
+            <el-select
+              v-model="filterStatus"
+              placeholder="全部状态"
+              clearable
+              size="small"
+              class="filter-select"
+              @change="onStatusChange"
+              @clear="onStatusChange"
+            >
+              <el-option label="排队中" value="pending" />
+              <el-option label="解析中" value="processing" />
+              <el-option label="已完成" value="completed" />
+              <el-option label="失败" value="failed" />
+              <el-option label="已取消" value="cancelled" />
+            </el-select>
+            <el-button :icon="Refresh" text @click="fetchDocuments" :loading="loading">刷新</el-button>
+          </div>
+        </div>
       </template>
-    </el-dialog>
+
+      <el-table :data="documents" v-loading="loading" stripe empty-text="暂无文档，请上传">
+        <el-table-column label="文件名" min-width="220">
+          <template #default="{ row }">
+            <div class="file-name">
+              <el-icon class="file-icon"><Document /></el-icon>
+              <span class="file-text">{{ row.filename }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="(row.status === 'failed' || row.status === 'cancelled') && row.error"
+              :content="row.error"
+              placement="top"
+              :show-after="200"
+            >
+              <el-tag :type="statusMap[row.status]?.type ?? 'info'" size="small" effect="light">
+                {{ statusMap[row.status]?.label ?? row.status }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="statusMap[row.status]?.type ?? 'info'" size="small" effect="light">
+              {{ statusMap[row.status]?.label ?? row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="切片数" width="90" align="center">
+          <template #default="{ row }">
+            <span
+              class="chunk-count-link"
+              :class="{ disabled: !row.chunk_count }"
+              @click="openChunks(row)"
+            >{{ row.chunk_count }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="耗时" width="80" align="right">
+          <template #default="{ row }">
+            <span class="time-cell">{{ formatDuration(row.parse_duration_ms) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="上传时间" width="150">
+          <template #default="{ row }">
+            <span v-if="row.created_at" class="time-cell">{{ formatTime(row.created_at) }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" align="center">
+          <template #default="{ row }">
+            <span class="action-slot">
+              <template v-if="row.status === 'pending' || row.status === 'processing'">
+                <el-tooltip content="取消">
+                  <el-button :icon="VideoPause" type="warning" text size="small" @click.stop="handleCancel(row)" />
+                </el-tooltip>
+              </template>
+              <template v-else-if="row.status === 'failed' || row.status === 'cancelled'">
+                <el-tooltip content="重试">
+                  <el-button :icon="RefreshRight" type="primary" text size="small" @click.stop="handleRetry(row)" />
+                </el-tooltip>
+              </template>
+              <template v-else-if="row.status === 'completed'">
+                <el-tooltip content="查看切片">
+                  <el-button :icon="View" type="primary" text size="small" @click.stop="openChunks(row)" />
+                </el-tooltip>
+              </template>
+            </span>
+            <span class="action-slot">
+              <el-tooltip content="删除">
+                <el-button :icon="Delete" type="danger" text size="small" @click.stop="handleDelete(row)" />
+              </el-tooltip>
+            </span>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="total > pageSize" class="table-footer">
+        <el-pagination
+          v-model:current-page="page"
+          :page-size="pageSize"
+          :total="total"
+          layout="prev, pager, next"
+          @current-change="fetchDocuments"
+        />
+      </div>
+    </el-card>
   </div>
 </template>
 
 <style scoped>
 .knowledge-page {
-  max-width: 960px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 24px 20px;
 }
 
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+/* ---- Upload ---- */
+.upload-card {
   margin-bottom: 20px;
 }
 
-.doc-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.upload-card :deep(.el-card__body) {
+  padding: 12px;
 }
 
-.doc-item {
+.upload-card :deep(.el-upload),
+.upload-card :deep(.el-upload-dragger) {
+  width: 100%;
+}
+
+.upload-card :deep(.el-upload-dragger) {
+  padding: 32px 20px;
+  border-radius: 8px;
+  border-color: var(--line);
+  background: var(--panel);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.upload-card :deep(.el-upload-dragger:hover) {
+  border-color: var(--accent, #4dc4b2);
+  background: rgba(77, 196, 178, 0.04);
+}
+
+.upload-content {
+  text-align: center;
+}
+
+.upload-icon-wrap {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(77, 196, 178, 0.08);
+  color: var(--accent, #4dc4b2);
+  transition: background 0.2s ease;
+}
+
+.upload-card :deep(.el-upload-dragger:hover) .upload-icon-wrap {
+  background: rgba(77, 196, 178, 0.15);
+}
+
+.upload-text {
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+.upload-text em {
+  color: var(--accent, #4dc4b2);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.upload-formats {
+  margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.fmt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+/* ---- Table card ---- */
+.table-card :deep(.el-card__header) {
+  padding: 14px 20px;
+}
+
+.card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.doc-info {
+.card-title {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-
-.doc-name {
-  font-size: 13px;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.doc-kb {
-  font-size: 11px;
-  color: var(--ink-3);
-  background: rgba(77, 196, 178, 0.08);
-  padding: 1px 6px;
-  border-radius: 3px;
   flex-shrink: 0;
 }
 
-.doc-meta {
-  font-size: 11px;
-  color: var(--ink-3);
+.card-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
 }
 
-.doc-error {
-  font-size: 11px;
-  color: var(--danger, #e74c3c);
+.filter-input {
+  width: 220px;
+}
+
+.filter-select {
+  width: 130px;
+}
+
+.title-text {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.count-chip {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #4dc4b2);
+  background: rgba(77, 196, 178, 0.08);
+  border-radius: 11px;
+}
+
+/* ---- Table cells ---- */
+.file-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-icon {
+  color: var(--ink-4);
+  flex-shrink: 0;
+}
+
+.file-text {
+  color: var(--ink);
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.delete-btn {
-  background: none;
-  border: none;
+.action-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 24px;
+}
+
+.time-cell {
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
   color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.text-muted {
+  color: var(--ink-4);
+}
+
+.table-card :deep(.el-table) {
+  font-size: 13.5px;
+}
+
+.table-card :deep(.el-table .cell) {
+  line-height: 1.5;
+}
+
+.table-card :deep(.el-table td.el-table__cell) {
+  padding: 11px 0;
+}
+
+.chunk-count-link {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent, #4dc4b2);
   cursor: pointer;
-  font-size: 14px;
-  padding: 0 4px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.doc-item:hover .delete-btn {
-  opacity: 1;
-}
-.delete-btn:hover {
-  color: var(--danger, #e74c3c);
+  transition: opacity 0.15s ease;
 }
 
-.empty-hint {
-  text-align: center;
-  padding: 40px 16px;
-  font-size: 13px;
-  color: var(--ink-3);
+.chunk-count-link:hover {
+  opacity: 0.75;
 }
 
-.new-kb-hint {
-  margin-top: 8px;
+.chunk-count-link.disabled {
+  color: var(--ink-4);
+  cursor: default;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
 }
 </style>

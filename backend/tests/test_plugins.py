@@ -1,24 +1,26 @@
 """插件加载 — load_plugins 扫描目录：新增/更新/清理删除/坏文件容错（启动与重载同路径）"""
 
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
 import app.registry.plugins as plugin_loader
-from app.registry import REGISTRY
+from app.registry import REGISTRY, TOOL_REGISTRY
 
 
 @pytest.fixture
 def isolated_registry():
     """隔离全局注册表、加载记录与 sys.modules，测试结束后原样恢复。"""
     registry_before = dict(REGISTRY)
+    tools_before = dict(TOOL_REGISTRY)
     loaded_before = dict(plugin_loader._LOADED)
     modules_before = set(sys.modules)
     yield
     REGISTRY.clear()
     REGISTRY.update(registry_before)
+    TOOL_REGISTRY.clear()
+    TOOL_REGISTRY.update(tools_before)
     plugin_loader._LOADED.clear()
     plugin_loader._LOADED.update(loaded_before)
     for name in set(sys.modules) - modules_before:
@@ -30,10 +32,8 @@ def _write(path: Path, body: str) -> None:
 
 
 def _rewrite(path: Path, body: str) -> None:
-    """重写已有插件文件：无字节码守卫下 pyc 按秒级 mtime 校验，
-    等待 mtime 秒值变化再重载，避免命中旧字节码（已接受的限制）。"""
+    """重写已有插件文件（加载器从源码编译，无 pyc 命中问题）。"""
     _write(path, body)
-    time.sleep(1.05)
 
 
 def test_load_plugins_scans_directory(monkeypatch, tmp_path, isolated_registry) -> None:
@@ -144,3 +144,44 @@ def test_sync_broken_update_clears_nodes(monkeypatch, tmp_path, isolated_registr
     assert REGISTRY["a_probe"].label == "A"  # 修复后重载恢复
     info = next(p for p in plugin_loader.list_plugins() if p.module == f"{tmp_path.name}.a")
     assert info.node_names == ["a_probe"] and info.error is None
+
+
+def test_tracks_tool_only_and_cleans_both_registries(monkeypatch, tmp_path, isolated_registry) -> None:
+    """node=False 的 tool-only 插件进 tool_names，删除后两张表都要清干净。"""
+    path = tmp_path / "toolish.py"
+    _write(
+        path,
+        '@func(node=False, tool=True, label="仅工具", description="")\n'
+        "async def tool_probe(ctx: dict) -> str:\n    return \"t\"\n",
+    )
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)
+    plugin_loader.load_plugins()
+
+    info = next(p for p in plugin_loader.list_plugins() if p.filename == "toolish.py")
+    assert info.node_names == [] and info.tool_names == ["tool_probe"]
+    assert "tool_probe" not in REGISTRY and "tool_probe" in TOOL_REGISTRY
+
+    path.unlink()
+    plugin_loader.load_plugins()
+
+    assert "tool_probe" not in TOOL_REGISTRY  # 僵尸工具被清理
+    assert plugin_loader.list_plugins() == []
+
+
+def test_cross_registry_name_conflict(monkeypatch, tmp_path, isolated_registry) -> None:
+    """节点名占用已有工具名（或反之）同样视为冲突，整文件撤销。"""
+    from app.registry.types import TOOL_REGISTRY as TR
+
+    TR["shared_probe"] = REGISTRY["test_fetch"]  # 预置一个仅工具注册表里的名字
+    monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)
+    _write(
+        tmp_path / "clash.py",
+        '@func(label="撞名", description="")\n'
+        "async def shared_probe(ctx: dict) -> str:\n    return \"x\"\n",
+    )
+    plugin_loader.load_plugins()
+
+    info = next(p for p in plugin_loader.list_plugins() if p.filename == "clash.py")
+    assert info.node_names == [] and info.tool_names == []
+    assert "名称冲突" in info.error
+    assert "shared_probe" not in REGISTRY  # 整文件撤销

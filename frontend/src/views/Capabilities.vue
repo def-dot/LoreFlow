@@ -1,0 +1,1024 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
+import { listTools, listSkills, rescanSkills, type ToolOut, type SkillOut } from '@/api/registry'
+import { listPlugins, uploadPlugin, deletePlugin, type PluginInfo } from '@/api/plugins'
+import {
+  listMcpServers, reconnectMcpServer, reconnectAllMcpServers, setMcpServerEnabled,
+  getMcpServerConfig, deleteMcpServer,
+  type McpServer, type McpServerConfig,
+} from '@/api/mcp'
+import NodeTypeCard from '@/components/NodeTypeCard.vue'
+import McpServerForm from '@/components/McpServerForm.vue'
+
+type TabName = 'catalog' | 'skills'
+type RoleFilter = 'all' | 'node' | 'tool'
+
+const activeTab = ref<TabName>('catalog')
+const nodeTypes = ref<NodeTypeInfo[]>([])
+const tools = ref<ToolOut[]>([])
+const skills = ref<SkillOut[]>([])
+const plugins = ref<PluginInfo[]>([])
+const mcpServers = ref<McpServer[]>([])
+const loading = ref(false)
+const loadError = ref(false)
+const uploading = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const guideOpen = ref(false)
+const rescaning = ref(false)
+const mcpBusy = ref('')
+
+const roleFilter = ref<RoleFilter>('all')
+const searchQuery = ref('')
+
+/** 名录条目：节点与工具并集（双端注册的 FuncDef 只出现一次） */
+interface CatalogItem {
+  name: string
+  label: string
+  description: string
+  metadata?: Record<string, any>
+  input_schema?: NodeTypeInfo['input_schema']
+  output_schema?: NodeTypeInfo['output_schema']
+  roles?: string[]
+  source?: NodeTypeInfo['source']
+}
+
+function catalogKey(t: { name: string; source?: NodeTypeInfo['source'] }): string {
+  return `${t.name}::${t.source?.kind ?? 'builtin'}::${t.source?.name ?? ''}`
+}
+
+/** 一张名录：REGISTRY 与 TOOL_REGISTRY 的并集 */
+const catalogItems = computed<CatalogItem[]>(() => {
+  const map = new Map<string, CatalogItem>()
+  for (const t of nodeTypes.value) map.set(catalogKey(t), t)
+  for (const t of tools.value) {
+    const k = catalogKey(t)
+    if (!map.has(k)) map.set(k, t as CatalogItem)
+  }
+  return [...map.values()]
+})
+
+function hasRole(t: CatalogItem, role: string): boolean {
+  return (t.roles ?? []).includes(role)
+}
+
+const roleCounts = computed(() => ({
+  all: catalogItems.value.length,
+  node: catalogItems.value.filter((t) => hasRole(t, 'node')).length,
+  tool: catalogItems.value.filter((t) => hasRole(t, 'tool')).length,
+}))
+
+const filteredItems = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  return catalogItems.value.filter((t) => {
+    if (roleFilter.value !== 'all' && !hasRole(t, roleFilter.value)) return false
+    if (q) {
+      const hay = `${t.name} ${t.label} ${t.description}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+})
+
+/**
+ * 分组：内置跟 metadata.group（域分组）；脚本按文件、MCP 按服务器。
+ * 脚本/MCP 是装载单位，管理动作（删除/重连/启停）就挂在组头上。
+ */
+interface CatalogGroup {
+  key: string
+  name: string
+  items: CatalogItem[]
+  kind: 'domain' | 'script' | 'mcp'
+  plugin?: PluginInfo
+  server?: McpServer
+}
+
+function domainGroupOf(t: CatalogItem): string {
+  return t.metadata?.group || '其他'
+}
+
+const catalogGroups = computed<CatalogGroup[]>(() => {
+  const bySource = (kind: string, name: string) =>
+    filteredItems.value.filter((t) => t.source?.kind === kind && t.source?.name === name)
+
+  // 内置：域分组
+  const domainMap = new Map<string, CatalogItem[]>()
+  for (const t of filteredItems.value) {
+    if (t.source?.kind === 'plugin' || t.source?.kind === 'mcp') continue
+    const g = domainGroupOf(t)
+    if (!domainMap.has(g)) domainMap.set(g, [])
+    domainMap.get(g)!.push(t)
+  }
+  const sortItems = (items: CatalogItem[]) =>
+    items.sort((a, b) => {
+      const oa = a.metadata?.order ?? 999
+      const ob = b.metadata?.order ?? 999
+      return oa !== ob ? oa - ob : a.name.localeCompare(b.name)
+    })
+  const domains: CatalogGroup[] = [...domainMap.entries()].map(([name, items]) => ({
+    key: `domain::${name}`,
+    name,
+    items: sortItems(items),
+    kind: 'domain' as const,
+  }))
+
+  // 自定义脚本：按文件一组（含 0 条目的，管理入口不能消失）
+  const scripts: CatalogGroup[] = plugins.value.map((p) => ({
+    key: `script::${p.filename}`,
+    name: p.filename,
+    items: sortItems(bySource('plugin', p.filename)),
+    kind: 'script' as const,
+    plugin: p,
+  }))
+
+  // MCP：按服务器一组
+  const mcp: CatalogGroup[] = mcpServers.value.map((s) => ({
+    key: `mcp::${s.name}`,
+    name: s.name,
+    items: sortItems(bySource('mcp', s.name)),
+    kind: 'mcp' as const,
+    server: s,
+  }))
+
+  return [...domains, ...scripts, ...mcp]
+})
+
+/** MCP 组默认折叠（Notion 一来就是 24 个工具）；搜索时自动展开命中所在的组 */
+const expandedGroups = ref<Set<string>>(new Set())
+
+function isGroupOpen(g: CatalogGroup): boolean {
+  if (g.kind === 'domain' || g.kind === 'script') return true
+  if (searchQuery.value.trim()) return true
+  return expandedGroups.value.has(g.key)
+}
+
+function toggleGroup(g: CatalogGroup) {
+  if (g.kind !== 'mcp') return
+  const next = new Set(expandedGroups.value)
+  if (next.has(g.key)) next.delete(g.key)
+  else next.add(g.key)
+  expandedGroups.value = next
+}
+
+const filtersActive = computed(() => roleFilter.value !== 'all' || searchQuery.value.trim() !== '')
+
+/** 三个区默认展开，收起只影响显示不改数据 */
+const collapsedSections = ref<Set<string>>(new Set())
+
+function isSectionCollapsed(key: string): boolean {
+  return collapsedSections.value.has(key)
+}
+
+function toggleSection(key: string) {
+  const next = new Set(collapsedSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedSections.value = next
+}
+
+const builtinCount = computed(
+  () => catalogItems.value.filter((t) => t.source?.kind !== 'plugin' && t.source?.kind !== 'mcp').length,
+)
+
+function resetFilters() {
+  roleFilter.value = 'all'
+  searchQuery.value = ''
+}
+
+/** 技能正文默认折叠 */
+const openSkills = ref<Set<string>>(new Set())
+
+function toggleSkill(name: string) {
+  const next = new Set(openSkills.value)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  openSkills.value = next
+}
+
+async function fetchAll() {
+  loading.value = true
+  loadError.value = false
+  try {
+    const [n, t, s, p, m] = await Promise.all([
+      listNodeTypes(), listTools(), listSkills(), listPlugins(), listMcpServers(),
+    ])
+    nodeTypes.value = n ?? []
+    tools.value = t ?? []
+    skills.value = s ?? []
+    plugins.value = p.plugins ?? []
+    mcpServers.value = m.servers ?? []
+  } catch {
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleUpload(file: File) {
+  uploading.value = true
+  try {
+    const plugin = await uploadPlugin(file)
+    ElMessage.success(`脚本 ${plugin.filename} 上传成功`)
+    await fetchAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+function onFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) handleUpload(file)
+  input.value = ''
+}
+
+async function handleDeletePlugin(p: PluginInfo) {
+  try {
+    await ElMessageBox.confirm(`确定删除脚本 ${p.filename}？删除后它注册的节点和工具会一并移除。`, '删除脚本', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+    await deletePlugin(p.filename)
+    ElMessage.success(`脚本 ${p.filename} 已删除`)
+    await fetchAll()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || e?.message || '删除失败')
+  }
+}
+
+async function handleRescan() {
+  rescaning.value = true
+  try {
+    const r = await rescanSkills()
+    ElMessage.success(`已重新扫描，发现 ${r.count} 个技能`)
+    await fetchAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '重扫失败')
+  } finally {
+    rescaning.value = false
+  }
+}
+
+async function handleReconnect(s: McpServer) {
+  mcpBusy.value = s.name
+  try {
+    const updated = await reconnectMcpServer(s.name)
+    Object.assign(s, updated)
+    if (updated.status === 'connected') ElMessage.success(`${s.name} 已连接（${updated.tool_names.length} 个工具）`)
+    else ElMessage.warning(`${s.name} 连接失败`)
+    await fetchAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '重连失败')
+  } finally {
+    mcpBusy.value = ''
+  }
+}
+
+async function handleToggle(s: McpServer) {
+  mcpBusy.value = s.name
+  try {
+    const updated = await setMcpServerEnabled(s.name, !s.enabled)
+    Object.assign(s, updated)
+    ElMessage.success(`${s.name} 已${updated.enabled ? '启用' : '停用'}`)
+    await fetchAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '操作失败')
+  } finally {
+    mcpBusy.value = ''
+  }
+}
+
+async function handleReconnectAll() {
+  mcpBusy.value = '__all__'
+  try {
+    const r = await reconnectAllMcpServers()
+    mcpServers.value = r.servers ?? []
+    ElMessage.success('已重连全部服务器')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '重连失败')
+  } finally {
+    mcpBusy.value = ''
+  }
+}
+
+// ---- MCP 配置：新建 / 编辑 / 删除（写回 mcp.json）----
+const mcpFormOpen = ref(false)
+const mcpEditing = ref<McpServerConfig | null>(null)
+
+function openMcpCreate() {
+  mcpEditing.value = null
+  mcpFormOpen.value = true
+}
+
+async function openMcpEdit(s: McpServer) {
+  try {
+    mcpEditing.value = await getMcpServerConfig(s.name)
+    mcpFormOpen.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '读取配置失败')
+  }
+}
+
+async function handleDeleteMcp(s: McpServer) {
+  try {
+    await ElMessageBox.confirm(`确定删除 MCP 服务器「${s.name}」？删除后它提供的工具将不可用。`, '删除 MCP 服务器', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteMcpServer(s.name)
+    ElMessage.success(`已删除 ${s.name}`)
+    await fetchAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '删除失败')
+  }
+}
+
+async function onMcpSaved() {
+  mcpFormOpen.value = false
+  mcpEditing.value = null
+  await fetchAll()
+}
+
+const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | 'info' | 'warning' }> = {
+  connected: { label: '已连接', type: 'success' },
+  connecting: { label: '连接中', type: 'warning' },
+  failed: { label: '连接失败', type: 'danger' },
+  disconnected: { label: '未连接', type: 'info' },
+  disabled: { label: '已停用', type: 'info' },
+}
+
+onMounted(fetchAll)
+</script>
+
+<template>
+  <div class="page">
+    <header class="page-head">
+      <div class="head-info">
+        <h1>能力目录</h1>
+        <span class="muted">工作流可引用的节点、Agent 可调用的工具/技能，以及扩展的装卸状态。</span>
+      </div>
+      <span v-if="loadError" class="load-error">加载失败，请检查后端是否可用</span>
+    </header>
+
+    <el-tabs v-model="activeTab" class="cap-tabs">
+      <!-- ==================== 节点与工具 ==================== -->
+      <el-tab-pane label="节点与工具" name="catalog">
+        <p class="lead">
+          节点供工作流 YAML 以 <code>type:</code> 引用，工具供智能体 function calling 调用。同一个函数可以两端都注册。
+        </p>
+
+        <!-- 筛选：用途 chip + 搜索 -->
+        <div class="filter-bar">
+          <div class="chip-group">
+            <button class="chip" :class="{ on: roleFilter === 'all' }" @click="roleFilter = 'all'">
+              全部 <span class="chip-n">{{ roleCounts.all }}</span>
+            </button>
+            <button class="chip" :class="{ on: roleFilter === 'node' }" @click="roleFilter = 'node'">
+              节点 <span class="chip-n">{{ roleCounts.node }}</span>
+            </button>
+            <button class="chip" :class="{ on: roleFilter === 'tool' }" @click="roleFilter = 'tool'">
+              工具 <span class="chip-n">{{ roleCounts.tool }}</span>
+            </button>
+          </div>
+          <el-input
+            v-model="searchQuery"
+            class="search"
+            placeholder="搜索 名称/描述"
+            clearable
+            :prefix-icon="() => null"
+          />
+        </div>
+
+        <!-- 名录 -->
+        <div v-loading="loading">
+          <!-- 内置：随代码走，不可装卸 -->
+          <div class="top-section">
+            <div class="source-head">
+              <h3 class="source-title" @click="toggleSection('builtin')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('builtin') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                内置
+                <span class="group-count">{{ builtinCount }}</span>
+              </h3>
+            </div>
+            <template v-if="!isSectionCollapsed('builtin')">
+              <div v-for="g in catalogGroups.filter((x) => x.kind === 'domain')" :key="g.key" class="group-section">
+                <h3 class="group-title">
+                  <span class="group-name">{{ g.name }}</span>
+                  <span class="group-count">{{ g.items.length }}</span>
+                </h3>
+                <div class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+                </div>
+              </div>
+              <div v-if="!catalogGroups.some((x) => x.kind === 'domain')" class="group-empty muted">无内置条目</div>
+            </template>
+          </div>
+
+          <!-- 自定义脚本：按文件一组，管理挂在组头 -->
+          <div class="top-section">
+            <div class="source-head">
+              <h3 class="source-title" @click="toggleSection('scripts')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('scripts') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                自定义脚本
+                <span class="group-count">{{ plugins.length }}</span>
+              </h3>
+              <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
+              <el-button type="primary" size="small" :loading="uploading" @click="fileInput?.click()">上传脚本</el-button>
+              <span class="guide-link" @click="guideOpen = true">编写指南</span>
+            </div>
+            <template v-if="!isSectionCollapsed('scripts')">
+            <p class="source-note">用 <code>@func</code> 写的 <code>.py</code> 文件 · 上传后自动热加载，函数会成为节点和工具</p>
+
+            <div v-for="g in catalogGroups.filter((x) => x.kind === 'script')" :key="g.key" class="group-section">
+              <h3 class="group-title with-actions">
+                <span class="group-name mono">{{ g.name }}</span>
+                <el-tag v-if="g.plugin?.error" type="danger" size="small" disable-transitions>加载失败</el-tag>
+                <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
+                <span class="group-count">节点 {{ g.plugin?.node_names.length ?? 0 }} · 工具 {{ g.plugin?.tool_names?.length ?? 0 }}</span>
+                <span class="group-actions">
+                  <el-button class="btn-soft btn-soft--danger" size="small" @click.stop="g.plugin && handleDeletePlugin(g.plugin)">删除</el-button>
+                </span>
+              </h3>
+              <div v-if="g.plugin?.error" class="group-error">{{ g.plugin.error }}</div>
+              <div v-if="g.items.length" class="node-grid">
+                <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="plugin" />
+              </div>
+              <div v-else-if="!g.plugin?.error" class="group-empty muted">无注册条目</div>
+            </div>
+            <div v-if="!plugins.length" class="muted source-empty">暂无自定义脚本</div>
+            </template>
+          </div>
+
+          <!-- MCP 服务器：按服务器一组 -->
+          <div class="top-section">
+            <div class="source-head">
+              <h3 class="source-title" @click="toggleSection('mcp')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('mcp') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                MCP 服务器
+                <span class="group-count">{{ mcpServers.length }}</span>
+              </h3>
+              <el-button type="primary" size="small" @click="openMcpCreate">新建</el-button>
+              <el-button class="btn-soft" size="small" :loading="mcpBusy === '__all__'" @click="handleReconnectAll">全部重连</el-button>
+            </div>
+            <template v-if="!isSectionCollapsed('mcp')">
+            <p class="source-note">接入外部工具服务，供智能体调用 · 新建 / 编辑 / 删除 / 启停即时生效</p>
+
+            <div v-for="g in catalogGroups.filter((x) => x.kind === 'mcp')" :key="g.key" class="group-section">
+              <h3 class="group-title with-actions collapsible" @click="toggleGroup(g)">
+                <svg class="chev" :class="{ open: isGroupOpen(g) }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <span class="group-name mono">{{ g.name }}</span>
+                <el-tag size="small" class="transport-tag" disable-transitions>{{ g.server?.transport }}</el-tag>
+                <el-tag size="small" :type="statusMeta[g.server?.status ?? '']?.type ?? 'info'" disable-transitions>
+                  {{ statusMeta[g.server?.status ?? '']?.label ?? g.server?.status }}
+                </el-tag>
+                <span class="group-count">{{ g.items.length }} 个工具</span>
+                <span class="group-actions" @click.stop>
+                  <el-button
+                    v-if="g.server && g.server.status !== 'connected' && g.server.enabled"
+                    class="btn-soft"
+                    size="small"
+                    :loading="mcpBusy === g.name"
+                    @click="handleReconnect(g.server)"
+                  >重连</el-button>
+                  <el-button
+                    v-if="g.server && g.server.status === 'connected'"
+                    class="btn-soft"
+                    size="small"
+                    :loading="mcpBusy === g.name"
+                    @click="handleToggle(g.server)"
+                  >停用</el-button>
+                  <el-button
+                    v-if="g.server && !g.server.enabled"
+                    class="btn-soft"
+                    size="small"
+                    :loading="mcpBusy === g.name"
+                    @click="handleToggle(g.server)"
+                  >启用</el-button>
+                  <el-button class="btn-soft" size="small" @click="g.server && openMcpEdit(g.server)">编辑</el-button>
+                  <el-button class="btn-soft btn-soft--danger" size="small" @click="g.server && handleDeleteMcp(g.server)">删除</el-button>
+                </span>
+              </h3>
+              <div v-if="g.server?.error" class="group-error">{{ g.server.error }}</div>
+              <div v-if="isGroupOpen(g) && g.items.length" class="node-grid">
+                <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+              </div>
+              <div v-else-if="isGroupOpen(g) && !g.items.length" class="group-empty muted">
+                {{ g.server?.enabled ? '无可用工具' : '已停用' }}
+              </div>
+            </div>
+            <div v-if="!mcpServers.length" class="muted source-empty">未配置 MCP 服务器</div>
+            </template>
+          </div>
+
+          <div v-if="!filteredItems.length && !loading" class="empty">
+            <template v-if="filtersActive">
+              没有匹配的条目
+              <el-button size="small" text type="primary" @click="resetFilters">清除筛选</el-button>
+            </template>
+            <template v-else>暂无节点与工具</template>
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <!-- ==================== 技能包 ==================== -->
+      <el-tab-pane label="技能包" name="skills">
+        <div class="section-head">
+          <span class="muted"><code>skills/</code> · 目录含 SKILL.md 即一个技能 · agent 经 <code>load_skill</code> 按需加载</span>
+          <el-button size="small" :loading="rescaning" @click="handleRescan">重新扫描</el-button>
+        </div>
+        <div v-loading="loading" class="plugin-list">
+          <div v-for="s in skills" :key="s.name" class="plugin-card">
+            <div class="plugin-head clickable" @click="toggleSkill(s.name)">
+              <svg class="chev" :class="{ open: openSkills.has(s.name) }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <div class="plugin-info">
+                <span class="plugin-filename">{{ s.name }}</span>
+                <span class="plugin-module muted">{{ s.location }}</span>
+              </div>
+              <el-tag type="success" size="small" disable-transitions>已发现</el-tag>
+            </div>
+            <div class="muted plugin-desc">{{ s.description }}</div>
+            <pre v-if="openSkills.has(s.name) && s.body" class="skill-body">{{ s.body }}</pre>
+            <span v-else-if="openSkills.has(s.name)" class="muted plugin-desc">（无正文）</span>
+          </div>
+          <span v-if="!skills.length && !loading" class="muted">暂无技能</span>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- MCP 服务器配置 drawer -->
+    <el-drawer
+      v-model="mcpFormOpen"
+      :title="mcpEditing ? '编辑 MCP 服务器' : '新建 MCP 服务器'"
+      size="480px"
+      :destroy-on-close="true"
+    >
+      <McpServerForm :server="mcpEditing" @saved="onMcpSaved" />
+    </el-drawer>
+
+    <!-- 编写指南 drawer -->
+    <el-drawer v-model="guideOpen" title="脚本编写指南" size="min(640px, 90vw)">
+      <div class="guide">
+        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@func</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可以在本页「自定义脚本」区直接上传。</p>
+
+        <h4 class="guide-h4">示例</h4>
+        <pre class="guide-code">from pydantic import BaseModel, Field
+
+class NotifyInput(BaseModel):
+    message: str = Field(description="消息内容")
+
+class NotifyOutput(BaseModel):
+    result: str = Field(description="发送结果")
+
+@func(label="发送通知", description="发送通知消息")
+async def send_notify(params: NotifyInput) -> NotifyOutput:
+    return NotifyOutput(result=f"已发送: {params.message}")</pre>
+        <p>函数名 <code>send_notify</code> 即为条目名：工作流 YAML 用 <code>type: send_notify</code> 引用，Agent 侧以同名 function calling 调用。输入输出参数类型都必须是 <code>BaseModel</code> 子类，框架自动推导 JSON Schema。</p>
+
+        <h4 class="guide-h4">注册选项</h4>
+        <table class="guide-table">
+          <thead><tr><th>参数</th><th>默认值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>label</code></td><td>—</td><td>显示名称（建议填写）</td></tr>
+            <tr><td><code>description</code></td><td>—</td><td>功能描述；作为工具时是 LLM 读的主要依据</td></tr>
+            <tr><td><code>node</code></td><td><code>True</code></td><td>注册为工作流节点</td></tr>
+            <tr><td><code>tool</code></td><td><code>True</code></td><td>注册为 Agent 工具</td></tr>
+          </tbody>
+        </table>
+        <p>两个开关独立：默认两端都注册；<code>node=False</code> 得到仅 Agent 可调用的工具，<code>tool=False</code> 得到仅流程使用的节点。卡片右上角的「仅节点 / 仅工具」就来自这两个开关——两端都注册时不标。</p>
+
+        <h4 class="guide-h4">规则</h4>
+        <ul class="guide-rules">
+          <li>函数必须是 <code>async def</code>，输入输出都用 <code>BaseModel</code></li>
+          <li>名字不可与内置或其它脚本冲突——节点名和工具名共用一个命名空间</li>
+        </ul>
+
+        <h4 class="guide-h4">错误处理</h4>
+        <p>脚本加载失败时会在对应文件分组下显示错误信息，常见原因：</p>
+        <ul class="guide-rules">
+          <li>Python 语法错误或导入失败</li>
+          <li>名字与已有节点/工具冲突</li>
+          <li>运行时缺少依赖包</li>
+        </ul>
+        <p>修正后保存文件即自动重载。也可以删除后重新上传。</p>
+      </div>
+    </el-drawer>
+  </div>
+</template>
+
+<style scoped>
+.page-head {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.head-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.page-head h1 {
+  font-size: 18px;
+  margin: 0;
+}
+.guide-link {
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.guide-link:hover {
+  color: #79bbff;
+}
+.load-error {
+  color: #f87171;
+  font-size: 12px;
+}
+.cap-tabs {
+  padding: 0 20px;
+}
+.lead {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+.lead code {
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* 筛选 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 16px;
+}
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.chip:hover {
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.chip.on {
+  color: var(--ink);
+  background: rgba(77, 196, 178, 0.14);
+  border-color: rgba(77, 196, 178, 0.45);
+}
+.chip-n {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.chip.on .chip-n {
+  color: var(--accent, #4dc4b2);
+}
+.search {
+  width: min(280px, 100%);
+}
+.search :deep(.el-input__wrapper) {
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.search :deep(.el-input__inner) {
+  font-size: 12px;
+}
+
+.empty {
+  padding: 28px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 14px;
+}
+.section-head .muted {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 树：一级 = 内置 / 自定义脚本 / MCP 服务器；二级 = group-title（域、脚本文件、MCP 服务器实例） */
+.group-section {
+  margin: 0 0 12px 16px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.group-section:last-child {
+  margin-bottom: 0;
+}
+.group-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.group-title.with-actions {
+  user-select: none;
+}
+.group-title.collapsible {
+  cursor: pointer;
+}
+.group-title.collapsible:hover {
+  color: var(--ink-2);
+}
+.group-name.mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.group-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--ink-3);
+  opacity: 0.85;
+}
+.group-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.transport-tag {
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.group-error {
+  margin: -2px 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #f87171;
+  line-height: 1.5;
+}
+.group-empty {
+  font-size: 11px;
+  padding: 2px 0 0;
+}
+.chev {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform 0.15s;
+}
+.chev.open {
+  transform: rotate(90deg);
+}
+.node-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+  min-height: 26px;
+}
+
+/* 一级节点：内置 / 自定义脚本 / MCP 服务器，三者平级 */
+.top-section {
+  padding: 18px 0 4px;
+  border-top: 1px solid var(--line);
+}
+.top-section:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.source-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* 次要按钮：给底色，免得只剩文字和链接分不清 */
+.btn-soft {
+  --el-button-bg-color: rgba(255, 255, 255, 0.06);
+  --el-button-border-color: var(--line);
+  --el-button-text-color: var(--ink-2);
+  --el-button-hover-bg-color: rgba(255, 255, 255, 0.1);
+  --el-button-hover-border-color: rgba(255, 255, 255, 0.18);
+  --el-button-hover-text-color: var(--ink);
+  --el-button-active-bg-color: rgba(255, 255, 255, 0.12);
+  --el-button-disabled-bg-color: rgba(255, 255, 255, 0.04);
+  --el-button-disabled-border-color: var(--line);
+  --el-button-disabled-text-color: var(--ink-3);
+}
+.btn-soft--danger {
+  --el-button-text-color: #f87171;
+  --el-button-hover-bg-color: rgba(248, 113, 113, 0.12);
+  --el-button-hover-border-color: rgba(248, 113, 113, 0.35);
+  --el-button-hover-text-color: #fca5a5;
+  --el-button-active-bg-color: rgba(248, 113, 113, 0.16);
+}
+.source-title {
+  margin: 0;
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.source-title:hover {
+  color: var(--ink-2);
+}
+.source-title .chev {
+  color: var(--ink-2);
+}
+.source-note {
+  margin: 4px 0 14px 16px;
+  padding-left: 12px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+.source-note code {
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.source-empty {
+  margin-left: 16px;
+  padding-left: 12px;
+  font-size: 12px;
+}
+
+/* 技能正文 */
+.skill-body {
+  margin: 10px 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* 技能包列表 */
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.plugin-card {
+  background: rgba(16, 21, 42, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.plugin-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.plugin-head.clickable {
+  cursor: pointer;
+  user-select: none;
+}
+.plugin-desc {
+  margin-top: 6px;
+  margin-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.plugin-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.plugin-filename {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.plugin-module {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* 编写指南 */
+.guide {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.guide p {
+  margin: 0 0 14px;
+}
+.guide code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.guide-h4 {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.guide-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0 0 10px;
+  white-space: pre;
+}
+.guide-rules {
+  margin: 0;
+  padding-left: 20px;
+}
+.guide-rules li {
+  margin-bottom: 4px;
+}
+.guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.guide-table th,
+.guide-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.guide-table th {
+  font-weight: 600;
+  color: var(--ink-2);
+  font-size: 11px;
+}
+.guide-table code {
+  font-size: 11.5px;
+}
+</style>

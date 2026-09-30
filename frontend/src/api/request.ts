@@ -30,7 +30,8 @@ request.interceptors.response.use(
 export const api = {
   get: <T>(url: string, config?: AxiosRequestConfig): Promise<T> =>
     request.get(url, config) as unknown as Promise<T>,
-  post: <T>(url: string, data?: unknown): Promise<T> => request.post(url, data) as unknown as Promise<T>,
+  post: <T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> =>
+    request.post(url, data, config) as unknown as Promise<T>,
   put: <T>(url: string, data?: unknown): Promise<T> => request.put(url, data) as unknown as Promise<T>,
   delete: <T>(url: string, config?: AxiosRequestConfig): Promise<T> =>
     request.delete(url, config) as unknown as Promise<T>,

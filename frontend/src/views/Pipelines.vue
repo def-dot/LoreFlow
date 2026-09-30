@@ -345,7 +345,7 @@ nodes:
           <span class="cond-item"><code>llm_chat</code> LLM 对话</span>
           <span class="cond-item"><code>llm_classify</code> 意图识别</span>
           <span class="cond-item"><code>read_document</code> 读取文档</span>
-          <span class="cond-item"><code>rag_retrieve</code> 知识库检索</span>
+          <span class="cond-item"><code>search_knowledge</code> 知识库检索</span>
           <span class="cond-item"><code>code</code> 代码执行</span>
           <span class="cond-item"><code>human</code> 人工审核</span>
           <span class="cond-item"><code>end</code> 最终输出</span>

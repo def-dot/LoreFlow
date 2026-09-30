@@ -1,9 +1,11 @@
 default_model: mimo:mimo-v2.6-pro
 
+# Embedding 已切换为 BGE-M3 via TEI（配置见 .env 中 TEI_EMBED_URL）
+# 以下配置仅保留供参考，不再被 embedding 服务使用
 embedding:
-  provider: ollama
-  model: nomic-embed-text
-  dimension: 768
+  provider: tei
+  model: bge-m3
+  dimension: 1024
 
 ollama:
   base_url: http://127.0.0.1:11434

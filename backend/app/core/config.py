@@ -23,13 +23,36 @@ class Settings(BaseSettings):
     SKILLS_DIR: Path = Path(__file__).resolve().parent.parent / "registry" / "skills"
 
     # MCP — Model Context Protocol 服务器配置
-    MCP_CONFIG: Path = Path(__file__).resolve().parent.parent.parent / "mcp.yml"
+    MCP_CONFIG: Path = Path(__file__).resolve().parent.parent.parent / "mcp.json"
 
     # Agent 工具调用最大轮次
     AGENT_MAX_ROUNDS: int = 10
 
     # RAG 知识库 — 向量维度（需与 embedding 模型一致）
-    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_DIMENSION: int = 1024
+
+    # TEI — Text Embeddings Inference（BGE-M3 向量 + BGE-Reranker 精排）
+    TEI_EMBED_URL: str = "http://localhost:8081"
+    TEI_RERANK_URL: str = "http://localhost:8082"
+    TEI_BATCH_SIZE: int = 16
+
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_PASSWORD: str = ""
+
+    # Arq — 分队列独立限流
+    PARSE_QUEUE_NAME: str = "parse"
+    PARSE_MAX_JOBS: int = 2
+    PARSE_JOB_TIMEOUT: int = 1800
+    DEFAULT_QUEUE_NAME: str = "default"
+    DEFAULT_MAX_JOBS: int = 10
+
+    # 检索参数
+    RECALL_COUNT: int = 100
+    VECTOR_THRESHOLD: float = 0.35
+    RERANK_COUNT: int = 32
+    RERANK_THRESHOLD: float = 0.5
+    RRF_K: int = 60
 
     # 上传文件 — 文本文件落盘目录（file 参数先上传后引用）
     UPLOADS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "uploads"

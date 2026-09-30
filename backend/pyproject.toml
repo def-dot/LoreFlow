@@ -24,6 +24,12 @@ dependencies = [
     "mcp>=1.0",
     "pgvector>=0.3",
     "psutil>=7.2.2",
+    "arq>=0.26",
+    "redis[hiredis]>=5.0",
+    "docling>=2.15.0",
+    "rapidocr-onnxruntime>=1.4.0",
+    "transformers>=4.42.0,<5.9.0",
+    "pypdfium2>=5.0",
 ]
 
 [project.optional-dependencies]
