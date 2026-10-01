@@ -9,15 +9,6 @@
       ],
       "env": {}
     },
-    "文件系统(MCP)": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "D:/rag/LoreFlows"
-      ],
-      "env": {}
-    },
     "数据库(MCP)": {
       "command": "npx",
       "args": [
@@ -38,6 +29,15 @@
       "env": {
         "NOTION_TOKEN": "${NOTION_TOKEN}"
       }
+    },
+    "文件系统(MCP)": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "D:/rag/LoreFlow"
+      ],
+      "env": {}
     }
   }
 }
