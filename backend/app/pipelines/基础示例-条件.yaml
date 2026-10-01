@@ -5,7 +5,7 @@ nodes:
   type: code
   label: 路由
   inputs:
-    script: |
+    code: |
       def main(level: str):
           return level
     params:
@@ -17,7 +17,7 @@ nodes:
   - router
   condition: $router.result == vip
   inputs:
-    script: |
+    code: |
       def main():
           return "走 VIP 通道"
 - name: normal_flow
@@ -27,7 +27,7 @@ nodes:
   - router
   condition: $router.result != vip
   inputs:
-    script: |
+    code: |
       def main():
           return "走普通通道"
 - name: __end__

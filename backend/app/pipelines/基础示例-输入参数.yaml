@@ -5,7 +5,7 @@ nodes:
   type: code
   label: 汇总参数
   inputs:
-    script: |
+    code: |
       def main(text, paragraph, number, lang, tags, file, file_list):
           def fmt_file(f):
               return f["filename"] if isinstance(f, dict) else str(f)

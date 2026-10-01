@@ -5,7 +5,7 @@ nodes:
   type: code
   label: 随机失败
   inputs:
-    script: |
+    code: |
       import random
       def main():
           if random.random() < 0.7:

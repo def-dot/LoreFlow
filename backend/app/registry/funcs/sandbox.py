@@ -1,5 +1,7 @@
 """沙箱工具 — 通过 sandbox 服务执行代码和安装依赖。"""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -7,16 +9,45 @@ from app.registry.types import func
 from app.utils.http import http_client
 
 
-class PipInstallOutput(BaseModel):
-    result: str = Field(description="安装结果")
+# ---------------------------------------------------------------------------
+# 工作流节点：必须定义 main 函数，程序按签名传参
+# ---------------------------------------------------------------------------
 
+class CodeOutput(BaseModel):
+    result: Any = Field(description="main 函数的返回值")
+
+
+class CodeParams(BaseModel):
+    code: str = Field(description="定义 main 函数的 Python 代码", min_length=1)
+    params: dict[str, Any] | None = Field(default=None, description="传给 main 的参数")
+    timeout: int = Field(default=60, description="超时秒数")
+
+
+@func(
+    tool=False,
+    label="代码执行",
+    description="执行定义了 main 函数的 Python 代码，程序按函数签名自动传参，返回 main 的返回值。",
+    metadata={"group": "基础", "order": 19},
+)
+async def code(params: CodeParams) -> CodeOutput:
+    async with http_client() as client:
+        resp = await client.post(
+            f"{settings.SANDBOX_URL}/exec",
+            json={"code": params.code, "params": params.params, "timeout": params.timeout},
+            timeout=params.timeout + 5,
+        )
+        result = resp.json()
+        if resp.status_code != 200:
+            raise RuntimeError(result.get("error", "执行失败"))
+    return CodeOutput(result=result.get("result"))
+
+
+# ---------------------------------------------------------------------------
+# Agent 工具：任意代码，返回 stdout
+# ---------------------------------------------------------------------------
 
 class RunCodeOutput(BaseModel):
-    result: str = Field(description="执行输出")
-
-
-class PipInstallParams(BaseModel):
-    packages: str = Field(description="要安装的包名，空格分隔，如 'scipy scikit-learn'", min_length=1)
+    stdout: str | None = Field(default=None, description="标准输出")
 
 
 class RunCodeParams(BaseModel):
@@ -26,9 +57,40 @@ class RunCodeParams(BaseModel):
 
 @func(
     node=False,
+    label="代码执行",
+    description="在沙箱中执行 Python 代码并返回 stdout。如需保存文件，写入 /uploads 目录。",
+    metadata={"group": "基础", "order": 20},
+)
+async def run_code(params: RunCodeParams) -> RunCodeOutput:
+    async with http_client() as client:
+        resp = await client.post(
+            f"{settings.SANDBOX_URL}/run",
+            json={"code": params.code, "timeout": params.timeout},
+            timeout=params.timeout + 5,
+        )
+        result = resp.json()
+        if result.get("returncode", -1) != 0:
+            raise RuntimeError(result.get("stderr", "执行失败"))
+    return RunCodeOutput(stdout=result.get("stdout"))
+
+
+# ---------------------------------------------------------------------------
+# 依赖安装
+# ---------------------------------------------------------------------------
+
+class PipInstallOutput(BaseModel):
+    result: str = Field(description="安装结果")
+
+
+class PipInstallParams(BaseModel):
+    packages: str = Field(description="要安装的包名，空格分隔，如 'scipy scikit-learn'", min_length=1)
+
+
+@func(
+    node=False,
     label="依赖安装",
     description="在沙箱中安装 Python 包。run_code 报 ModuleNotFoundError 时用此工具安装缺失包",
-    metadata={"group": "基础", "order": 32},
+    metadata={"group": "基础", "order": 21},
 )
 async def pip_install(params: PipInstallParams) -> PipInstallOutput:
     async with http_client() as client:
@@ -41,22 +103,3 @@ async def pip_install(params: PipInstallParams) -> PipInstallOutput:
         if result.get("returncode", -1) != 0:
             raise RuntimeError(f"pip install 失败: {result.get('stderr', '')}")
     return PipInstallOutput(result=result["stdout"].strip())
-
-
-@func(
-    node=False,
-    label="代码执行",
-    description="在沙箱中执行 Python 代码并返回 stdout。如需保存文件，写入 /uploads 目录。",
-    metadata={"group": "基础", "order": 33},
-)
-async def run_code(params: RunCodeParams) -> RunCodeOutput:
-    async with http_client() as client:
-        resp = await client.post(
-            f"{settings.SANDBOX_URL}/run",
-            json={"code": params.code, "timeout": params.timeout},
-            timeout=params.timeout + 5,
-        )
-        result = resp.json()
-        if result.get("returncode", -1) != 0:
-            raise RuntimeError(result.get("stderr", "执行失败"))
-    return RunCodeOutput(result=result["stdout"].strip())

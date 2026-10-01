@@ -5,7 +5,7 @@ nodes:
   type: code
   label: 永远失败
   inputs:
-    script: |
+    code: |
       def main():
           raise Exception("服务持续不可用")
   retry:
