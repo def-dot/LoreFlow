@@ -89,7 +89,6 @@ def _make_call(sess: ClientSession, tool_name: str, timeout: float | None = None
     return _call
 
 
-
 async def _connect_server(name: str, config: McpStdioConfig | McpHttpConfig) -> McpServerState:
     """创建状态、连接服务器、注册工具，放入 _servers（调用方持有 _lock）。"""
     state = McpServerState(name=name, config=config)

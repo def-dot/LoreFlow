@@ -178,7 +178,13 @@ function toggleSection(key: string) {
 }
 
 const builtinCount = computed(
-  () => catalogItems.value.filter((t) => t.source?.kind !== 'plugin' && t.source?.kind !== 'mcp').length,
+  () => filteredItems.value.filter((t) => t.source?.kind !== 'plugin' && t.source?.kind !== 'mcp').length,
+)
+const pluginItemCount = computed(
+  () => filteredItems.value.filter((t) => t.source?.kind === 'plugin').length,
+)
+const mcpItemCount = computed(
+  () => filteredItems.value.filter((t) => t.source?.kind === 'mcp').length,
 )
 
 function resetFilters() {
@@ -417,7 +423,7 @@ onMounted(fetchAll)
                   <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 自定义脚本
-                <span class="group-count">{{ plugins.length }}</span>
+                <span class="group-count">{{ pluginItemCount }}</span>
               </h3>
               <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
               <el-button type="primary" size="small" :loading="uploading" @click="fileInput?.click()">上传脚本</el-button>
@@ -454,7 +460,7 @@ onMounted(fetchAll)
                   <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 MCP 服务器
-                <span class="group-count">{{ mcpServers.length }}</span>
+                <span class="group-count">{{ mcpItemCount }}</span>
               </h3>
               <el-button type="primary" size="small" @click="openMcpCreate">新建</el-button>
               <el-button class="btn-soft" size="small" :loading="mcpBusy === '__all__'" @click="handleReconnectAll">全部重连</el-button>

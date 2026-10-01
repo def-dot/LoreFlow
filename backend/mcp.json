@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "系统监控(MCP)": {
+    "系统监控": {
       "command": "uv",
       "args": [
         "run",
@@ -9,7 +9,7 @@
       ],
       "env": {}
     },
-    "数据库(MCP)": {
+    "数据库": {
       "command": "npx",
       "args": [
         "-y",
@@ -18,9 +18,10 @@
         "stdio",
         "--dsn",
         "postgresql://postgres:postgres@localhost:5432/loreflow?sslmode=disable"
-      ]
+      ],
+      "env": {}
     },
-    "Notion(MCP)": {
+    "Notion": {
       "command": "npx",
       "args": [
         "-y",
@@ -30,7 +31,7 @@
         "NOTION_TOKEN": "${NOTION_TOKEN}"
       }
     },
-    "文件系统(MCP)": {
+    "文件系统": {
       "command": "npx",
       "args": [
         "-y",
