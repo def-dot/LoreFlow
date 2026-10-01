@@ -26,8 +26,6 @@ from app.schemas.mcp import McpServerConfigIn, McpStdioConfig, McpHttpConfig
 logger = logging.getLogger(__name__)
 
 
-
-
 # ---------------------------------------------------------------------------
 # mcp.json 配置读写
 # ---------------------------------------------------------------------------
@@ -76,14 +74,6 @@ class McpServerState(BaseModel):
 _servers: dict[str, McpServerState] = {}
 _stacks: dict[str, AsyncExitStack] = {}
 _lock = asyncio.Lock()
-
-
-# ---------------------------------------------------------------------------
-# 内部工具
-# ---------------------------------------------------------------------------
-
-
-
 
 
 def _make_call(sess: ClientSession, tool_name: str, timeout: float | None = None):
