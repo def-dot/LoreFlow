@@ -54,15 +54,6 @@ def list_plugins() -> list[PluginInfo]:
     return sorted(_LOADED.values(), key=lambda p: p.filename)
 
 
-def plugin_owner_index() -> dict[str, str]:
-    """注册名（节点或工具）→ 插件文件名，用于区分 builtin / plugin 来源。"""
-    idx: dict[str, str] = {}
-    for info in _LOADED.values():
-        for name in info.node_names + info.tool_names:
-            idx[name] = info.filename
-    return idx
-
-
 def _load(path: Path) -> None:
     """加载单个插件文件（调用前注册表已被 load_plugins 清空）。
 

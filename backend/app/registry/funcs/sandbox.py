@@ -28,7 +28,7 @@ class RunCodeParams(BaseModel):
     node=False,
     label="依赖安装",
     description="在沙箱中安装 Python 包。run_code 报 ModuleNotFoundError 时用此工具安装缺失包",
-    metadata={"group": "工具"},
+    metadata={"group": "基础", "order": 32},
 )
 async def pip_install(params: PipInstallParams) -> PipInstallOutput:
     async with http_client() as client:
@@ -47,7 +47,7 @@ async def pip_install(params: PipInstallParams) -> PipInstallOutput:
     node=False,
     label="代码执行",
     description="在沙箱中执行 Python 代码并返回 stdout。如需保存文件，写入 /uploads 目录。",
-    metadata={"group": "工具"},
+    metadata={"group": "基础", "order": 33},
 )
 async def run_code(params: RunCodeParams) -> RunCodeOutput:
     async with http_client() as client:

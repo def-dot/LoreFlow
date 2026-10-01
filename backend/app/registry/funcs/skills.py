@@ -14,7 +14,7 @@ class LoadSkillParams(BaseModel):
     name: str = Field(description="技能名称")
 
 
-@func(node=False, description="加载技能的完整指令", label="加载技能")
+@func(node=False, description="加载技能的完整指令", label="加载技能", metadata={"group": "基础", "order": 32})
 async def load_skill(params: LoadSkillParams) -> LoadSkillOutput:
     sd = SKILL_REGISTRY.get(params.name)
     if not sd:

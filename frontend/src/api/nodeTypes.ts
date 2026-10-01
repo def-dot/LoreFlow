@@ -14,24 +14,18 @@ export interface JsonSchema {
   additionalProperties?: boolean | JsonSchema
 }
 
-export interface SourceInfo {
-  kind: 'builtin' | 'plugin' | 'mcp'
+export interface FuncInfo {
   name: string
-}
-
-export interface NodeTypeInfo {
-  name: string
-  kind?: 'function' | 'condition'
   label: string
   description: string
   metadata?: Record<string, any>
   input_schema?: JsonSchema | null
   output_schema?: JsonSchema | null
-  /** 消费方：node = 工作流节点，tool = Agent 工具 */
-  roles?: string[]
-  source?: SourceInfo
 }
 
-export function listNodeTypes(): Promise<NodeTypeInfo[]> {
+/** @deprecated 用 FuncInfo */
+export type NodeTypeInfo = FuncInfo
+
+export function listNodeTypes(): Promise<FuncInfo[]> {
   return api.get('/node-types')
 }

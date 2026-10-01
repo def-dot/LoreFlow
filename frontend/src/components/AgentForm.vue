@@ -44,10 +44,11 @@ const toolTreeData = computed<TreeNode[]>(() => {
   const grouped = new Map<string, ToolOut[]>()
   const ungrouped: TreeNode[] = []
   for (const t of allTools.value) {
-    if (t.group) {
-      const arr = grouped.get(t.group) || []
+    const g = t.metadata?.group
+    if (g) {
+      const arr = grouped.get(g) || []
       arr.push(t)
-      grouped.set(t.group, arr)
+      grouped.set(g, arr)
     } else {
       ungrouped.push({ id: t.name, label: t.label, description: t.description })
     }

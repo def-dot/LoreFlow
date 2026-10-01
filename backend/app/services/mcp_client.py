@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.core.config import settings
 from app.registry.types import TOOL_REGISTRY, FuncDef
@@ -65,6 +65,7 @@ class McpServerState(BaseModel):
     tool_names: list[str] = Field(default_factory=list)
     connected_at: datetime | None = None
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def transport(self) -> str:
         return "stdio" if isinstance(self.config, McpStdioConfig) else "http"

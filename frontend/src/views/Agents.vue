@@ -29,10 +29,11 @@ function compressTools(tools: string[]): string[] {
   const grouped = new Map<string, ToolOut[]>()
   const labelMap = new Map<string, string>()
   for (const t of allTools.value) {
-    if (t.group) {
-      const arr = grouped.get(t.group) || []
+    const g = t.metadata?.group
+    if (g) {
+      const arr = grouped.get(g) || []
       arr.push(t)
-      grouped.set(t.group, arr)
+      grouped.set(g, arr)
     } else {
       labelMap.set(t.name, t.label)
     }

@@ -33,7 +33,6 @@ from app.routers import (
     health,
     knowledge,
     mcp,
-    node_types,
     pipelines,
     plugins,
     registry,
@@ -80,7 +79,6 @@ app.add_middleware(
 
 API_V1 = "/api/v1"
 app.include_router(runs.router, prefix=API_V1)
-app.include_router(node_types.router, prefix=API_V1)
 app.include_router(pipelines.router, prefix=API_V1)
 app.include_router(plugins.router, prefix=API_V1)
 app.include_router(uploads.router, prefix=API_V1)

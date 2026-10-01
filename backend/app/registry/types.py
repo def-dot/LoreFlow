@@ -12,8 +12,8 @@ from __future__ import annotations
 import inspect
 import logging
 import typing
-from dataclasses import dataclass, field
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel
@@ -136,31 +136,3 @@ def func(
         return fn
 
     return decorator
-
-
-
-# ---------------------------------------------------------------------------
-# 用途 / 来源标注（供 API 层展示）
-# ---------------------------------------------------------------------------
-
-def roles_of(name: str) -> list[str]:
-    """该名字暴露给哪些消费方：node = 工作流，tool = Agent。"""
-    roles: list[str] = []
-    if name in REGISTRY:
-        roles.append("node")
-    if name in TOOL_REGISTRY:
-        roles.append("tool")
-    return roles
-
-
-def source_of(fd: FuncDef, owner: str = "") -> tuple[str, str]:
-    """返回 (kind, name)：builtin / plugin / mcp。
-
-    ``owner`` 是插件文件名（可选）；MCP 来源由注册时写入的 metadata 判定。
-    """
-    meta = fd.metadata or {}
-    if meta.get("source") == "mcp":
-        return "mcp", str(meta.get("source_name") or meta.get("group") or "")
-    if owner:
-        return "plugin", owner
-    return "builtin", ""

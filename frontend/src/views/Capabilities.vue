@@ -33,6 +33,8 @@ const roleFilter = ref<RoleFilter>('all')
 const searchQuery = ref('')
 
 /** 名录条目：节点与工具并集（双端注册的 FuncDef 只出现一次） */
+interface SourceInfo { kind: 'builtin' | 'plugin' | 'mcp'; name: string }
+
 interface CatalogItem {
   name: string
   label: string
@@ -41,20 +43,34 @@ interface CatalogItem {
   input_schema?: NodeTypeInfo['input_schema']
   output_schema?: NodeTypeInfo['output_schema']
   roles?: string[]
-  source?: NodeTypeInfo['source']
+  source?: SourceInfo
 }
 
-function catalogKey(t: { name: string; source?: NodeTypeInfo['source'] }): string {
+function catalogKey(t: { name: string; source?: SourceInfo }): string {
   return `${t.name}::${t.source?.kind ?? 'builtin'}::${t.source?.name ?? ''}`
 }
 
-/** 一张名录：REGISTRY 与 TOOL_REGISTRY 的并集 */
+/** 一张名录：REGISTRY 与 TOOL_REGISTRY 的并集，source / roles 由前端推算 */
 const catalogItems = computed<CatalogItem[]>(() => {
+  // 从 plugins / mcpServers 构建 name → source 索引
+  const srcMap = new Map<string, SourceInfo>()
+  for (const p of plugins.value)
+    for (const n of p.node_names) srcMap.set(n, { kind: 'plugin', name: p.filename })
+  for (const p of plugins.value)
+    for (const n of p.tool_names) srcMap.set(n, { kind: 'plugin', name: p.filename })
+  for (const s of mcpServers.value)
+    for (const n of s.tool_names) srcMap.set(n, { kind: 'mcp', name: s.name })
+
+  const toolSet = new Set(tools.value.map((t) => t.name))
   const map = new Map<string, CatalogItem>()
-  for (const t of nodeTypes.value) map.set(catalogKey(t), t)
+  for (const t of nodeTypes.value) {
+    const roles: string[] = toolSet.has(t.name) ? ['node', 'tool'] : ['node']
+    map.set(catalogKey(t), { ...t, roles, source: srcMap.get(t.name) })
+  }
   for (const t of tools.value) {
     const k = catalogKey(t)
-    if (!map.has(k)) map.set(k, t as CatalogItem)
+    if (map.has(k)) continue
+    map.set(k, { ...t, roles: ['tool'], source: srcMap.get(t.name) })
   }
   return [...map.values()]
 })
@@ -221,12 +237,27 @@ async function fetchAll() {
   }
 }
 
+/** 插件增删后只刷新受影响的三项 */
+async function refreshAfterPluginChange() {
+  const [n, t, p] = await Promise.all([listNodeTypes(), listTools(), listPlugins()])
+  nodeTypes.value = n ?? []
+  tools.value = t ?? []
+  plugins.value = p.plugins ?? []
+}
+
+/** MCP 增删改后只刷新 mcpServers 和 tools */
+async function refreshAfterMcpChange() {
+  const [t, m] = await Promise.all([listTools(), listMcpServers()])
+  tools.value = t ?? []
+  mcpServers.value = m ?? []
+}
+
 async function handleUpload(file: File) {
   uploading.value = true
   try {
     const plugin = await uploadPlugin(file)
     ElMessage.success(`脚本 ${plugin.filename} 上传成功`)
-    await fetchAll()
+    await refreshAfterPluginChange()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '上传失败')
   } finally {
@@ -250,7 +281,7 @@ async function handleDeletePlugin(p: PluginInfo) {
     })
     await deletePlugin(p.filename)
     ElMessage.success(`脚本 ${p.filename} 已删除`)
-    await fetchAll()
+    await refreshAfterPluginChange()
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || e?.message || '删除失败')
   }
@@ -276,7 +307,7 @@ async function handleReconnect(s: McpServer) {
     Object.assign(s, updated)
     if (updated.status === 'connected') ElMessage.success(`${s.name} 已连接（${updated.tool_names.length} 个工具）`)
     else ElMessage.warning(`${s.name} 连接失败`)
-    await fetchAll()
+    await refreshAfterMcpChange()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '重连失败')
   } finally {
@@ -328,7 +359,7 @@ async function handleDeleteMcp(s: McpServer) {
   try {
     await deleteMcpServer(s.name)
     ElMessage.success(`已删除 ${s.name}`)
-    await fetchAll()
+    await refreshAfterMcpChange()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.msg || e?.message || '删除失败')
   }
@@ -337,7 +368,7 @@ async function handleDeleteMcp(s: McpServer) {
 async function onMcpSaved() {
   mcpFormOpen.value = false
   mcpEditing.value = null
-  await fetchAll()
+  await refreshAfterMcpChange()
 }
 
 const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | 'info' | 'warning' }> = {

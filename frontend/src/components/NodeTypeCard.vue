@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { JsonSchema, SourceInfo } from '@/api/nodeTypes'
+import type { JsonSchema } from '@/api/nodeTypes'
 import SchemaFields from './SchemaFields.vue'
 
 /** NodeTypeCard 兼容节点类型与工具（两者的展示字段一致） */
@@ -11,7 +11,6 @@ interface CardNode {
   input_schema?: JsonSchema | null
   output_schema?: JsonSchema | null
   roles?: string[]
-  source?: SourceInfo
 }
 
 const props = defineProps<{
