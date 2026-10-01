@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,7 +26,6 @@ from app.schemas.mcp import McpServerConfigIn, McpStdioConfig, McpHttpConfig
 logger = logging.getLogger(__name__)
 
 
-_ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
 
 
 # ---------------------------------------------------------------------------
@@ -86,15 +84,6 @@ _lock = asyncio.Lock()
 
 
 
-def _resolve_env(env_cfg: dict[str, Any] | None) -> dict[str, str] | None:
-    """展开 env 配置中的 ${VAR} 占位符为当前进程环境变量。"""
-    if not env_cfg:
-        return None
-    resolved: dict[str, str] = {}
-    for key, value in env_cfg.items():
-        text = "" if value is None else str(value)
-        resolved[str(key)] = _ENV_VAR_RE.sub(lambda m: os.environ.get(m.group(1), ""), text)
-    return resolved
 
 
 def _make_call(sess: ClientSession, tool_name: str, timeout: float | None = None):
@@ -124,7 +113,7 @@ async def _connect_server(name: str, config: McpStdioConfig | McpHttpConfig) -> 
             read, write = await stack.enter_async_context(stdio_client(StdioServerParameters(
                 command=config.command,
                 args=config.args,
-                env=_resolve_env(config.env),
+                env={k: os.path.expandvars(v) for k, v in config.env.items()} or None,
             )))
         elif isinstance(config, McpHttpConfig):
             from mcp.client.streamable_http import streamable_http_client

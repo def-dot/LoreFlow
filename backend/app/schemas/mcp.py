@@ -22,7 +22,6 @@ class McpHttpConfig(BaseModel):
 
     url: str = Field(min_length=1)
     headers: dict[str, str] = Field(default_factory=dict)
-    env: dict[str, str] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
