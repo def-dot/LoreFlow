@@ -249,23 +249,26 @@ def _start_background_connect(names: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 async def init_mcp(config_path: Path) -> None:
-    """读取标准 MCP 配置并注册服务器状态，连接在后台进行。"""
-    if not config_path.exists():
-        logger.info("[mcp] 配置文件不存在，跳过：%s", config_path)
-        return
+    """读取标准 MCP 配置并注册服务器状态，连接在后台进行。异常兜底，不阻塞启动。"""
+    try:
+        if not config_path.exists():
+            logger.info("[mcp] 配置文件不存在，跳过：%s", config_path)
+            return
 
-    entries = load_doc().get("mcpServers", {})
-    if not entries:
-        logger.info("[mcp] 无服务器配置")
-        return
+        entries = load_doc().get("mcpServers", {})
+        if not entries:
+            logger.info("[mcp] 无服务器配置")
+            return
 
-    async with _lock:
-        for name, cfg in entries.items():
-            _servers[name] = McpServerState(
-                name=name, transport=_infer_transport(cfg), config=cfg,
-            )
+        async with _lock:
+            for name, cfg in entries.items():
+                _servers[name] = McpServerState(
+                    name=name, transport=_infer_transport(cfg), config=cfg,
+                )
 
-    _start_background_connect(list(_servers))
+        _start_background_connect(list(_servers))
+    except Exception:
+        logger.exception("MCP 初始化失败")
 
 
 async def shutdown_mcp() -> None:

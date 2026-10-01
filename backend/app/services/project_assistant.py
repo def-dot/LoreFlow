@@ -18,28 +18,32 @@ _PROMPT = """\
 
 
 async def ensure_project_assistant() -> None:
-    from sqlmodel import select
+    """启动时自动创建「系统小助手」Agent，已存在则跳过。异常兜底，不阻塞启动。"""
+    try:
+        from sqlmodel import select
 
-    from app.registry.types import TOOL_REGISTRY
+        from app.registry.types import TOOL_REGISTRY
 
-    async with AsyncSessionLocal() as session:
-        existing = (
-            await session.exec(
-                select(AgentRecord).where(AgentRecord.name == "系统小助手")
+        async with AsyncSessionLocal() as session:
+            existing = (
+                await session.exec(
+                    select(AgentRecord).where(AgentRecord.name == "系统小助手")
+                )
+            ).one_or_none()
+            if existing:
+                return
+            tools = [
+                name for name, td in TOOL_REGISTRY.items()
+                if td.metadata.get("group") in ("数据库MCP", "文件系统MCP", "系统监控MCP")
+            ]
+            agent = AgentRecord(
+                name="系统小助手",
+                description="帮你了解项目、查询数据、查看系统状态",
+                system_prompt=_PROMPT,
+                tools=tools,
             )
-        ).one_or_none()
-        if existing:
-            return
-        tools = [
-            name for name, td in TOOL_REGISTRY.items()
-            if td.metadata.get("group") in ("数据库MCP", "文件系统MCP", "系统监控MCP")
-        ]
-        agent = AgentRecord(
-            name="系统小助手",
-            description="帮你了解项目、查询数据、查看系统状态",
-            system_prompt=_PROMPT,
-            tools=tools,
-        )
-        session.add(agent)
-        await session.commit()
-        logger.info("项目助手 Agent 已创建 (#%d), tools=%s", agent.id, tools)
+            session.add(agent)
+            await session.commit()
+            logger.info("项目助手 Agent 已创建 (#%d), tools=%s", agent.id, tools)
+    except Exception:
+        logger.exception("项目助手 Agent 初始化失败")

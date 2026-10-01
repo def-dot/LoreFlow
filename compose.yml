@@ -34,7 +34,7 @@ services:
 
   tei-embed:
     # 无 GPU 用 cpu 镜像；有卡再换回 86-1.6 + 下方 device 预留
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.6
     container_name: bge-m3-embed
     command: >
       --model-id /data
@@ -53,7 +53,7 @@ services:
       retries: 3
 
   tei-rerank:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.6
     container_name: bge-reranker
     command: >
       --model-id /data

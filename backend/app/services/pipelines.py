@@ -12,16 +12,71 @@ from typing import Any
 
 import yaml
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlmodel import select
 
 from app.core import database
 from app.core.config import settings
+from app.core.logging import get_logger
 
 from app.engine.pipeline import Pipeline
+
+logger = get_logger(__name__)
 from app.models.pipeline import PipelineRecord
 from app.registry import REGISTRY
 
 PIPELINES_DIR = settings.PIPELINES_DIR
+
+
+async def sync_pipelines_from_yaml() -> None:
+    """启动时将 pipelines/*.yaml 同步到数据库（存在则更新，不存在则插入）。
+
+    使用 pg_try_advisory_lock 保证多 worker 下只有一个进程执行。
+    整体异常兜底——不抛出，避免阻塞启动。
+    """
+    try:
+        if not PIPELINES_DIR.is_dir():
+            return
+
+        yaml_files = sorted(PIPELINES_DIR.glob("*.yaml"))
+        if not yaml_files:
+            return
+
+        async with database.AsyncSessionLocal() as session:
+            result = await session.execute(
+                text("SELECT pg_try_advisory_xact_lock(hashtext('pipelines_yaml_sync'))")
+            )
+            locked = result.scalar()
+            if not locked:
+                return
+
+            logger.info("同步 pipelines YAML → 数据库 (%d 个文件)", len(yaml_files))
+
+            for f in yaml_files:
+                try:
+                    raw = f.read_text(encoding="utf-8")
+                    data = yaml.safe_load(raw)
+                    name = data.get("name", f.stem)
+                    description = data.get("description", "")
+
+                    stmt = select(PipelineRecord).where(PipelineRecord.name == name)
+                    result = await session.execute(stmt)
+                    existing = result.scalars().first()
+
+                    if existing:
+                        existing.description = description
+                        existing.definition = raw
+                        session.add(existing)
+                    else:
+                        session.add(PipelineRecord(name=name, description=description, definition=raw))
+                except Exception:
+                    logger.warning("跳过 %s", f.name, exc_info=True)
+
+            await session.commit()
+
+        logger.info("Pipelines 同步完成")
+    except Exception:
+        logger.exception("Pipelines YAML 同步失败")
 
 
 async def list_pipelines(q: str | None = None) -> list[PipelineRecord]:

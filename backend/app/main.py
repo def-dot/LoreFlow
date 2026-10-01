@@ -42,6 +42,7 @@ from app.routers import (
 )
 from app.services import orchestrator
 from app.services.mcp_client import init_mcp, shutdown_mcp
+from app.services.pipelines import sync_pipelines_from_yaml
 from app.services.project_assistant import ensure_project_assistant
 
 load_dotenv()
@@ -53,14 +54,9 @@ logger = get_logger(__name__)
 async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
     discover_skills(settings.SKILLS_DIR)
-    try:
-        await init_mcp(settings.MCP_CONFIG)
-    except Exception:
-        logger.exception("MCP 初始化失败")
-    try:
-        await ensure_project_assistant()
-    except Exception:
-        logger.exception("项目助手 Agent 初始化失败")
+    await init_mcp(settings.MCP_CONFIG)
+    await ensure_project_assistant()
+    await sync_pipelines_from_yaml()
     try:
         await orchestrator.resume_stuck_runs()
         yield
