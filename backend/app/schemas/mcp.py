@@ -18,10 +18,9 @@ class McpStdioConfig(BaseModel):
 
 
 class McpHttpConfig(BaseModel):
-    """SSE / Streamable HTTP 传输：远程服务。"""
+    """HTTP 传输：远程服务。"""
 
     url: str = Field(min_length=1)
-    transport: str = Field(default="http", pattern="^(sse|http)$")
     headers: dict[str, str] = Field(default_factory=dict)
     env: dict[str, str] = Field(default_factory=dict)
 

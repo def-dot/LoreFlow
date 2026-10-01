@@ -17,7 +17,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.registry import REGISTRY, TOOL_REGISTRY, unregister, unregister_tool
+from app.registry import REGISTRY, TOOL_REGISTRY
 
 logger = get_logger(__name__)
 plugins_dir = Path(settings.PLUGINS_DIR)
@@ -41,9 +41,9 @@ def load_plugins() -> None:
     """
     for info in _LOADED.values():
         for name in info.node_names:
-            unregister(name)
+            REGISTRY.pop(name, None)
         for name in info.tool_names:
-            unregister_tool(name)
+            TOOL_REGISTRY.pop(name, None)
     _LOADED.clear()
     for path in sorted(p for p in plugins_dir.glob("*.py") if not p.name.startswith("_")):
         _load(path)

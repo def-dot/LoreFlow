@@ -23,22 +23,14 @@ from .types import (
     TOOL_REGISTRY,
     FuncDef,
     func,
-    unregister,
-    unregister_tool,
 )
 
 # 导入内置节点类型和工具 — 触发 @func 装饰器注册
 from . import funcs  # noqa: E402, F401
 
 __all__ = [
-    # 统一函数定义
     "FuncDef",
-    # 双注册表
     "REGISTRY",
     "TOOL_REGISTRY",
-    # 装饰器
     "func",
-    # 注销
-    "unregister",
-    "unregister_tool",
 ]

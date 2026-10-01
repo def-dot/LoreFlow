@@ -3,7 +3,7 @@
 运行时状态查询 + 配置增删改（写回 ``mcp.json``，标准 MCP 格式）。
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.core.response import UnifiedResponseRoute
 from app.schemas.mcp import DeleteResult, McpServerConfigIn
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/mcp", route_class=UnifiedResponseRoute, tags=["mcp"]
 async def get_server(name: str) -> McpServerConfigIn:
     cfg = mcp_client.load_doc().get("mcpServers", {}).get(name)
     if cfg is None:
-        raise HTTPException(status_code=404, detail=f"MCP 服务器 {name} 不存在")
+        raise ValueError(f"MCP 服务器 {name} 不存在")
     return McpServerConfigIn(mcpServers={name: cfg})
 
 
@@ -34,18 +34,12 @@ async def create_server(body: McpServerConfigIn) -> McpServerState:
 @router.put("/servers/{name}", response_model=McpServerState)
 async def update_server(name: str, body: McpServerConfigIn) -> McpServerState:
     """接受标准 mcpServers 配置，更新指定服务器（支持改名）。"""
-    try:
-        return await mcp_client.update_server(name, body)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"MCP 服务器 {name} 不存在") from None
+    return await mcp_client.update_server(name, body)
 
 
 @router.delete("/servers/{name}", response_model=DeleteResult)
 async def delete_server(name: str) -> DeleteResult:
-    try:
-        await mcp_client.delete_server(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"MCP 服务器 {name} 不存在") from None
+    await mcp_client.delete_server(name)
     return DeleteResult()
 
 
@@ -60,10 +54,7 @@ async def list_servers() -> list[McpServerState]:
 
 @router.post("/servers/{name}/reconnect", response_model=McpServerState)
 async def reconnect_server(name: str) -> McpServerState:
-    try:
-        return await mcp_client.reconnect_server(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"MCP 服务器 {name} 不存在") from None
+    return await mcp_client.reconnect_server(name)
 
 
 @router.post("/servers/reconnect-all", response_model=list[McpServerState])

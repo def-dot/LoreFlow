@@ -138,15 +138,6 @@ def func(
     return decorator
 
 
-def unregister(name: str) -> FuncDef | None:
-    """从节点注册表删除一个节点。"""
-    return REGISTRY.pop(name, None)
-
-
-def unregister_tool(name: str) -> FuncDef | None:
-    """从工具注册表删除一个节点。"""
-    return TOOL_REGISTRY.pop(name, None)
-
 
 # ---------------------------------------------------------------------------
 # 用途 / 来源标注（供 API 层展示）

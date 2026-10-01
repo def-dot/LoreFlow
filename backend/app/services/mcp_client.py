@@ -17,12 +17,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
 from mcp import ClientSession
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.registry.types import TOOL_REGISTRY, FuncDef, unregister_tool
+from app.registry.types import TOOL_REGISTRY, FuncDef
 from app.schemas.mcp import McpServerConfigIn, McpStdioConfig, McpHttpConfig
 
 logger = logging.getLogger(__name__)
@@ -61,13 +60,10 @@ DEFAULT_TIMEOUT = 60
 
 
 class McpServerState(BaseModel):
-    """单个 MCP 服务器的配置与运行状态。"""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    """单个 MCP 服务器的运行状态。"""
 
     name: str
     config: McpStdioConfig | McpHttpConfig = Field(exclude=True)
-    _stack: AsyncExitStack | None = None
     status: str = STATUS_CONNECTING
     error: str | None = None
     tool_names: list[str] = Field(default_factory=list)
@@ -75,13 +71,12 @@ class McpServerState(BaseModel):
 
     @property
     def transport(self) -> str:
-        if isinstance(self.config, McpStdioConfig):
-            return "stdio"
-        return "http"
+        return "stdio" if isinstance(self.config, McpStdioConfig) else "http"
 
 
 #: 服务器名 → 状态
 _servers: dict[str, McpServerState] = {}
+_stacks: dict[str, AsyncExitStack] = {}
 _lock = asyncio.Lock()
 _connect_task: asyncio.Task[None] | None = None
 
@@ -90,12 +85,6 @@ _connect_task: asyncio.Task[None] | None = None
 # 内部工具
 # ---------------------------------------------------------------------------
 
-
-def _parse_config(raw: dict[str, Any]) -> McpStdioConfig | McpHttpConfig:
-    """从 dict 解析出对应的配置模型。"""
-    if raw.get("command"):
-        return McpStdioConfig(**raw)
-    return McpHttpConfig(**raw)
 
 
 def _resolve_env(env_cfg: dict[str, Any] | None) -> dict[str, str] | None:
@@ -122,39 +111,27 @@ def _make_call(sess: ClientSession, tool_name: str, timeout: float | None = None
     return _call
 
 
-def _drop_tools(state: McpServerState) -> None:
-    """注销该服务器注册过的工具。"""
-    for name in state.tool_names:
-        td = TOOL_REGISTRY.get(name)
-        if td is None:
-            continue
-        meta = td.metadata or {}
-        if meta.get("source") == "mcp" and meta.get("source_name") == state.name:
-            unregister_tool(name)
-    state.tool_names = []
 
-
-async def _connect_server(state: McpServerState) -> None:
-    """连接单个 MCP 服务器并注册其工具（调用方持有 _lock）。"""
-    cfg = state.config
-    state.status = STATUS_CONNECTING
-    state.error = None
+async def _connect_server(name: str, config: McpStdioConfig | McpHttpConfig) -> McpServerState:
+    """创建状态、连接服务器、注册工具，放入 _servers（调用方持有 _lock）。"""
+    state = McpServerState(name=name, config=config)
+    _servers[name] = state
 
     stack = AsyncExitStack()
     try:
         # ── 建立 transport + session ──
-        if isinstance(cfg, McpStdioConfig):
+        if isinstance(config, McpStdioConfig):
             from mcp.client.stdio import StdioServerParameters, stdio_client
             read, write = await stack.enter_async_context(stdio_client(StdioServerParameters(
-                command=cfg.command,
-                args=cfg.args,
-                env=_resolve_env(cfg.env),
+                command=config.command,
+                args=config.args,
+                env=_resolve_env(config.env),
             )))
-        elif isinstance(cfg, McpHttpConfig):
+        elif isinstance(config, McpHttpConfig):
             from mcp.client.streamable_http import streamable_http_client
-            read, write, _ = await stack.enter_async_context(streamable_http_client(cfg.url))
+            read, write, _ = await stack.enter_async_context(streamable_http_client(config.url))
         else:
-            raise ValueError(f"未知配置类型: {type(cfg)}")
+            raise ValueError(f"未知配置类型: {type(config)}")
 
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
@@ -162,46 +139,48 @@ async def _connect_server(state: McpServerState) -> None:
         # ── 注册工具 ──
         tools_result = await session.list_tools()
         for t in tools_result.tools:
-            existing = TOOL_REGISTRY.get(t.name)
-            if existing is not None and (existing.metadata or {}).get("source") != "mcp":
-                logger.warning("[mcp] 工具名 %s 与已有工具冲突，服务器 %s 将覆盖它", t.name, state.name)
+            if t.name in TOOL_REGISTRY:
+                logger.warning("[mcp] 工具名 %s 与已有工具冲突，服务器 %s 将覆盖它", t.name, name)
             td = FuncDef(
                 name=t.name,
                 func=_make_call(session, t.name, timeout=DEFAULT_TIMEOUT),
                 description=t.description or "",
                 label=t.name,
-                metadata={"group": state.name, "source": "mcp", "source_name": state.name},
+                metadata={"group": name, "source": "mcp", "source_name": name},
                 input_schema=t.inputSchema,
                 output_schema=t.outputSchema,
             )
             TOOL_REGISTRY[t.name] = td
 
         state.tool_names = [t.name for t in tools_result.tools]
-        state._stack = stack
+        _stacks[name] = stack
         state.status = STATUS_CONNECTED
         state.error = None
         state.connected_at = datetime.now(UTC)
-        logger.info("[mcp] 已连接 %s（%s），注册 %d 个工具", state.name, state.transport, len(state.tool_names))
+        logger.info("[mcp] 已连接 %s（%s），注册 %d 个工具", name, state.transport, len(state.tool_names))
     except Exception as exc:
         await stack.aclose()
-        logger.exception("[mcp] 连接服务器 %s 失败", state.name)
+        logger.exception("[mcp] 连接服务器 %s 失败", name)
         state.status = STATUS_FAILED
         state.error = str(exc) or exc.__class__.__name__
         state.tool_names = []
 
+    return state
 
-async def _close_server(state: McpServerState) -> None:
-    """断开连接并清掉工具（调用方持有 _lock）。"""
-    _drop_tools(state)
-    if state._stack is not None:
+
+async def _close_server(name: str) -> None:
+    """断开连接、清掉工具、移除运行态（调用方持有 _lock）。"""
+    state = _servers.pop(name, None)
+    if state is None:
+        return
+    for t in state.tool_names:
+        TOOL_REGISTRY.pop(t, None)
+    stack = _stacks.pop(name, None)
+    if stack is not None:
         try:
-            await state._stack.aclose()
+            await stack.aclose()
         except Exception:
-            logger.debug("[mcp] 关闭 %s 资源时出错", state.name, exc_info=True)
-        state._stack = None
-    state.connected_at = None
-    state.status = STATUS_CONNECTING
-
+            logger.debug("[mcp] 关闭 %s 资源时出错", name, exc_info=True)
 
 
 def _start_background_connect(names: list[str]) -> None:
@@ -242,9 +221,9 @@ async def init_mcp(config_path: Path) -> None:
 
         async with _lock:
             for name, cfg in entries.items():
-                _servers[name] = McpServerState(
-                    name=name, config=_parse_config(cfg),
-                )
+                cfg_model = McpStdioConfig(**cfg) if cfg.get("command") else McpHttpConfig(**cfg)
+                state = McpServerState(name=name, config=cfg_model)
+                _servers[name] = state
 
         _start_background_connect(list(_servers))
     except Exception:
@@ -261,9 +240,8 @@ async def shutdown_mcp() -> None:
         except asyncio.CancelledError:
             pass
     async with _lock:
-        for state in list(_servers.values()):
-            await _close_server(state)
-        _servers.clear()
+        for name in list(_servers):
+            await _close_server(name)
 
 
 # ---------------------------------------------------------------------------
@@ -280,81 +258,58 @@ async def create_server(body: McpServerConfigIn) -> McpServerState:
     """新增服务器：先写配置文件，再建运行态并连接。"""
     name, cfg = next(iter(body.mcpServers.items()))
     name = name.strip()
-    cfg_dict = cfg.model_dump(exclude_none=True)
     async with _lock:
         doc = load_doc()
         servers = doc.get("mcpServers", {})
         if name in servers:
-            raise HTTPException(status_code=409, detail=f"MCP 服务器 {name!r} 已存在")
-        servers[name] = cfg_dict
+            raise ValueError(f"MCP 服务器 {name!r} 已存在")
+        
+        servers[name] = cfg.model_dump(exclude_none=True)
         save_doc(doc)
 
-        state = McpServerState(
-            name=name, config=cfg,
-        )
-        _servers[name] = state
-        await _connect_server(state)
-        return state
+        return await _connect_server(name, cfg)
 
 
 async def update_server(name: str, body: McpServerConfigIn) -> McpServerState:
     """更新服务器（含改名）。先关旧连接再建新连接。"""
     new_name, cfg = next(iter(body.mcpServers.items()))
     new_name = new_name.strip()
-    cfg_dict = cfg.model_dump(exclude_none=True)
     async with _lock:
-        old = _servers.get(name)
-        if old is None:
-            raise KeyError(name)
-        if new_name != name and load_doc().get("mcpServers", {}).get(new_name) is not None:
-            raise HTTPException(status_code=409, detail=f"MCP 服务器 {new_name!r} 已存在")
-
         doc = load_doc()
         servers = doc.get("mcpServers", {})
+        if name not in servers:
+            raise ValueError(f"MCP 服务器 {name} 不存在") from None
+        if new_name != name and new_name in servers:
+            raise ValueError(f"MCP 服务器 {new_name!r} 已存在")
 
-        if new_name != name:
-            servers.pop(name, None)
-            servers[new_name] = cfg_dict
-        else:
-            servers[name] = cfg_dict
+        servers.pop(name, None)
+        servers[new_name] = cfg.model_dump(exclude_none=True)
         save_doc(doc)
 
-        await _close_server(old)
-        _servers.pop(name, None)
-
-        state = McpServerState(
-            name=new_name,
-            config=cfg,
-        )
-        _servers[new_name] = state
-        await _connect_server(state)
-        return state
+        await _close_server(name)
+        return await _connect_server(new_name, cfg)
 
 
 async def delete_server(name: str) -> None:
     """删除服务器：先删配置文件，再断开并移除运行态。"""
     async with _lock:
-        state = _servers.get(name)
-        if state is None:
-            raise KeyError(name)
         doc = load_doc()
         servers = doc.get("mcpServers", {})
-        servers.pop(name, None)
-
+        if name not in servers:
+            raise ValueError(f"MCP 服务器 {name} 不存在")
+        servers.pop(name)
         save_doc(doc)
-        await _close_server(state)
-        _servers.pop(name, None)
+        await _close_server(name)
 
 
 async def reconnect_server(name: str) -> McpServerState:
     """重连指定服务器。"""
     async with _lock:
-        state = _servers.get(name)
-        if state is None:
-            raise KeyError(name)
-        await _close_server(state)
-        await _connect_server(state)
-        return state
+        old = _servers.get(name)
+        if old is None:
+            raise ValueError(f"MCP 服务器 {name} 不存在")
+        await _close_server(name)
+        return await _connect_server(name, old.config)
 
 
 async def reconnect_all() -> list[McpServerState]:

@@ -10,7 +10,7 @@ import pytest
 
 from app.engine import PipeLine, load_config
 from helpers import validate_config
-from app.registry.types import func, unregister
+from app.registry.types import func, REGISTRY
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,7 @@ def probe():
         return {"seen_document": ctx.get("document")}
 
     yield
-    unregister("wire_probe")
+    REGISTRY.pop("wire_probe", None)
 
 
 CFG: dict[str, Any] = {

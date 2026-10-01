@@ -42,6 +42,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("Unhandled exception")
         return JSONResponse(
-            status_code=500,
-            content={"code": 500, "msg": "服务器内部错误", "data": None},
+            status_code=400,
+            content={"code": 400, "msg": str(exc), "data": None},
         )
