@@ -87,9 +87,5 @@ async def test_mcp_servers_endpoints(client: AsyncClient, monkeypatch, tmp_path)
     # env 里的密钥不外泄
     assert "env" not in demo
 
-    resp = await client.post("/api/v1/mcp/servers/demo-server/enable", json={"enabled": False})
-    assert resp.json()["data"]["enabled"] is False
-    assert resp.json()["data"]["status"] == "disabled"
-
     resp = await client.post("/api/v1/mcp/servers/no-such/reconnect")
     assert resp.status_code == 404

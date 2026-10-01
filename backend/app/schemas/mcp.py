@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 
@@ -23,6 +21,7 @@ class McpHttpConfig(BaseModel):
     """SSE / Streamable HTTP 传输：远程服务。"""
 
     url: str = Field(min_length=1)
+    transport: str = Field(default="http", pattern="^(sse|http)$")
     headers: dict[str, str] = Field(default_factory=dict)
     env: dict[str, str] = Field(default_factory=dict)
 
@@ -34,39 +33,7 @@ class McpHttpConfig(BaseModel):
 class McpServerConfigIn(BaseModel):
     """标准 MCP 配置格式：{ "mcpServers": { "名称": { ... } } }"""
 
-    mcpServers: dict[str, McpStdioConfig | McpHttpConfig]
-
-
-class McpServerConfigOut(BaseModel):
-    """标准 MCP 配置视图。"""
-
-    name: str
-    command: str | None = None
-    args: list[str] = Field(default_factory=list)
-    url: str | None = None
-    env: dict[str, str] = Field(default_factory=dict)
-    headers: dict[str, str] = Field(default_factory=dict)
-
-
-class McpServerOut(BaseModel):
-    """运行时视图——不含 env 密钥。"""
-
-    name: str
-    transport: str
-    status: str
-    enabled: bool
-    error: str | None = None
-    tool_names: list[str] = Field(default_factory=list)
-    connected_at: datetime | None = None
-    endpoint: str = ""
-
-
-class McpServerListResponse(BaseModel):
-    servers: list[McpServerOut] = Field(default_factory=list)
-
-
-class EnableBody(BaseModel):
-    enabled: bool
+    mcpServers: dict[str, McpStdioConfig | McpHttpConfig] = Field(min_length=1)
 
 
 class McpTestResultOut(BaseModel):

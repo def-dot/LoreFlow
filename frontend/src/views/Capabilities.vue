@@ -5,7 +5,7 @@ import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
 import { listTools, listSkills, rescanSkills, type ToolOut, type SkillOut } from '@/api/registry'
 import { listPlugins, uploadPlugin, deletePlugin, type PluginInfo } from '@/api/plugins'
 import {
-  listMcpServers, reconnectMcpServer, reconnectAllMcpServers, setMcpServerEnabled,
+  listMcpServers, reconnectMcpServer, reconnectAllMcpServers,
   getMcpServerConfig, deleteMcpServer,
   type McpServer, type McpServerConfig,
 } from '@/api/mcp'
@@ -207,7 +207,7 @@ async function fetchAll() {
     tools.value = t ?? []
     skills.value = s ?? []
     plugins.value = p.plugins ?? []
-    mcpServers.value = m.servers ?? []
+    mcpServers.value = m ?? []
   } catch {
     loadError.value = true
   } finally {
@@ -278,25 +278,11 @@ async function handleReconnect(s: McpServer) {
   }
 }
 
-async function handleToggle(s: McpServer) {
-  mcpBusy.value = s.name
-  try {
-    const updated = await setMcpServerEnabled(s.name, !s.enabled)
-    Object.assign(s, updated)
-    ElMessage.success(`${s.name} 已${updated.enabled ? '启用' : '停用'}`)
-    await fetchAll()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '操作失败')
-  } finally {
-    mcpBusy.value = ''
-  }
-}
 
 async function handleReconnectAll() {
   mcpBusy.value = '__all__'
   try {
-    const r = await reconnectAllMcpServers()
-    mcpServers.value = r.servers ?? []
+    mcpServers.value = await reconnectAllMcpServers()
     ElMessage.success('已重连全部服务器')
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '重连失败')
@@ -352,8 +338,6 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
   connected: { label: '已连接', type: 'success' },
   connecting: { label: '连接中', type: 'warning' },
   failed: { label: '连接失败', type: 'danger' },
-  disconnected: { label: '未连接', type: 'info' },
-  disabled: { label: '已停用', type: 'info' },
 }
 
 onMounted(fetchAll)
@@ -491,26 +475,12 @@ onMounted(fetchAll)
                 <span class="group-count">{{ g.items.length }} 个工具</span>
                 <span class="group-actions" @click.stop>
                   <el-button
-                    v-if="g.server && g.server.status !== 'connected' && g.server.enabled"
+                    v-if="g.server && g.server.status !== 'connected'"
                     class="btn-soft"
                     size="small"
                     :loading="mcpBusy === g.name"
                     @click="handleReconnect(g.server)"
                   >重连</el-button>
-                  <el-button
-                    v-if="g.server && g.server.status === 'connected'"
-                    class="btn-soft"
-                    size="small"
-                    :loading="mcpBusy === g.name"
-                    @click="handleToggle(g.server)"
-                  >停用</el-button>
-                  <el-button
-                    v-if="g.server && !g.server.enabled"
-                    class="btn-soft"
-                    size="small"
-                    :loading="mcpBusy === g.name"
-                    @click="handleToggle(g.server)"
-                  >启用</el-button>
                   <el-button class="btn-soft" size="small" @click="g.server && openMcpEdit(g.server)">编辑</el-button>
                   <el-button class="btn-soft btn-soft--danger" size="small" @click="g.server && handleDeleteMcp(g.server)">删除</el-button>
                 </span>
@@ -520,7 +490,7 @@ onMounted(fetchAll)
                 <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
               </div>
               <div v-else-if="isGroupOpen(g) && !g.items.length" class="group-empty muted">
-                {{ g.server?.enabled ? '无可用工具' : '已停用' }}
+                无可用工具
               </div>
             </div>
             <div v-if="!mcpServers.length" class="muted source-empty">未配置 MCP 服务器</div>

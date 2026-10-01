@@ -128,23 +128,6 @@ async def test_delete_missing_is_404(client: AsyncClient) -> None:
     assert resp.status_code == 404
 
 
-async def test_enable_is_runtime_only(client: AsyncClient) -> None:
-    """启用/停用只影响内存，不写配置文件。"""
-    await client.post("/api/v1/mcp/servers", json=_payload())
-
-    resp = await client.post("/api/v1/mcp/servers/echo-server/enable", json={"enabled": False})
-    assert resp.status_code == 200
-    assert resp.json()["data"]["enabled"] is False
-
-    # 配置文件里没有 enabled 字段
-    cfg = json.loads(_cfg_path().read_text(encoding="utf-8"))
-    entry = cfg["mcpServers"]["echo-server"]
-    assert "enabled" not in entry
-
-    resp = await client.post("/api/v1/mcp/servers/echo-server/enable", json={"enabled": True})
-    assert resp.json()["data"]["enabled"] is True
-
-
 async def test_validation_errors_in_chinese(client: AsyncClient) -> None:
     resp = await client.post("/api/v1/mcp/servers", json=_payload(command=""))
     assert resp.status_code == 422

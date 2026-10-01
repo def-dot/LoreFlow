@@ -1,16 +1,14 @@
 import { api } from './request'
 
-export type McpStatus = 'disconnected' | 'connecting' | 'connected' | 'failed' | 'disabled'
+export type McpStatus = 'connecting' | 'connected' | 'failed'
 
 export interface McpServer {
   name: string
   transport: string
   status: McpStatus
-  enabled: boolean
   error: string | null
   tool_names: string[]
   connected_at: string | null
-  endpoint: string
 }
 
 export interface McpServerConfig {
@@ -25,12 +23,15 @@ export interface McpServersPayload {
   mcpServers: Record<string, Record<string, any>>
 }
 
-export function listMcpServers(): Promise<{ servers: McpServer[] }> {
+export function listMcpServers(): Promise<McpServer[]> {
   return api.get('/mcp/servers')
 }
 
-export function getMcpServerConfig(name: string): Promise<McpServerConfig> {
-  return api.get(`/mcp/servers/${encodeURIComponent(name)}/config`)
+export async function getMcpServerConfig(name: string): Promise<McpServerConfig> {
+  const res = await api.get<{ mcpServers: Record<string, McpServerConfig> }>(
+    `/mcp/servers/${encodeURIComponent(name)}`,
+  )
+  return { name, ...res.mcpServers[name] }
 }
 
 export function createMcpServer(cfg: McpServersPayload): Promise<McpServer> {
@@ -49,10 +50,6 @@ export function reconnectMcpServer(name: string): Promise<McpServer> {
   return api.post(`/mcp/servers/${encodeURIComponent(name)}/reconnect`)
 }
 
-export function reconnectAllMcpServers(): Promise<{ servers: McpServer[] }> {
+export function reconnectAllMcpServers(): Promise<McpServer[]> {
   return api.post('/mcp/servers/reconnect-all')
-}
-
-export function setMcpServerEnabled(name: string, enabled: boolean): Promise<McpServer> {
-  return api.post(`/mcp/servers/${encodeURIComponent(name)}/enable`, { enabled })
 }

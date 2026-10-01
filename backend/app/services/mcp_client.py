@@ -13,13 +13,13 @@ import logging
 import os
 import re
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 from mcp import ClientSession
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.registry.types import TOOL_REGISTRY, FuncDef, unregister_tool
@@ -52,28 +52,29 @@ def save_doc(doc: dict[str, Any]) -> None:
 
 
 #: 连接状态
-STATUS_DISCONNECTED = "disconnected"
 STATUS_CONNECTING = "connecting"
 STATUS_CONNECTED = "connected"
 STATUS_FAILED = "failed"
-STATUS_DISABLED = "disabled"
 
 #: 默认工具调用超时（秒）
 DEFAULT_TIMEOUT = 60
 
 
-@dataclass
-class McpServerState:
+class McpServerState(BaseModel):
     """单个 MCP 服务器的配置与运行状态。"""
 
     name: str
-    transport: str
-    config: dict[str, Any] = field(default_factory=dict)
-    status: str = STATUS_DISCONNECTED
+    config: McpStdioConfig | McpHttpConfig = Field(exclude=True)
+    status: str = STATUS_CONNECTING
     error: str | None = None
-    tool_names: list[str] = field(default_factory=list)
-    enabled: bool = True
+    tool_names: list[str] = Field(default_factory=list)
     connected_at: datetime | None = None
+
+    @property
+    def transport(self) -> str:
+        if isinstance(self.config, McpStdioConfig):
+            return "stdio"
+        return "http"
 
 
 #: 服务器名 → 状态
@@ -88,13 +89,12 @@ _connect_task: asyncio.Task[None] | None = None
 # 内部工具
 # ---------------------------------------------------------------------------
 
-def _infer_transport(cfg: dict[str, Any]) -> str:
-    """从配置推断 transport：有 command → stdio，有 url → sse。"""
-    if cfg.get("command"):
-        return "stdio"
-    if cfg.get("url"):
-        return "sse"
-    return "stdio"  # fallback
+
+def _parse_config(raw: dict[str, Any]) -> McpStdioConfig | McpHttpConfig:
+    """从 dict 解析出对应的配置模型。"""
+    if raw.get("command"):
+        return McpStdioConfig(**raw)
+    return McpHttpConfig(**raw)
 
 
 def _resolve_env(env_cfg: dict[str, Any] | None) -> dict[str, str] | None:
@@ -133,50 +133,32 @@ def _drop_tools(state: McpServerState) -> None:
     state.tool_names = []
 
 
-async def _open_session(cfg: dict[str, Any], transport: str) -> tuple[ClientSession, AsyncExitStack]:
-    """建立 transport + 会话并 initialize()。"""
-    stack = AsyncExitStack()
-    try:
-        if transport == "sse":
-            from mcp.client.sse import sse_client
-            read, write = await stack.enter_async_context(sse_client(cfg["url"]))
-        elif transport == "stdio":
-            from mcp.client.stdio import StdioServerParameters, stdio_client
-            read, write = await stack.enter_async_context(stdio_client(StdioServerParameters(
-                command=cfg["command"],
-                args=cfg.get("args", []),
-                env=_resolve_env(cfg.get("env")),
-            )))
-        elif transport == "http":
-            from mcp.client.streamable_http import streamablehttp_client
-            read, write, _ = await stack.enter_async_context(streamablehttp_client(cfg["url"]))
-        else:
-            raise ValueError(f"未知 transport: {transport}")
-
-        session = await stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
-        return session, stack
-    except Exception:
-        await stack.aclose()
-        raise
-
-
-async def _connect_server(name: str, cfg: McpStdioConfig | McpHttpConfig) -> None:
+async def _connect_server(state: McpServerState) -> None:
     """连接单个 MCP 服务器并注册其工具（调用方持有 _lock）。"""
     cfg = state.config
     state.status = STATUS_CONNECTING
     state.error = None
 
+    stack = AsyncExitStack()
     try:
-        session, stack = await _open_session(cfg, state.transport)
-    except Exception as exc:
-        logger.exception("[mcp] 连接服务器 %s 失败", state.name)
-        state.status = STATUS_FAILED
-        state.error = str(exc) or exc.__class__.__name__
-        state.tool_names = []
-        return
+        # ── 建立 transport + session ──
+        if isinstance(cfg, McpStdioConfig):
+            from mcp.client.stdio import StdioServerParameters, stdio_client
+            read, write = await stack.enter_async_context(stdio_client(StdioServerParameters(
+                command=cfg.command,
+                args=cfg.args,
+                env=_resolve_env(cfg.env),
+            )))
+        elif isinstance(cfg, McpHttpConfig):
+            from mcp.client.streamable_http import streamable_http_client
+            read, write, _ = await stack.enter_async_context(streamable_http_client(cfg.url))
+        else:
+            raise ValueError(f"未知配置类型: {type(cfg)}")
 
-    try:
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+
+        # ── 注册工具 ──
         tools_result = await session.list_tools()
         registered: list[str] = []
         for t in tools_result.tools:
@@ -202,8 +184,8 @@ async def _connect_server(name: str, cfg: McpStdioConfig | McpHttpConfig) -> Non
         state.connected_at = datetime.now(UTC)
         logger.info("[mcp] 已连接 %s（%s），注册 %d 个工具", state.name, state.transport, len(registered))
     except Exception as exc:
-        logger.exception("[mcp] 读取 %s 工具列表失败", state.name)
         await stack.aclose()
+        logger.exception("[mcp] 连接服务器 %s 失败", state.name)
         state.status = STATUS_FAILED
         state.error = str(exc) or exc.__class__.__name__
         state.tool_names = []
@@ -219,8 +201,7 @@ async def _close_server(state: McpServerState) -> None:
         except Exception:
             logger.debug("[mcp] 关闭 %s 资源时出错", state.name, exc_info=True)
     state.connected_at = None
-    if state.status != STATUS_DISABLED:
-        state.status = STATUS_DISCONNECTED
+    state.status = STATUS_CONNECTING
 
 
 
@@ -263,7 +244,7 @@ async def init_mcp(config_path: Path) -> None:
         async with _lock:
             for name, cfg in entries.items():
                 _servers[name] = McpServerState(
-                    name=name, transport=_infer_transport(cfg), config=cfg,
+                    name=name, config=_parse_config(cfg),
                 )
 
         _start_background_connect(list(_servers))
@@ -296,7 +277,7 @@ def list_servers() -> list[McpServerState]:
 
 
 
-async def create_server(body: McpServerConfigIn) -> dict[str, McpStdioConfig | McpHttpConfig]:
+async def create_server(body: McpServerConfigIn) -> McpServerState:
     """新增服务器：先写配置文件，再建运行态并连接。"""
     name, cfg = next(iter(body.mcpServers.items()))
     name = name.strip()
@@ -310,11 +291,11 @@ async def create_server(body: McpServerConfigIn) -> dict[str, McpStdioConfig | M
         save_doc(doc)
 
         state = McpServerState(
-            name=name, transport=_infer_transport(cfg_dict), config=cfg_dict,
+            name=name, config=cfg,
         )
         _servers[name] = state
-        await _connect_server(body.mcpServers)
-        return body.mcpServers
+        await _connect_server(state)
+        return state
 
 
 async def update_server(name: str, body: McpServerConfigIn) -> McpServerState:
@@ -344,14 +325,10 @@ async def update_server(name: str, body: McpServerConfigIn) -> McpServerState:
 
         state = McpServerState(
             name=new_name,
-            transport=_infer_transport(cfg),
             config=cfg,
-            enabled=old.enabled,
-            status=STATUS_DISABLED if not old.enabled else STATUS_DISCONNECTED,
         )
         _servers[new_name] = state
-        if state.enabled:
-            await _connect_server(state)
+        await _connect_server(state)
         return state
 
 
@@ -376,28 +353,8 @@ async def reconnect_server(name: str) -> McpServerState:
         state = _servers.get(name)
         if state is None:
             raise KeyError(name)
-        if not state.enabled:
-            state.status = STATUS_DISABLED
-            return state
         await _close_server(state)
         await _connect_server(state)
-        return state
-
-
-async def set_server_enabled(name: str, enabled: bool) -> McpServerState:
-    """启停单个服务器（仅内存，不写配置文件）。"""
-    async with _lock:
-        state = _servers.get(name)
-        if state is None:
-            raise KeyError(name)
-        state.enabled = enabled
-        if enabled:
-            state.status = STATUS_DISCONNECTED
-            await _connect_server(state)
-        else:
-            await _close_server(state)
-            state.status = STATUS_DISABLED
-            state.error = None
         return state
 
 
