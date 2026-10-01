@@ -19,7 +19,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from mcp import ClientSession
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import settings
 from app.registry.types import TOOL_REGISTRY, FuncDef, unregister_tool
@@ -63,8 +63,11 @@ DEFAULT_TIMEOUT = 60
 class McpServerState(BaseModel):
     """单个 MCP 服务器的配置与运行状态。"""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
     config: McpStdioConfig | McpHttpConfig = Field(exclude=True)
+    _stack: AsyncExitStack | None = None
     status: str = STATUS_CONNECTING
     error: str | None = None
     tool_names: list[str] = Field(default_factory=list)
@@ -79,8 +82,6 @@ class McpServerState(BaseModel):
 
 #: 服务器名 → 状态
 _servers: dict[str, McpServerState] = {}
-#: 服务器名 → 连接资源
-_stacks: dict[str, AsyncExitStack] = {}
 _lock = asyncio.Lock()
 _connect_task: asyncio.Task[None] | None = None
 
@@ -160,7 +161,6 @@ async def _connect_server(state: McpServerState) -> None:
 
         # ── 注册工具 ──
         tools_result = await session.list_tools()
-        registered: list[str] = []
         for t in tools_result.tools:
             existing = TOOL_REGISTRY.get(t.name)
             if existing is not None and (existing.metadata or {}).get("source") != "mcp":
@@ -175,14 +175,13 @@ async def _connect_server(state: McpServerState) -> None:
                 output_schema=t.outputSchema,
             )
             TOOL_REGISTRY[t.name] = td
-            registered.append(t.name)
 
-        _stacks[state.name] = stack
-        state.tool_names = registered
+        state.tool_names = [t.name for t in tools_result.tools]
+        state._stack = stack
         state.status = STATUS_CONNECTED
         state.error = None
         state.connected_at = datetime.now(UTC)
-        logger.info("[mcp] 已连接 %s（%s），注册 %d 个工具", state.name, state.transport, len(registered))
+        logger.info("[mcp] 已连接 %s（%s），注册 %d 个工具", state.name, state.transport, len(state.tool_names))
     except Exception as exc:
         await stack.aclose()
         logger.exception("[mcp] 连接服务器 %s 失败", state.name)
@@ -194,12 +193,12 @@ async def _connect_server(state: McpServerState) -> None:
 async def _close_server(state: McpServerState) -> None:
     """断开连接并清掉工具（调用方持有 _lock）。"""
     _drop_tools(state)
-    stack = _stacks.pop(state.name, None)
-    if stack is not None:
+    if state._stack is not None:
         try:
-            await stack.aclose()
+            await state._stack.aclose()
         except Exception:
             logger.debug("[mcp] 关闭 %s 资源时出错", state.name, exc_info=True)
+        state._stack = None
     state.connected_at = None
     state.status = STATUS_CONNECTING
 
