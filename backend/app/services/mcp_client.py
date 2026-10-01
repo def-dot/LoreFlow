@@ -78,7 +78,6 @@ class McpServerState(BaseModel):
 _servers: dict[str, McpServerState] = {}
 _stacks: dict[str, AsyncExitStack] = {}
 _lock = asyncio.Lock()
-_connect_task: asyncio.Task[None] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -183,32 +182,12 @@ async def _close_server(name: str) -> None:
             logger.debug("[mcp] 关闭 %s 资源时出错", name, exc_info=True)
 
 
-def _start_background_connect(names: list[str]) -> None:
-    """把批量连接丢到后台，不阻塞 lifespan。"""
-
-    async def _run() -> None:
-        results = await asyncio.gather(
-            *(reconnect_server(n) for n in names),
-            return_exceptions=True,
-        )
-        for name, r in zip(names, results, strict=False):
-            if isinstance(r, Exception):
-                logger.warning("[mcp] 启动连接 %s 失败：%s", name, r)
-            elif r.status == STATUS_CONNECTED:
-                logger.info("[mcp] %s 已连接（%d 个工具）", name, len(r.tool_names))
-            else:
-                logger.warning("[mcp] %s 连接失败：%s", name, r.error)
-
-    global _connect_task
-    _connect_task = asyncio.create_task(_run())
-
-
 # ---------------------------------------------------------------------------
 # 生命周期
 # ---------------------------------------------------------------------------
 
 async def init_mcp(config_path: Path) -> None:
-    """读取标准 MCP 配置并注册服务器状态，连接在后台进行。异常兜底，不阻塞启动。"""
+    """读取标准 MCP 配置，后台连接所有服务器。"""
     try:
         if not config_path.exists():
             logger.info("[mcp] 配置文件不存在，跳过：%s", config_path)
@@ -219,26 +198,22 @@ async def init_mcp(config_path: Path) -> None:
             logger.info("[mcp] 无服务器配置")
             return
 
-        async with _lock:
-            for name, cfg in entries.items():
-                cfg_model = McpStdioConfig(**cfg) if cfg.get("command") else McpHttpConfig(**cfg)
-                state = McpServerState(name=name, config=cfg_model)
-                _servers[name] = state
+        async def _connect_all() -> None:
+            async with _lock:
+                for name, cfg in entries.items():
+                    cfg_model = McpStdioConfig(**cfg) if cfg.get("command") else McpHttpConfig(**cfg)
+                    try:
+                        await _connect_server(name, cfg_model)
+                    except Exception:
+                        logger.exception("[mcp] 连接服务器 %s 失败", name)
 
-        _start_background_connect(list(_servers))
+        asyncio.create_task(_connect_all())
     except Exception:
         logger.exception("MCP 初始化失败")
 
 
 async def shutdown_mcp() -> None:
     """关闭所有 MCP 连接。"""
-    task = _connect_task
-    if task is not None and not task.done():
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
     async with _lock:
         for name in list(_servers):
             await _close_server(name)
