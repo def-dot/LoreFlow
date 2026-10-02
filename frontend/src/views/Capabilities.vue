@@ -277,6 +277,28 @@ async function handleFileClick(skillName: string, filePath: string) {
   }
 }
 
+/** 树宽度调整 */
+const treeWidths = ref<Record<string, number>>({})
+
+function startTreeResize(e: MouseEvent, skillName: string) {
+  const startX = e.clientX
+  const startW = treeWidths.value[skillName] || 200
+  const onMove = (ev: MouseEvent) => {
+    const w = Math.max(120, Math.min(400, startW + ev.clientX - startX))
+    treeWidths.value = { ...treeWidths.value, [skillName]: w }
+  }
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
 function toggleSkill(name: string) {
   const next = new Set(openSkills.value)
   if (next.has(name)) next.delete(name)
@@ -660,12 +682,12 @@ onMounted(fetchAll)
             <div v-if="openSkills.has(s.name)" class="skill-content" @click.stop>
               <!-- 无附加文件：直接显示 SKILL.md -->
               <template v-if="!s.files || s.files.length <= 1">
-                <pre v-if="s.content" class="skill-body">{{ s.content }}</pre>
+                <pre v-if="s.content" class="skill-body skill-body--standalone">{{ s.content }}</pre>
                 <span v-else class="muted plugin-desc">（无正文）</span>
               </template>
               <!-- 有附加文件：左树右内容 -->
               <div v-else class="skill-split">
-                <div class="skill-tree">
+                <div class="skill-tree" :style="{ flex: `0 0 ${treeWidths[s.name] || 200}px` }">
                   <div
                     v-for="item in buildFileTree(s.files)"
                     :key="item.path"
@@ -674,9 +696,10 @@ onMounted(fetchAll)
                     @click="!item.isDir && handleFileClick(s.name, item.path)"
                   >
                     <span class="tree-connector">{{ item.connector }}</span>
-                    <span class="tree-name">{{ item.name }}{{ item.isDir ? '/' : '' }}</span>
+                    <span class="tree-name" :title="item.path">{{ item.name }}{{ item.isDir ? '/' : '' }}</span>
                   </div>
                 </div>
+                <div class="skill-divider" @mousedown.prevent="startTreeResize($event, s.name)"></div>
                 <div class="skill-viewer">
                   <template v-if="(selectedFile[s.name] || 'SKILL.md') === 'SKILL.md'">
                     <pre v-if="s.content" class="skill-body">{{ s.content }}</pre>
@@ -1116,26 +1139,34 @@ description: 一句话说明技能用途
 /* 左树右内容分栏 */
 .skill-split {
   display: flex;
-  gap: 10px;
   margin-top: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  overflow: hidden;
+  max-height: 280px;
 }
 .skill-tree {
-  flex: 0 0 220px;
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.7;
   color: var(--ink-3);
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
   padding: 8px 10px;
-  overflow: auto;
-  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
   user-select: none;
+}
+.skill-divider {
+  flex: 0 0 4px;
+  cursor: col-resize;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.15s;
+}
+.skill-divider:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 .tree-item {
   display: flex;
-  white-space: nowrap;
 }
 .tree-item.file {
   cursor: pointer;
@@ -1157,16 +1188,16 @@ description: 一句话说明技能用途
 .tree-connector {
   white-space: pre;
   opacity: 0.5;
+  flex-shrink: 0;
 }
 .tree-name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .skill-viewer {
   flex: 1;
   min-width: 0;
+  overflow: auto;
 }
 
 /* 技能正文 */
@@ -1176,15 +1207,18 @@ description: 一句话说明技能用途
   font-size: 11.5px;
   line-height: 1.6;
   color: var(--ink-3);
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid var(--line);
-  border-radius: 6px;
   padding: 10px 12px;
-  max-height: 280px;
-  overflow: auto;
   white-space: pre-wrap;
   user-select: text;
   cursor: auto;
+}
+/* 独立显示时（无附加文件）加边框背景 */
+.skill-body--standalone {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  max-height: 280px;
+  overflow: auto;
 }
 
 /* 技能包列表 */
