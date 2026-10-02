@@ -40,6 +40,11 @@ export function readSkillFile(name: string, path: string): Promise<string> {
   return api.get(`/skills/${name}/file`, { params: { path } })
 }
 
+export async function downloadSkill(name: string): Promise<Blob> {
+  const resp = await api.get(`/skills/${name}/download`, { responseType: 'blob' }) as unknown as { data: Blob }
+  return resp.data
+}
+
 export function listTools(): Promise<FuncInfo[]> {
   return api.get('/tools')
 }

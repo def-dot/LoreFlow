@@ -4,6 +4,7 @@ import zipfile
 from io import BytesIO
 
 from fastapi import APIRouter, File, UploadFile
+from fastapi.responses import StreamingResponse
 
 from app.core.config import settings
 from app.core.response import UnifiedResponseRoute
@@ -64,6 +65,25 @@ async def read_skill_file(name: str, path: str) -> str:
     if target.stat().st_size > 100 * 1024:
         raise ValueError("文件过大（超过 100KB）")
     return target.read_text(encoding="utf-8")
+
+
+@router.get("/{name}/download")
+async def download_skill(name: str):
+    """下载技能为 zip 包。"""
+    if name not in SKILL_REGISTRY:
+        raise ValueError(f"技能 {name!r} 不存在")
+    skill_dir = settings.SKILLS_DIR / name
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file in sorted(skill_dir.rglob("*")):
+            if file.is_file():
+                zf.write(file, file.relative_to(skill_dir))
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
+    )
 
 
 async def _parse_skill_zip(file: UploadFile) -> tuple[zipfile.ZipFile, SkillDef]:

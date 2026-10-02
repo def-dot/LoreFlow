@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
 import {
   listTools, listSkills,
-  deleteSkill, readSkillFile,
+  deleteSkill, readSkillFile, downloadSkill,
   type ToolOut, type SkillDef,
 } from '@/api/registry'
 import { listPlugins, uploadPlugin, deletePlugin, type PluginInfo } from '@/api/plugins'
@@ -482,6 +482,20 @@ async function handleDeleteSkill(s: SkillDef) {
   }
 }
 
+async function handleDownloadSkill(s: SkillDef) {
+  try {
+    const blob = await downloadSkill(s.name)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${s.name}.zip`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '下载失败')
+  }
+}
+
 const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | 'info' | 'warning' }> = {
   connected: { label: '已连接', type: 'success' },
   connecting: { label: '连接中', type: 'warning' },
@@ -675,6 +689,7 @@ onMounted(fetchAll)
               </div>
               <span class="group-actions" @click.stop>
                 <el-button class="btn-soft" size="small" @click="openSkillEdit(s)">编辑</el-button>
+                <el-button class="btn-soft" size="small" @click="handleDownloadSkill(s)">下载</el-button>
                 <el-button class="btn-soft btn-soft--danger" size="small" @click="handleDeleteSkill(s)">删除</el-button>
               </span>
             </div>
