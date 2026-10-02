@@ -843,12 +843,12 @@ description: 一句话说明技能用途
         <p>目录名建议与 <code>name</code> 一致。除 <code>SKILL.md</code> 外可放任意附加文件，agent 加载时会读取目录下的所有内容。</p>
 
         <h4 class="guide-h4">zip 导入</h4>
-        <p>打包时确保 zip 内顶层是技能目录，例如：</p>
+        <p>zip 内直接包含技能文件（<code>SKILL.md</code> 在根目录），例如：</p>
         <pre class="guide-code">my-skill.zip
-  └── my-skill/
-      ├── SKILL.md
-      └── examples.md</pre>
-        <p>上传后会自动解压到 <code>skills/</code> 目录并注册。</p>
+  ├── SKILL.md
+  └── examples.md</pre>
+        <p>上传后会解压到 <code>skills/{name}/</code> 目录并注册。<code>name</code> 取自 SKILL.md 中的 frontmatter。</p>
+        <p>编辑已有技能时也可上传 zip 替换全部文件，支持通过修改 SKILL.md 的 <code>name</code> 字段重命名。</p>
       </div>
     </el-drawer>
   </div>

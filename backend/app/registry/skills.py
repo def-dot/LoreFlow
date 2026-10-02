@@ -103,44 +103,23 @@ def delete_skill(name: str) -> None:
     shutil.rmtree(settings.SKILLS_DIR / name, ignore_errors=True)
 
 
-# ---------------------------------------------------------------------------
-# 技能发现
-# ---------------------------------------------------------------------------
-
 def discover_skills(*dirs: Path) -> None:
-    """扫描目录树，发现所有包含 SKILL.md 的子目录并注册到 SKILL_REGISTRY。
-    """
+    """扫描目录树，发现所有包含 SKILL.md 的子目录并注册到 SKILL_REGISTRY。"""
     count = 0
     for root_path in dirs:
         if not root_path.is_dir():
             continue
-        for skill_def in _scan_dir(root_path):
-            SKILL_REGISTRY[skill_def.name] = skill_def
-            count += 1
+        for entry in sorted(root_path.iterdir()):
+            if not entry.is_dir():
+                continue
+            skill_md = entry / "SKILL.md"
+            if not skill_md.is_file():
+                continue
+            try:
+                text = skill_md.read_text(encoding="utf-8")
+                name, desc = parse_skill_content(text)
+                save_skill(SkillDef(name=name, description=desc, content=text))
+                count += 1
+            except Exception:
+                continue
     logger.info("发现 %d 个技能", count)
-
-
-def rescan_skills(*dirs: Path) -> int:
-    """清空后重新扫描，返回发现的技能数量。供 API 热刷新，免重启。"""
-    SKILL_REGISTRY.clear()
-    discover_skills(*dirs)
-    return len(SKILL_REGISTRY)
-
-
-def _scan_dir(root: Path) -> list[SkillDef]:
-    """扫描目录，返回发现的 SkillDef 列表。"""
-    results: list[SkillDef] = []
-    for entry in sorted(root.iterdir()):
-        if not entry.is_dir():
-            continue
-        skill_md = entry / "SKILL.md"
-        if not skill_md.is_file():
-            continue
-        try:
-            text = skill_md.read_text(encoding="utf-8")
-            name, desc = parse_skill_content(text)
-        except Exception:
-            continue
-        sd = SkillDef(name=name, description=desc, content=text, files=_collect_files(entry))
-        results.append(sd)
-    return results

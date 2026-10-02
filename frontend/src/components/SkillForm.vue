@@ -172,8 +172,8 @@ async function handleZip(e: Event) {
     <div v-if="mode === 'zip'" class="zip-area">
       <input ref="fileInput" type="file" accept=".zip" hidden @change="handleZip" />
       <p class="muted">
-        <template v-if="isEdit">选择 <code>.zip</code> 文件替换当前技能，目录中所有文件将被替换。</template>
-        <template v-else>选择一个 <code>.zip</code> 文件，内容将解压到 <code>skills/</code> 目录。</template>
+        <template v-if="isEdit">选择 <code>.zip</code> 替换当前技能全部文件。zip 内直接包含 SKILL.md 等文件，修改 name 字段可重命名。</template>
+        <template v-else>选择 <code>.zip</code> 导入技能。zip 内直接包含 SKILL.md 等文件（不需要外层目录），<code>name</code> 取自 SKILL.md。</template>
       </p>
       <el-button :loading="uploading" @click="fileInput?.click()">选择 zip 文件</el-button>
     </div>
