@@ -26,6 +26,7 @@ async def list_skills() -> list[SkillOut]:
             description=s.description,
             content=s.content,
             base_dir=s.base_dir,
+            files=s.files,
         )
         for s in sorted(SKILL_REGISTRY.values(), key=lambda s: s.name)
     ]
@@ -63,7 +64,7 @@ async def create_skill(body: SkillCreateIn) -> SkillOut:
     rescan_skills(settings.SKILLS_DIR)
     s = SKILL_REGISTRY[body.name]
     return SkillOut(name=s.name, description=s.description, content=s.content,
-                    base_dir=s.base_dir)
+                    base_dir=s.base_dir, files=s.files)
 
 
 @router.put("/skills/{name}", response_model=SkillOut)
@@ -82,7 +83,7 @@ async def update_skill(name: str, body: SkillCreateIn) -> SkillOut:
     rescan_skills(settings.SKILLS_DIR)
     s = SKILL_REGISTRY[body.name]
     return SkillOut(name=s.name, description=s.description, content=s.content,
-                    base_dir=s.base_dir)
+                    base_dir=s.base_dir, files=s.files)
 
 
 @router.delete("/skills/{name}")
@@ -93,6 +94,25 @@ async def delete_skill(name: str) -> dict:
     shutil.rmtree(skill_dir)
     rescan_skills(settings.SKILLS_DIR)
     return {"detail": f"技能 {name} 已删除"}
+
+
+@router.get("/skills/{name}/file")
+async def read_skill_file(name: str, path: str) -> str:
+    """读取技能目录内的文件内容。"""
+    sd = SKILL_REGISTRY.get(name)
+    if not sd:
+        raise ValueError(f"技能 {name!r} 不存在")
+    base = Path(sd.base_dir)
+    target = (base / path).resolve()
+    # 安全检查：不允许跳出技能目录
+    if not str(target).startswith(str(base.resolve())):
+        raise ValueError("非法路径")
+    if not target.is_file():
+        raise ValueError(f"文件不存在: {path}")
+    # 限制大小 100KB
+    if target.stat().st_size > 100 * 1024:
+        raise ValueError("文件过大（超过 100KB）")
+    return target.read_text(encoding="utf-8")
 
 
 @router.post("/skills/upload")

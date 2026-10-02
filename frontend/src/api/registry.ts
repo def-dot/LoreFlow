@@ -8,6 +8,7 @@ export interface SkillOut {
   description: string
   content: string
   base_dir: string
+  files: string[]
 }
 
 export function listSkills(): Promise<SkillOut[]> {
@@ -41,6 +42,10 @@ export function uploadSkillZip(file: File): Promise<{ count: number }> {
   const form = new FormData()
   form.append('file', file)
   return api.post('/skills/upload', form)
+}
+
+export function readSkillFile(name: string, path: string): Promise<string> {
+  return api.get(`/skills/${name}/file`, { params: { path } })
 }
 
 export function listTools(): Promise<FuncInfo[]> {

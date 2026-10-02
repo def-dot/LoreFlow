@@ -19,4 +19,4 @@ async def load_skill(params: LoadSkillParams) -> LoadSkillOutput:
     sd = SKILL_REGISTRY.get(params.name)
     if not sd:
         return LoadSkillOutput(result=f"技能不存在：{params.name}")
-    return LoadSkillOutput(result=sd.body)
+    return LoadSkillOutput(result=sd.content)

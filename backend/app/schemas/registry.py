@@ -23,6 +23,7 @@ class SkillOut(BaseModel):
     description: str = ""
     content: str = ""
     base_dir: str = ""
+    files: list[str] = Field(default_factory=list)
 
 
 class SkillCreateIn(BaseModel):

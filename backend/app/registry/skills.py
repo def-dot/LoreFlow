@@ -36,6 +36,7 @@ class SkillDef:
     description: str
     base_dir: str  # 技能根目录（SKILL.md 所在目录）
     content: str = ""  # 完整 SKILL.md 内容
+    files: list[str] = field(default_factory=list)  # 目录内所有文件（相对路径）
 
 
 SKILL_REGISTRY: dict[str, SkillDef] = {}
@@ -104,33 +105,39 @@ def parse_skill_md(path: Path) -> SkillDef | None:
 
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv"}
 _MAX_DEPTH = 6
-_MAX_SKILLS = 2000
 
 
-def discover_skills(*dirs: str | Path) -> None:
+def discover_skills(*dirs: Path) -> None:
     """扫描目录树，发现所有包含 SKILL.md 的子目录并注册到 SKILL_REGISTRY。
-
-    扫描结果覆盖同名技能（后发现的覆盖先发现的）。
     """
     count = 0
-    for root in dirs:
-        root_path = Path(root)
+    for root_path in dirs:
         if not root_path.is_dir():
             continue
         for skill_def in _scan_dir(root_path):
-            if count >= _MAX_SKILLS:
-                logger.warning("技能数量达到上限 %d，停止扫描", _MAX_SKILLS)
-                return
             SKILL_REGISTRY[skill_def.name] = skill_def
             count += 1
     logger.info("发现 %d 个技能", count)
 
 
-def rescan_skills(*dirs: str | Path) -> int:
+def rescan_skills(*dirs: Path) -> int:
     """清空后重新扫描，返回发现的技能数量。供 API 热刷新，免重启。"""
     SKILL_REGISTRY.clear()
     discover_skills(*dirs)
     return len(SKILL_REGISTRY)
+
+
+def _collect_files(skill_dir: Path) -> list[str]:
+    """收集技能目录内所有文件的相对路径。"""
+    files: list[str] = []
+    for p in sorted(skill_dir.rglob("*")):
+        if p.is_file():
+            rel = str(p.relative_to(skill_dir)).replace("\\", "/")
+            if not rel.startswith(".") and not any(
+                part in _SKIP_DIRS for part in rel.split("/")
+            ):
+                files.append(rel)
+    return files
 
 
 def _scan_dir(root: Path) -> list[SkillDef]:
@@ -158,6 +165,7 @@ def _walk(current: Path, depth: int, results: list[SkillDef]) -> None:
         if skill_md.is_file():
             sd = parse_skill_md(skill_md)
             if sd is not None:
+                sd.files = _collect_files(entry)
                 results.append(sd)
         else:
             _walk(entry, depth + 1, results)

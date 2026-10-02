@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
 import {
   listTools, listSkills,
-  deleteSkill,
+  deleteSkill, readSkillFile,
   type ToolOut, type SkillOut,
 } from '@/api/registry'
 import { listPlugins, uploadPlugin, deletePlugin, type PluginInfo } from '@/api/plugins'
@@ -214,6 +214,68 @@ function resetFilters() {
 
 /** 技能正文默认折叠 */
 const openSkills = ref<Set<string>>(new Set())
+
+/** 选中的文件：skill name → file path */
+const selectedFile = ref<Record<string, string>>({})
+/** 文件内容缓存：skill name → content */
+const fileContent = ref<Record<string, string>>({})
+
+interface FileTreeItem {
+  name: string
+  path: string
+  isDir: boolean
+  connector: string  // "├── " / "└── " / "│   ├── " / "    └── "
+}
+
+/** 将平铺的文件路径列表转成目录树条目 */
+function buildFileTree(files: string[]): FileTreeItem[] {
+  if (!files?.length) return []
+  interface TreeNode { [key: string]: TreeNode }
+  const root: TreeNode = {}
+  for (const f of files) {
+    const parts = f.split('/')
+    let node = root
+    for (const p of parts) {
+      if (!node[p]) node[p] = {}
+      node = node[p]
+    }
+  }
+  const items: FileTreeItem[] = []
+  function walk(node: TreeNode, prefix: string, dirPath: string) {
+    const keys = Object.keys(node)
+    keys.forEach((key, i) => {
+      const isLast = i === keys.length - 1
+      const connector = prefix + (isLast ? '└── ' : '├── ')
+      const childPrefix = prefix + (isLast ? '    ' : '│   ')
+      const isDir = Object.keys(node[key]).length > 0
+      const fullPath = dirPath ? dirPath + '/' + key : key
+      items.push({ name: key, path: fullPath, isDir, connector })
+      if (isDir) walk(node[key], childPrefix, fullPath)
+    })
+  }
+  walk(root, '', '')
+  return items
+}
+
+/** 点击文件：加载内容 */
+async function handleFileClick(skillName: string, filePath: string) {
+  const cur = selectedFile.value[skillName]
+  if (cur === filePath) {
+    // 取消选中
+    selectedFile.value = { ...selectedFile.value, [skillName]: '' }
+    return
+  }
+  selectedFile.value = { ...selectedFile.value, [skillName]: filePath }
+  // 已有缓存则不重复请求
+  const cacheKey = `${skillName}::${filePath}`
+  if (fileContent.value[cacheKey]) return
+  try {
+    const content = await readSkillFile(skillName, filePath)
+    fileContent.value = { ...fileContent.value, [cacheKey]: content }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '读取文件失败')
+  }
+}
 
 function toggleSkill(name: string) {
   const next = new Set(openSkills.value)
@@ -581,8 +643,8 @@ onMounted(fetchAll)
           </span>
         </div>
         <div v-loading="loading" class="plugin-list">
-          <div v-for="s in skills" :key="s.name" class="plugin-card">
-            <div class="plugin-head clickable" @click="toggleSkill(s.name)">
+          <div v-for="s in skills" :key="s.name" class="plugin-card clickable" @click="toggleSkill(s.name)">
+            <div class="plugin-head">
               <svg class="chev" :class="{ open: openSkills.has(s.name) }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
                 <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
@@ -595,8 +657,38 @@ onMounted(fetchAll)
               </span>
             </div>
             <div class="muted plugin-desc">{{ s.description }}</div>
-            <pre v-if="openSkills.has(s.name) && s.content" class="skill-body">{{ s.content }}</pre>
-            <span v-else-if="openSkills.has(s.name)" class="muted plugin-desc">（无正文）</span>
+            <div v-if="openSkills.has(s.name)" class="skill-content" @click.stop>
+              <!-- 无附加文件：直接显示 SKILL.md -->
+              <template v-if="!s.files || s.files.length <= 1">
+                <pre v-if="s.content" class="skill-body">{{ s.content }}</pre>
+                <span v-else class="muted plugin-desc">（无正文）</span>
+              </template>
+              <!-- 有附加文件：左树右内容 -->
+              <div v-else class="skill-split">
+                <div class="skill-tree">
+                  <div
+                    v-for="item in buildFileTree(s.files)"
+                    :key="item.path"
+                    class="tree-item"
+                    :class="{ dir: item.isDir, file: !item.isDir, active: (selectedFile[s.name] || 'SKILL.md') === item.path }"
+                    @click="!item.isDir && handleFileClick(s.name, item.path)"
+                  >
+                    <span class="tree-connector">{{ item.connector }}</span>
+                    <span class="tree-name">{{ item.name }}{{ item.isDir ? '/' : '' }}</span>
+                  </div>
+                </div>
+                <div class="skill-viewer">
+                  <template v-if="(selectedFile[s.name] || 'SKILL.md') === 'SKILL.md'">
+                    <pre v-if="s.content" class="skill-body">{{ s.content }}</pre>
+                    <span v-else class="muted plugin-desc">（无正文）</span>
+                  </template>
+                  <template v-else>
+                    <pre v-if="fileContent[`${s.name}::${selectedFile[s.name]}`]" class="skill-body">{{ fileContent[`${s.name}::${selectedFile[s.name]}`] }}</pre>
+                    <span v-else class="muted plugin-desc">（加载中…）</span>
+                  </template>
+                </div>
+              </div>
+            </div>
           </div>
           <span v-if="!skills.length && !loading" class="muted">暂无技能</span>
         </div>
@@ -1014,9 +1106,72 @@ description: 一句话说明技能用途
   font-size: 12px;
 }
 
+/* 技能内容区 */
+.skill-content {
+  margin-top: 8px;
+  user-select: text;
+  cursor: auto;
+}
+
+/* 左树右内容分栏 */
+.skill-split {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.skill-tree {
+  flex: 0 0 220px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ink-3);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow: auto;
+  max-height: 280px;
+  user-select: none;
+}
+.tree-item {
+  display: flex;
+  white-space: nowrap;
+}
+.tree-item.file {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.tree-item.file:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink-2);
+}
+.tree-item.file.active {
+  background: rgba(77, 196, 178, 0.14);
+  color: var(--ink);
+}
+.tree-item.dir {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.tree-connector {
+  white-space: pre;
+  opacity: 0.5;
+}
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.skill-viewer {
+  flex: 1;
+  min-width: 0;
+}
+
 /* 技能正文 */
 .skill-body {
-  margin: 10px 0 0 18px;
+  margin: 0;
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.6;
@@ -1025,9 +1180,11 @@ description: 一句话说明技能用途
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 10px 12px;
-  max-height: 220px;
+  max-height: 280px;
   overflow: auto;
   white-space: pre-wrap;
+  user-select: text;
+  cursor: auto;
 }
 
 /* 技能包列表 */
@@ -1042,14 +1199,14 @@ description: 一句话说明技能用途
   border-radius: 12px;
   padding: 14px 16px;
 }
+.plugin-card.clickable {
+  cursor: pointer;
+  user-select: none;
+}
 .plugin-head {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.plugin-head.clickable {
-  cursor: pointer;
-  user-select: none;
 }
 .plugin-desc {
   margin-top: 6px;
