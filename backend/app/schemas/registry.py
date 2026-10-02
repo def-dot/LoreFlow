@@ -21,9 +21,14 @@ class SkillOut(BaseModel):
 
     name: str
     description: str = ""
-    body: str = ""
-    location: str = ""
+    content: str = ""
     base_dir: str = ""
+
+
+class SkillCreateIn(BaseModel):
+    """创建/更新技能请求。"""
+
+    name: str = Field(min_length=1, max_length=128)
+    description: str = ""
+    body: str = ""
     allowed_tools: str = ""
-    license: str = ""
-    compatibility: str = ""

@@ -2,7 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
-import { listTools, listSkills, rescanSkills, type ToolOut, type SkillOut } from '@/api/registry'
+import {
+  listTools, listSkills,
+  deleteSkill,
+  type ToolOut, type SkillOut,
+} from '@/api/registry'
 import { listPlugins, uploadPlugin, deletePlugin, type PluginInfo } from '@/api/plugins'
 import {
   listMcpServers, reconnectMcpServer, reconnectAllMcpServers,
@@ -11,6 +15,7 @@ import {
 } from '@/api/mcp'
 import NodeTypeCard from '@/components/NodeTypeCard.vue'
 import McpServerForm from '@/components/McpServerForm.vue'
+import SkillForm from '@/components/SkillForm.vue'
 
 type TabName = 'catalog' | 'skills'
 type RoleFilter = 'all' | 'node' | 'tool'
@@ -26,7 +31,6 @@ const loadError = ref(false)
 const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const guideOpen = ref(false)
-const rescaning = ref(false)
 const mcpBusy = ref('')
 
 const roleFilter = ref<RoleFilter>('all')
@@ -287,19 +291,6 @@ async function handleDeletePlugin(p: PluginInfo) {
   }
 }
 
-async function handleRescan() {
-  rescaning.value = true
-  try {
-    const r = await rescanSkills()
-    ElMessage.success(`已重新扫描，发现 ${r.count} 个技能`)
-    await fetchAll()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '重扫失败')
-  } finally {
-    rescaning.value = false
-  }
-}
-
 async function handleReconnect(s: McpServer) {
   mcpBusy.value = s.name
   try {
@@ -369,6 +360,42 @@ async function onMcpSaved() {
   mcpFormOpen.value = false
   mcpEditing.value = null
   await refreshAfterMcpChange()
+}
+
+// ---- 技能包：新建 / 编辑 / 删除 ----
+const skillFormOpen = ref(false)
+const skillEditing = ref<SkillOut | null>(null)
+const skillGuideOpen = ref(false)
+
+function openSkillCreate() {
+  skillEditing.value = null
+  skillFormOpen.value = true
+}
+
+function openSkillEdit(s: SkillOut) {
+  skillEditing.value = s
+  skillFormOpen.value = true
+}
+
+async function onSkillSaved() {
+  skillFormOpen.value = false
+  skillEditing.value = null
+  skills.value = (await listSkills()) ?? []
+}
+
+async function handleDeleteSkill(s: SkillOut) {
+  try {
+    await ElMessageBox.confirm(`确定删除技能「${s.name}」？`, '删除技能', {
+      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
+    })
+  } catch { return }
+  try {
+    await deleteSkill(s.name)
+    ElMessage.success(`已删除 ${s.name}`)
+    skills.value = (await listSkills()) ?? []
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '删除失败')
+  }
 }
 
 const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | 'info' | 'warning' }> = {
@@ -548,7 +575,10 @@ onMounted(fetchAll)
       <el-tab-pane label="技能包" name="skills">
         <div class="section-head">
           <span class="muted"><code>skills/</code> · 目录含 SKILL.md 即一个技能 · agent 经 <code>load_skill</code> 按需加载</span>
-          <el-button size="small" :loading="rescaning" @click="handleRescan">重新扫描</el-button>
+          <span>
+            <el-button size="small" type="primary" @click="openSkillCreate">添加技能</el-button>
+            <span class="guide-link" @click="skillGuideOpen = true">编写指南</span>
+          </span>
         </div>
         <div v-loading="loading" class="plugin-list">
           <div v-for="s in skills" :key="s.name" class="plugin-card">
@@ -558,12 +588,14 @@ onMounted(fetchAll)
               </svg>
               <div class="plugin-info">
                 <span class="plugin-filename">{{ s.name }}</span>
-                <span class="plugin-module muted">{{ s.location }}</span>
               </div>
-              <el-tag type="success" size="small" disable-transitions>已发现</el-tag>
+              <span class="group-actions" @click.stop>
+                <el-button class="btn-soft" size="small" @click="openSkillEdit(s)">编辑</el-button>
+                <el-button class="btn-soft btn-soft--danger" size="small" @click="handleDeleteSkill(s)">删除</el-button>
+              </span>
             </div>
             <div class="muted plugin-desc">{{ s.description }}</div>
-            <pre v-if="openSkills.has(s.name) && s.body" class="skill-body">{{ s.body }}</pre>
+            <pre v-if="openSkills.has(s.name) && s.content" class="skill-body">{{ s.content }}</pre>
             <span v-else-if="openSkills.has(s.name)" class="muted plugin-desc">（无正文）</span>
           </div>
           <span v-if="!skills.length && !loading" class="muted">暂无技能</span>
@@ -579,6 +611,16 @@ onMounted(fetchAll)
       :destroy-on-close="true"
     >
       <McpServerForm :server="mcpEditing" @saved="onMcpSaved" />
+    </el-drawer>
+
+    <!-- 技能包 drawer -->
+    <el-drawer
+      v-model="skillFormOpen"
+      :title="skillEditing ? '编辑技能' : '新建技能'"
+      size="min(640px, 90vw)"
+      :destroy-on-close="true"
+    >
+      <SkillForm :skill="skillEditing" @saved="onSkillSaved" />
     </el-drawer>
 
     <!-- 编写指南 drawer -->
@@ -628,6 +670,72 @@ async def send_notify(params: NotifyInput) -> NotifyOutput:
         <p>修正后保存文件即自动重载。也可以删除后重新上传。</p>
       </div>
     </el-drawer>
+
+    <!-- 技能编写指南 drawer -->
+    <el-drawer v-model="skillGuideOpen" title="技能编写指南" size="min(640px, 90vw)">
+      <div class="guide">
+        <p>技能是 agent 可按需加载的指令包。每个技能是一个目录，包含 <code>SKILL.md</code> 文件。</p>
+
+        <h4 class="guide-h4">添加技能</h4>
+        <p>两种方式：</p>
+        <ul class="guide-rules">
+          <li><b>编写</b> — 点击「添加技能」，在编辑器中直接编写 SKILL.md</li>
+          <li><b>导入</b> — 点击「添加技能」，切换到「导入 zip 包」选项卡，上传 <code>.zip</code> 文件（目录结构见下方）</li>
+        </ul>
+
+        <h4 class="guide-h4">SKILL.md 格式</h4>
+        <pre class="guide-code">---
+name: my-skill
+description: 一句话说明技能用途
+---
+
+执行任务时，按以下步骤逐项检查：
+
+## 步骤
+
+1. 第一步做什么
+2. 第二步做什么
+3. 第三步做什么
+
+## 注意事项
+
+- 要点一
+- 要点二</pre>
+
+        <h4 class="guide-h4">头部信息字段</h4>
+        <table class="guide-table">
+          <thead><tr><th>字段</th><th>必填</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>是</td><td>技能标识符，如 <code>code-review</code></td></tr>
+            <tr><td><code>description</code></td><td>是</td><td>技能描述，agent 根据此判断何时加载</td></tr>
+          </tbody>
+        </table>
+
+        <h4 class="guide-h4">使用方式</h4>
+        <p>在工作流或 agent 配置中通过 <code>skills</code> 字段引用技能名。agent 运行时会调用 <code>load_skill</code> 工具加载完整指令。</p>
+        <ul class="guide-rules">
+          <li><code>skills: ["*"]</code> — 加载所有技能</li>
+          <li><code>skills: ["code-review", "summarize"]</code> — 加载指定技能</li>
+        </ul>
+
+        <h4 class="guide-h4">目录结构</h4>
+        <pre class="guide-code">skills/
+  code-review/
+    SKILL.md          # 技能指令（必须）
+    examples.md       # 附加文件（可选）
+  summarize/
+    SKILL.md</pre>
+        <p>目录名建议与 <code>name</code> 一致。除 <code>SKILL.md</code> 外可放任意附加文件，agent 加载时会读取目录下的所有内容。</p>
+
+        <h4 class="guide-h4">zip 导入</h4>
+        <p>打包时确保 zip 内顶层是技能目录，例如：</p>
+        <pre class="guide-code">my-skill.zip
+  └── my-skill/
+      ├── SKILL.md
+      └── examples.md</pre>
+        <p>上传后会自动解压到 <code>skills/</code> 目录并注册。</p>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -657,6 +765,7 @@ async def send_notify(params: NotifyInput) -> NotifyOutput:
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
+  margin-left: 10px;
 }
 .guide-link:hover {
   color: #79bbff;

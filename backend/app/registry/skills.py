@@ -34,13 +34,8 @@ class SkillDef:
 
     name: str
     description: str
-    location: str  # SKILL.md 绝对路径
     base_dir: str  # 技能根目录（SKILL.md 所在目录）
-    body: str = ""  # markdown 指令体（frontmatter 之后的内容）
-    license: str = ""
-    compatibility: str = ""
-    allowed_tools: str = ""
-    metadata: dict[str, str] = field(default_factory=dict)
+    content: str = ""  # 完整 SKILL.md 内容
 
 
 SKILL_REGISTRY: dict[str, SkillDef] = {}
@@ -49,10 +44,6 @@ SKILL_REGISTRY: dict[str, SkillDef] = {}
 # ---------------------------------------------------------------------------
 # SKILL.md 解析
 # ---------------------------------------------------------------------------
-
-_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
-_NAME_MAX_LEN = 64
-_DESC_MAX_LEN = 1024
 
 
 def parse_skill_md(path: Path) -> SkillDef | None:
@@ -63,35 +54,26 @@ def parse_skill_md(path: Path) -> SkillDef | None:
         logger.warning("无法读取 %s: %s", path, exc)
         return None
 
-    # 提取 YAML frontmatter
-    if not text.startswith("---"):
+    # 提取 YAML frontmatter（用 split 拆三段）
+    parts = text.split("---", 2)
+    if len(parts) < 3 or not parts[0].strip() == "":
         logger.warning("SKILL.md 缺少 frontmatter: %s", path)
         return None
 
-    # 找第二个 ---
-    second = text.find("---", 3)
-    if second == -1:
-        logger.warning("SKILL.md frontmatter 未闭合: %s", path)
-        return None
+    yaml_str, body = parts[1], parts[2].strip()
 
-    yaml_str = text[3:second]
-    body = text[second + 3:].strip()
-
+    # 预处理：给所有未加引号的值加引号，避免 YAML 解析异常
+    fixed = re.sub(
+        r'^([\w-]+):\s+(.+)$',
+        lambda m: f'{m.group(1)}: "{m.group(2)}"',
+        yaml_str,
+        flags=re.MULTILINE,
+    )
     try:
-        meta = yaml.safe_load(yaml_str)
-    except yaml.YAMLError:
-        # 宽容处理：尝试给含冒号的值加引号
-        try:
-            fixed = re.sub(
-                r"^(\w+):\s+(.+[^:]*)$",
-                lambda m: f'{m.group(1)}: "{m.group(2)}"',
-                yaml_str,
-                flags=re.MULTILINE,
-            )
-            meta = yaml.safe_load(fixed)
-        except yaml.YAMLError as exc:
-            logger.warning("SKILL.md YAML 解析失败: %s — %s", path, exc)
-            return None
+        meta = yaml.safe_load(fixed)
+    except yaml.YAMLError as exc:
+        logger.warning("SKILL.md YAML 解析失败: %s — %s", path, exc)
+        return None
 
     if not isinstance(meta, dict):
         logger.warning("SKILL.md frontmatter 非字典: %s", path)
@@ -100,35 +82,19 @@ def parse_skill_md(path: Path) -> SkillDef | None:
     name = str(meta.get("name", "")).strip()
     desc = str(meta.get("description", "")).strip()
 
-    # 宽容验证：name 不合法时警告但仍加载
+    # 必填字段校验
     if not name:
-        logger.warning("SKILL.md 缺少 name: %s — 跳过", path)
+        logger.warning("SKILL.md 缺少 name: %s", path)
         return None
-    if len(name) > _NAME_MAX_LEN:
-        logger.warning("name 超过 %d 字符: %s (%s)", _NAME_MAX_LEN, name, path)
-    if not _NAME_RE.match(name):
-        logger.warning("name 格式不规范: %s (%s) — 仍加载", name, path)
     if not desc:
-        logger.warning("SKILL.md 缺少 description: %s — 跳过", path)
+        logger.warning("SKILL.md 缺少 description: %s", path)
         return None
-    if len(desc) > _DESC_MAX_LEN:
-        logger.warning("description 超过 %d 字符: %s", _DESC_MAX_LEN, path)
-
-    # 宽容验证：name 与目录名不匹配时警告
-    dir_name = path.parent.name
-    if name != dir_name:
-        logger.warning("name (%s) 与目录名 (%s) 不匹配: %s — 仍加载", name, dir_name, path)
 
     return SkillDef(
         name=name,
         description=desc,
-        location=str(path),
         base_dir=str(path.parent),
-        body=body,
-        license=str(meta.get("license", "")),
-        compatibility=str(meta.get("compatibility", "")),
-        allowed_tools=str(meta.get("allowed-tools", "")),
-        metadata={str(k): str(v) for k, v in (meta.get("metadata") or {}).items()},
+        content=text,
     )
 
 

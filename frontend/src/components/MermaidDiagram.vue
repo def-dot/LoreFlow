@@ -36,6 +36,13 @@ mermaid.initialize({
     fontSize: '13px',
     fontFamily: "ui-monospace, 'Cascadia Code', Consolas, 'SF Mono', monospace",
   },
+  flowchart: {
+    padding: 10,
+    nodeSpacing: 30,
+    rankSpacing: 40,
+    htmlLabels: true,
+    curve: 'basis',
+  },
 })
 
 // 状态 → mermaid classDef 样式：青 = 机器流转，琥珀 = 人工介入，
@@ -99,7 +106,9 @@ let pendingId = 0
 
 /** 去掉 mermaid 节点标签中的 HTML 标签（<br/> <i> 等），避免 mermaid 计算 viewBox 时虚高 */
 function stripHtml(source: string): string {
-  return source.replace(/<br\s*\/?>/gi, '\n')
+  return source
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?i>/gi, '')
 }
 
 async function render() {
@@ -112,54 +121,27 @@ async function render() {
     const { svg } = await mermaid.render(`mermaid-${seq}`, source)
     if (myId !== pendingId) return // 新的渲染已经启动，丢弃旧结果
     graphEl.value.innerHTML = svg
-    // 统一节点块最小高度：rect 向上扩展，label 整组上移保持居中
-    const MIN_NODE_H = 50
-    for (const g of graphEl.value.querySelectorAll<SVGGElement>('.node')) {
-      const rect = g.querySelector<SVGRectElement>('rect')
-      if (!rect) continue
-      const h = parseFloat(rect.getAttribute('height') ?? '0')
-      if (h > 0 && h < MIN_NODE_H) {
-        const dy = (MIN_NODE_H - h) / 2
-        rect.setAttribute('height', String(MIN_NODE_H))
-        rect.setAttribute('y', String(parseFloat(rect.getAttribute('y') ?? '0') - dy))
-        // .label 是 foreignObject 或 g，整体下移 dy 保持视觉居中
-        const label = g.querySelector<HTMLElement>('.label, foreignObject')
-        if (label) {
-          const cur = parseFloat(label.getAttribute('y') ?? label.style.marginTop ?? '0')
-          if (label.hasAttribute('y')) {
-            label.setAttribute('y', String(cur + dy))
-          } else {
-            label.style.marginTop = `${cur + dy}px`
-          }
-        }
-      }
-    }
-    // mermaid 给 svg 根节点写死 px 的 width/height 与 inline max-width，
-    // CSS width:100% 让图按面板宽度等比缩放，不再手动限制放大倍数
+    // mermaid 给 svg 根节点写死 px 的 width/height 与 inline max-width
     const svgEl = graphEl.value.querySelector('svg')
     if (svgEl) {
-      // mermaid 有时会算出过大的 viewBox（如单节点却有 2074×2050），
-      // 用 getBBox 获取实际内容边界，修正 viewBox 后缩放
-      try {
-        const bbox = svgEl.getBBox()
-        if (bbox.width > 0 && bbox.height > 0) {
-          const pad = 20
-          const vb = svgEl.viewBox?.baseVal
-          const origW = vb?.width || bbox.width
-          // 只在 viewBox 明显大于实际内容时修正（容差 2 倍）
-          if (origW > bbox.width * 2) {
-            const MIN_VB_W = 600
-            const w = Math.ceil(Math.max(bbox.width, MIN_VB_W) + pad * 2)
-            const h = Math.ceil(bbox.height + pad * 2)
-            svgEl.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${w} ${h}`)
-          }
-        }
-      } catch { /* getBBox 可能失败，忽略 */ }
-      svgEl.removeAttribute('width')
+      const vb = svgEl.viewBox?.baseVal
+      const vbW = vb?.width || 0
+
+      // 获取容器宽度
+      const containerW = graphEl.value.clientWidth
+
+      // 如果 viewBox 宽度远小于容器宽度，限制最大宽度避免过度放大
+      // 目标：最多放大 1.5 倍
+      const MAX_SCALE = 1.5
+      if (vbW > 0 && containerW > vbW * MAX_SCALE) {
+        svgEl.style.maxWidth = `${vbW * MAX_SCALE}px`
+        svgEl.style.width = 'auto'
+      } else {
+        svgEl.style.width = '100%'
+      }
+
       svgEl.removeAttribute('height')
-      svgEl.style.width = '100%'
       svgEl.style.height = 'auto'
-      svgEl.style.removeProperty('max-width')
       svgEl.style.removeProperty('min-width')
     }
   } catch (e) {
@@ -198,10 +180,12 @@ watch(
 <style scoped>
 .mermaid-graph {
   overflow-x: auto;
+  display: flex;
+  justify-content: center;
 }
 .mermaid-graph :deep(svg) {
-  width: 100%;
   height: auto;
+  max-width: 100%;
 }
 /* 节点小字行（<i>：类型键 · label）—— 缩小字号、弱化颜色（与图例一致） */
 .mermaid-graph :deep(.nodeLabel i) {

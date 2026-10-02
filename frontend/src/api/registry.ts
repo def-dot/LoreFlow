@@ -6,12 +6,8 @@ export type { FuncInfo as ToolOut }
 export interface SkillOut {
   name: string
   description: string
-  body: string
-  location: string
+  content: string
   base_dir: string
-  allowed_tools: string
-  license: string
-  compatibility: string
 }
 
 export function listSkills(): Promise<SkillOut[]> {
@@ -20,6 +16,31 @@ export function listSkills(): Promise<SkillOut[]> {
 
 export function rescanSkills(): Promise<{ count: number }> {
   return api.post('/skills/rescan')
+}
+
+export interface SkillCreateIn {
+  name: string
+  description?: string
+  body?: string
+  allowed_tools?: string
+}
+
+export function createSkill(data: SkillCreateIn): Promise<SkillOut> {
+  return api.post('/skills', data)
+}
+
+export function updateSkill(name: string, data: SkillCreateIn): Promise<SkillOut> {
+  return api.put(`/skills/${name}`, data)
+}
+
+export function deleteSkill(name: string): Promise<void> {
+  return api.delete(`/skills/${name}`)
+}
+
+export function uploadSkillZip(file: File): Promise<{ count: number }> {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post('/skills/upload', form)
 }
 
 export function listTools(): Promise<FuncInfo[]> {
