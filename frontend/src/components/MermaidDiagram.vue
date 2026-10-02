@@ -104,11 +104,9 @@ function decorate(source: string, statuses?: Record<string, string>): string {
 
 let pendingId = 0
 
-/** 去掉 mermaid 节点标签中的 HTML 标签（<br/> <i> 等），避免 mermaid 计算 viewBox 时虚高 */
+/** 去掉 mermaid 节点标签中的 HTML 标签（<br/> 等），避免 mermaid 计算 viewBox 时虚高 */
 function stripHtml(source: string): string {
-  return source
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?i>/gi, '')
+  return source.replace(/<br\s*\/?>/gi, '\n')
 }
 
 async function render() {
@@ -131,8 +129,8 @@ async function render() {
       const containerW = graphEl.value.clientWidth
 
       // 如果 viewBox 宽度远小于容器宽度，限制最大宽度避免过度放大
-      // 目标：最多放大 1.5 倍
-      const MAX_SCALE = 1.5
+      // 目标：最多放大 1.2 倍
+      const MAX_SCALE = 1.2
       if (vbW > 0 && containerW > vbW * MAX_SCALE) {
         svgEl.style.maxWidth = `${vbW * MAX_SCALE}px`
         svgEl.style.width = 'auto'
