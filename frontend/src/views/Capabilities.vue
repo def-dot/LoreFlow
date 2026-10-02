@@ -5,7 +5,7 @@ import { listNodeTypes, type NodeTypeInfo } from '@/api/nodeTypes'
 import {
   listTools, listSkills,
   deleteSkill, readSkillFile,
-  type ToolOut, type SkillOut,
+  type ToolOut, type SkillDef,
 } from '@/api/registry'
 import { listPlugins, uploadPlugin, deletePlugin, type PluginInfo } from '@/api/plugins'
 import {
@@ -23,7 +23,7 @@ type RoleFilter = 'all' | 'node' | 'tool'
 const activeTab = ref<TabName>('catalog')
 const nodeTypes = ref<NodeTypeInfo[]>([])
 const tools = ref<ToolOut[]>([])
-const skills = ref<SkillOut[]>([])
+const skills = ref<SkillDef[]>([])
 const plugins = ref<PluginInfo[]>([])
 const mcpServers = ref<McpServer[]>([])
 const loading = ref(false)
@@ -448,7 +448,7 @@ async function onMcpSaved() {
 
 // ---- 技能包：新建 / 编辑 / 删除 ----
 const skillFormOpen = ref(false)
-const skillEditing = ref<SkillOut | null>(null)
+const skillEditing = ref<SkillDef | null>(null)
 const skillGuideOpen = ref(false)
 
 function openSkillCreate() {
@@ -456,7 +456,7 @@ function openSkillCreate() {
   skillFormOpen.value = true
 }
 
-function openSkillEdit(s: SkillOut) {
+function openSkillEdit(s: SkillDef) {
   skillEditing.value = s
   skillFormOpen.value = true
 }
@@ -467,7 +467,7 @@ async function onSkillSaved() {
   skills.value = (await listSkills()) ?? []
 }
 
-async function handleDeleteSkill(s: SkillOut) {
+async function handleDeleteSkill(s: SkillDef) {
   try {
     await ElMessageBox.confirm(`确定删除技能「${s.name}」？`, '删除技能', {
       type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',

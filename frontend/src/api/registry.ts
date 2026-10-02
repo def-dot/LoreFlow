@@ -3,34 +3,26 @@ import type { FuncInfo } from './nodeTypes'
 
 export type { FuncInfo as ToolOut }
 
-export interface SkillOut {
+export interface SkillDef {
   name: string
   description: string
   content: string
-  base_dir: string
   files: string[]
 }
 
-export function listSkills(): Promise<SkillOut[]> {
+export function listSkills(): Promise<SkillDef[]> {
   return api.get('/skills')
 }
 
-export function rescanSkills(): Promise<{ count: number }> {
-  return api.post('/skills/rescan')
-}
-
 export interface SkillCreateIn {
-  name: string
-  description?: string
-  body?: string
-  allowed_tools?: string
+  content: string
 }
 
-export function createSkill(data: SkillCreateIn): Promise<SkillOut> {
+export function createSkill(data: SkillCreateIn): Promise<SkillDef> {
   return api.post('/skills', data)
 }
 
-export function updateSkill(name: string, data: SkillCreateIn): Promise<SkillOut> {
+export function updateSkill(name: string, data: SkillCreateIn): Promise<SkillDef> {
   return api.put(`/skills/${name}`, data)
 }
 

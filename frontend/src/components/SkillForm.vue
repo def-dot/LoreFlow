@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { createSkill, updateSkill, deleteSkill, uploadSkillZip, type SkillCreateIn, type SkillOut } from '@/api/registry'
+import { createSkill, updateSkill, deleteSkill, uploadSkillZip, type SkillCreateIn, type SkillDef } from '@/api/registry'
 
 const props = defineProps<{
-  skill?: SkillOut | null
+  skill?: SkillDef | null
 }>()
 
 const emit = defineEmits<{
@@ -22,7 +22,7 @@ const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 /** 从 skill 对象获取 SKILL.md 内容 */
-function skillToContent(s: SkillOut): string {
+function skillToContent(s: SkillDef): string {
   return s.content
 }
 
@@ -85,11 +85,8 @@ async function handleSave() {
     ElMessage.warning(parsed.value.error)
     return
   }
-  const { meta, body } = parsed.value
   const data: SkillCreateIn = {
-    name: meta.name,
-    description: meta.description || '',
-    body,
+    content: content.value,
   }
   saving.value = true
   try {

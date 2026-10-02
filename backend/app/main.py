@@ -37,6 +37,7 @@ from app.routers import (
     plugins,
     registry,
     runs,
+    skills,
     uploads,
 )
 from app.services import orchestrator
@@ -83,6 +84,7 @@ app.include_router(pipelines.router, prefix=API_V1)
 app.include_router(plugins.router, prefix=API_V1)
 app.include_router(uploads.router, prefix=API_V1)
 app.include_router(registry.router, prefix=API_V1)
+app.include_router(skills.router, prefix=API_V1)
 app.include_router(mcp.router, prefix=API_V1)
 app.include_router(agents.router, prefix=API_V1)
 app.include_router(conversations.router, prefix=API_V1)
