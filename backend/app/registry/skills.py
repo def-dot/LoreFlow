@@ -103,10 +103,6 @@ def parse_skill_md(path: Path) -> SkillDef | None:
 # 技能发现
 # ---------------------------------------------------------------------------
 
-_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv"}
-_MAX_DEPTH = 6
-
-
 def discover_skills(*dirs: Path) -> None:
     """扫描目录树，发现所有包含 SKILL.md 的子目录并注册到 SKILL_REGISTRY。
     """
@@ -127,45 +123,21 @@ def rescan_skills(*dirs: Path) -> int:
     return len(SKILL_REGISTRY)
 
 
-def _collect_files(skill_dir: Path) -> list[str]:
-    """收集技能目录内所有文件的相对路径。"""
-    files: list[str] = []
-    for p in sorted(skill_dir.rglob("*")):
-        if p.is_file():
-            rel = str(p.relative_to(skill_dir)).replace("\\", "/")
-            if not rel.startswith(".") and not any(
-                part in _SKIP_DIRS for part in rel.split("/")
-            ):
-                files.append(rel)
-    return files
-
-
 def _scan_dir(root: Path) -> list[SkillDef]:
-    """递归扫描目录，返回发现的 SkillDef 列表。"""
+    """扫描目录，返回发现的 SkillDef 列表。"""
     results: list[SkillDef] = []
-    _walk(root, 0, results)
-    return results
-
-
-def _walk(current: Path, depth: int, results: list[SkillDef]) -> None:
-    if depth > _MAX_DEPTH:
-        return
-    try:
-        entries = sorted(current.iterdir())
-    except PermissionError:
-        return
-
-    for entry in entries:
+    for entry in sorted(root.iterdir()):
         if not entry.is_dir():
             continue
-        if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
-            continue
-
         skill_md = entry / "SKILL.md"
-        if skill_md.is_file():
-            sd = parse_skill_md(skill_md)
-            if sd is not None:
-                sd.files = _collect_files(entry)
-                results.append(sd)
-        else:
-            _walk(entry, depth + 1, results)
+        if not skill_md.is_file():
+            continue
+        sd = parse_skill_md(skill_md)
+        if sd is not None:
+            sd.files = [
+                str(p.relative_to(entry)).replace("\\", "/")
+                for p in sorted(entry.rglob("*"))
+                if p.is_file()
+            ]
+            results.append(sd)
+    return results
