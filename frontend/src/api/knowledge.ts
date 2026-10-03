@@ -1,9 +1,8 @@
 import { api } from './request'
 
-export interface KnowledgeBase {
+export interface TagInfo {
   id: number
   name: string
-  description: string
 }
 
 export interface DocumentItem {
@@ -13,9 +12,9 @@ export interface DocumentItem {
   chunk_count: number
   error: string | null
   parse_duration_ms: number | null
+  file_size: number | null
   created_at: string | null
-  kb_id: number
-  kb_name: string
+  tags: TagInfo[]
 }
 
 export interface DocumentListResponse {
@@ -46,8 +45,13 @@ export interface StatusCounts {
 }
 
 // 文档（扁平接口）
-export const listAllDocuments = (params?: { limit?: number; offset?: number; status?: string }) =>
-  api.get<DocumentListResponse>('/documents', { params })
+export const listAllDocuments = (params?: {
+  limit?: number
+  offset?: number
+  status?: string
+  q?: string
+  tag_ids?: number[]
+}) => api.get<DocumentListResponse>('/documents', { params })
 
 export const getDocument = (docId: number) =>
   api.get<DocumentItem>(`/documents/${docId}`)
@@ -67,36 +71,29 @@ export const cancelDocument = (docId: number) =>
 export const retryDocument = (docId: number) =>
   api.post(`/documents/${docId}/retry`)
 
-// KnowledgeBase CRUD
-export const listKnowledgeBases = () =>
-  api.get<KnowledgeBase[]>('/knowledge-bases')
-
-export const createKnowledgeBase = (data: { name: string; description?: string }) =>
-  api.post<KnowledgeBase>('/knowledge-bases', data)
-
-export const deleteKnowledgeBase = (id: number) =>
-  api.delete(`/knowledge-bases/${id}`)
-
-// 上传文档到指定 KB（保留旧接口）
-export const uploadDocument = (kbId: number, file: File) => {
+// 直接上传文档
+export const uploadDocumentDirect = (file: File, tagIds?: number[]) => {
   const formData = new FormData()
   formData.append('file', file)
-  return api.post<{ doc_id: number; filename: string; status: string }>(
-    `/knowledge-bases/${kbId}/documents/upload`,
-    formData,
-  )
-}
-
-// 直接上传文档（kbId 可选，留空归入默认知识库）
-export const uploadDocumentDirect = (file: File, kbId?: number) => {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (kbId != null) formData.append('kb_id', String(kbId))
+  if (tagIds && tagIds.length) formData.append('tag_ids', tagIds.join(','))
   return api.post<{ doc_id: number; filename: string; status: string }>(
     '/documents/upload',
     formData,
   )
 }
+
+// 标签 CRUD
+export const listTags = () =>
+  api.get<TagInfo[]>('/tags')
+
+export const createTag = (name: string) =>
+  api.post<TagInfo>('/tags', { name })
+
+export const updateTag = (id: number, name: string) =>
+  api.put<TagInfo>(`/tags/${id}`, { name })
+
+export const deleteTag = (id: number) =>
+  api.delete(`/tags/${id}`)
 
 // 解析结果对照
 export interface PageData {

@@ -1,4 +1,4 @@
-"""知识库模型 — KnowledgeBase、Document、Chunk。"""
+"""知识库模型 — Document、Chunk、Tag。"""
 
 from datetime import datetime
 from enum import StrEnum
@@ -24,18 +24,6 @@ class DocumentStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-# ---------- 知识库 ----------
-
-
-class KnowledgeBaseRecord(SQLModel, table=True):
-    __tablename__ = "knowledge_bases"
-
-    id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(max_length=200)
-    description: str = Field(default="", sa_column=Column(Text))
-    created_at: datetime = Field(default_factory=datetime.now)
-
-
 # ---------- 文档记录 ----------
 
 
@@ -43,7 +31,6 @@ class DocumentRecord(SQLModel, table=True):
     __tablename__ = "documents"
 
     id: int | None = Field(default=None, primary_key=True)
-    kb_id: int = Field(index=True, foreign_key="knowledge_bases.id")
     filename: str = Field(max_length=500)
     upload_id: str = Field(max_length=200)
     file_path: str | None = Field(default=None, max_length=500)
@@ -88,3 +75,21 @@ class ChunkRecord(SQLModel, table=True):
             postgresql_using="gin",
         ),
     )
+
+
+# ---------- 标签 ----------
+
+
+class TagRecord(SQLModel, table=True):
+    __tablename__ = "tags"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=50, unique=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class DocumentTagRecord(SQLModel, table=True):
+    __tablename__ = "document_tags"
+
+    document_id: int = Field(foreign_key="documents.id", primary_key=True)
+    tag_id: int = Field(foreign_key="tags.id", primary_key=True)

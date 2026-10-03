@@ -18,7 +18,7 @@ from sqlmodel import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.knowledge import ChunkRecord, DocumentRecord, DocumentStatus, KnowledgeBaseRecord
+from app.models.knowledge import ChunkRecord, DocumentRecord, DocumentStatus, DocumentTagRecord, TagRecord
 from app.services.embedding import embed_query, embed_texts
 from app.services.rerank import rerank
 from app.utils import files
@@ -39,58 +39,130 @@ def compute_content_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-# ── KnowledgeBase CRUD ──────────────────────────────────────────────
+# ── 标签 CRUD ───────────────────────────────────────────────────────
 
 
-async def create_kb(name: str, description: str = "") -> dict[str, Any]:
+async def create_tag(name: str) -> dict[str, Any]:
     async with AsyncSessionLocal() as session:
-        kb = KnowledgeBaseRecord(name=name, description=description)
-        session.add(kb)
+        tag = TagRecord(name=name)
+        session.add(tag)
         await session.commit()
-        await session.refresh(kb)
-        return {"id": kb.id, "name": kb.name, "description": kb.description}
+        await session.refresh(tag)
+        return {"id": tag.id, "name": tag.name}
 
 
-async def list_kbs() -> list[dict[str, Any]]:
+async def update_tag(tag_id: int, name: str) -> dict[str, Any] | None:
+    async with AsyncSessionLocal() as session:
+        tag = await session.get(TagRecord, tag_id)
+        if tag is None:
+            return None
+        tag.name = name
+        session.add(tag)
+        await session.commit()
+        await session.refresh(tag)
+        return {"id": tag.id, "name": tag.name}
+
+
+async def list_tags() -> list[dict[str, Any]]:
     async with AsyncSessionLocal() as session:
         rows = (await session.exec(
-            select(KnowledgeBaseRecord).order_by(KnowledgeBaseRecord.id.desc())
+            select(TagRecord).order_by(TagRecord.id)
         )).all()
-    return [{"id": r.id, "name": r.name, "description": r.description} for r in rows]
+    return [{"id": r.id, "name": r.name} for r in rows]
 
 
-_DEFAULT_KB_NAME = "默认知识库"
-
-
-async def get_or_create_default_kb() -> int:
-    """获取或创建默认知识库，返回其 ID。"""
+async def delete_tag(tag_id: int) -> bool:
     async with AsyncSessionLocal() as session:
-        kb = (await session.exec(
-            select(KnowledgeBaseRecord).where(KnowledgeBaseRecord.name == _DEFAULT_KB_NAME)
-        )).first()
-        if kb:
-            return kb.id  # type: ignore[return-value]
-        new_kb = KnowledgeBaseRecord(name=_DEFAULT_KB_NAME, description="自动创建的默认知识库")
-        session.add(new_kb)
-        await session.commit()
-        await session.refresh(new_kb)
-        return new_kb.id  # type: ignore[return-value]
-
-
-async def delete_kb(kb_id: int) -> bool:
-    async with AsyncSessionLocal() as session:
-        kb = await session.get(KnowledgeBaseRecord, kb_id)
-        if not kb:
+        tag = await session.get(TagRecord, tag_id)
+        if tag is None:
             return False
-        await session.delete(kb)
+        # 清理关联
+        await session.exec(
+            delete(DocumentTagRecord).where(DocumentTagRecord.tag_id == tag_id)
+        )
+        await session.delete(tag)
         await session.commit()
     return True
+
+
+async def _get_doc_tags(session, doc_ids: list[int]) -> dict[int, list[dict]]:
+    """批量查询文档标签，返回 {doc_id: [{id, name}, ...]}"""
+    if not doc_ids:
+        return {}
+    rows = (await session.exec(
+        select(DocumentTagRecord, TagRecord)
+        .join(TagRecord, DocumentTagRecord.tag_id == TagRecord.id)
+        .where(DocumentTagRecord.document_id.in_(doc_ids))
+    )).all()
+    result: dict[int, list[dict]] = {did: [] for did in doc_ids}
+    for dt, tag in rows:
+        result[dt.document_id].append({"id": tag.id, "name": tag.name})
+    return result
+
+
+# ── 自动打标签 ──────────────────────────────────────────────────────
+
+
+async def auto_tag_document(document_id: int, text_preview: str) -> None:
+    """解析完成后自动打标签（仅当文档无手动标签且已有标签时）。"""
+    async with AsyncSessionLocal() as session:
+        # 检查是否已有手动标签
+        existing = (await session.exec(
+            select(DocumentTagRecord).where(DocumentTagRecord.document_id == document_id)
+        )).first()
+        if existing:
+            return  # 已有标签，跳过
+
+        # 获取所有可用标签
+        tags = (await session.exec(select(TagRecord))).all()
+        if not tags:
+            return  # 无标签可选
+
+    tag_names = [t.name for t in tags]
+    tag_list_str = "、".join(tag_names)
+
+    from app.services.llm import llm_chat_call
+
+    try:
+        result = await llm_chat_call(
+            model=None,  # 使用默认模型
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"你是一个文档分类助手。根据文档内容，从以下标签中选择最匹配的（可多选，用逗号分隔）：\n"
+                        f"{tag_list_str}\n\n"
+                        f"只返回标签名称，不要其他文字。如果都不匹配，返回空。"
+                    ),
+                },
+                {"role": "user", "content": text_preview[:2000]},
+            ],
+        )
+        content = result.get("content", "").strip()
+        if not content:
+            return
+
+        # 解析 LLM 返回的标签名
+        selected = [n.strip() for n in content.split(",") if n.strip()]
+        if not selected:
+            return
+
+        name_to_id = {t.name: t.id for t in tags}
+        async with AsyncSessionLocal() as session:
+            for name in selected:
+                if name in name_to_id:
+                    session.add(DocumentTagRecord(document_id=document_id, tag_id=name_to_id[name]))
+            await session.commit()
+
+        logger.info("[auto-tag] doc#%d tagged: %s", document_id, selected)
+    except Exception:
+        logger.warning("[auto-tag] doc#%d failed, skipped", document_id, exc_info=True)
 
 
 # ── 文档入库（异步） ───────────────────────────────────────────────
 
 
-async def ingest_document(kb_id: int, upload_id: str, filename: str) -> dict[str, Any]:
+async def ingest_document(upload_id: str, filename: str, *, tag_ids: list[int] | None = None) -> dict[str, Any]:
     """创建文档记录并入队异步解析。"""
     suffix = os.path.splitext(filename)[1].lower()
     file_path = str(settings.UPLOADS_DIR / upload_id)
@@ -98,7 +170,6 @@ async def ingest_document(kb_id: int, upload_id: str, filename: str) -> dict[str
 
     async with AsyncSessionLocal() as session:
         doc = DocumentRecord(
-            kb_id=kb_id,
             filename=filename,
             upload_id=upload_id,
             file_path=file_path,
@@ -110,6 +181,12 @@ async def ingest_document(kb_id: int, upload_id: str, filename: str) -> dict[str
         await session.commit()
         await session.refresh(doc)
         doc_id = doc.id
+
+        # 写入标签关联
+        if tag_ids:
+            for tid in tag_ids:
+                session.add(DocumentTagRecord(document_id=doc_id, tag_id=tid))
+            await session.commit()
 
     # 入队异步解析
     from app.utils.arq import enqueue_parse
@@ -174,6 +251,10 @@ async def parse_document(document_id: int) -> None:
                                           error="文本块入库失败")
             return
 
+        # 自动打标签（取前几个 chunk 的 enriched_text 作为预览）
+        preview = "\n".join(c.get("enriched_text", "") for c in chunks[:3])
+        await auto_tag_document(document_id, preview)
+
         duration_ms = int((time.time() - t0) * 1000)
         await _update_document_status(
             document_id, DocumentStatus.COMPLETED,
@@ -196,7 +277,7 @@ async def _get_document(document_id: int) -> dict[str, Any] | None:
         if doc is None:
             return None
         return {
-            "id": doc.id, "kb_id": doc.kb_id, "filename": doc.filename,
+            "id": doc.id, "filename": doc.filename,
             "upload_id": doc.upload_id, "file_path": doc.file_path,
             "status": doc.status,
         }
@@ -274,11 +355,8 @@ async def _insert_chunks(chunks: list[dict[str, Any]], document_id: int) -> int:
 # ── 检索（BM25 + Vector + RRF + Reranker） ─────────────────────────
 
 
-async def search_chunks(kb_id: int | None, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-    """混合检索：BM25 + 向量 + RRF 融合 + Reranker 精排。
-
-    kb_id 为 None 时搜索全部文档；有值时只搜该知识库。
-    """
+async def search_chunks(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+    """混合检索：BM25 + 向量 + RRF 融合 + Reranker 精排。"""
     t0 = time.perf_counter()
     query_vec = await embed_query(query)
     logger.info("[perf] query_vec: %.2fs", time.perf_counter() - t0)
@@ -286,7 +364,7 @@ async def search_chunks(kb_id: int | None, query: str, top_k: int = 5) -> list[d
     # 第一阶段：混合召回
     t0 = time.perf_counter()
     recalls = await _get_chunks_hybrid_rrf(
-        query, query_vec, kb_id,
+        query, query_vec,
         vec_threshold=settings.VECTOR_THRESHOLD,
         limit=settings.RECALL_COUNT,
         rrf_k=settings.RRF_K,
@@ -319,19 +397,14 @@ async def search_chunks(kb_id: int | None, query: str, top_k: int = 5) -> list[d
 async def _get_chunks_hybrid_rrf(
     query_text: str,
     query_vec: list[float],
-    kb_id: int | None = None,
     vec_threshold: float = 0.35,
     limit: int = 100,
     rrf_k: int = 60,
 ) -> list[dict[str, Any]]:
-    """单 SQL 完成稠密向量 + tsvector BM25 双路召回 + RRF 融合。
-
-    kb_id 为 None 时不加知识库过滤，搜索全部文档。
-    """
+    """单 SQL 完成稠密向量 + tsvector BM25 双路召回 + RRF 融合。"""
     query_vec_str = _vector_to_str(query_vec)
-    kb_filter = "AND d.kb_id = :kb_id" if kb_id is not None else ""
 
-    hybrid_sql = text(f"""
+    hybrid_sql = text("""
         WITH qv AS (
             SELECT CAST(:qvec AS vector) AS v
         ),
@@ -343,10 +416,8 @@ async def _get_chunks_hybrid_rrf(
         dense_search AS (
             SELECT c.id, c.document_id, c.file_name, c.raw_content, c.enriched_content,
                    ROW_NUMBER() OVER (ORDER BY c.embedding <=> qv.v) AS rank
-            FROM chunks c, qv, documents d
-            WHERE c.document_id = d.id
-              {kb_filter}
-              AND c.embedding IS NOT NULL
+            FROM chunks c, qv
+            WHERE c.embedding IS NOT NULL
               AND 1.0 - (c.embedding <=> qv.v) > :threshold
             ORDER BY c.embedding <=> qv.v
             LIMIT :limit
@@ -354,10 +425,8 @@ async def _get_chunks_hybrid_rrf(
         sparse_search AS (
             SELECT c.id, c.document_id, c.file_name, c.raw_content, c.enriched_content,
                    ROW_NUMBER() OVER (ORDER BY ts_rank(c.tsv_content, qt.q) DESC) AS rank
-            FROM chunks c, qt, documents d
-            WHERE c.document_id = d.id
-              {kb_filter}
-              AND c.tsv_content @@ qt.q
+            FROM chunks c, qt
+            WHERE c.tsv_content @@ qt.q
             ORDER BY ts_rank(c.tsv_content, qt.q) DESC
             LIMIT :limit
         )
@@ -380,8 +449,6 @@ async def _get_chunks_hybrid_rrf(
         "limit": limit,
         "rrf_k": rrf_k,
     }
-    if kb_id is not None:
-        params["kb_id"] = kb_id
 
     async with AsyncSessionLocal() as session:
         rows = (await session.execute(hybrid_sql, params)).fetchall()
@@ -399,62 +466,49 @@ async def list_all_documents(
     limit: int = 50,
     offset: int = 0,
     status: str = "",
+    q: str = "",
+    tag_ids: list[int] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """返回所有文档（分页 + 状态筛选），附带所属知识库名称。"""
+    """返回所有文档（分页 + 状态/文件名/标签筛选）。"""
     async with AsyncSessionLocal() as session:
-        base = (
-            select(DocumentRecord)
-            .join(KnowledgeBaseRecord, KnowledgeBaseRecord.id == DocumentRecord.kb_id)
-        )
+        base = select(DocumentRecord)
         count_base = select(func.count(DocumentRecord.id))
 
         if status:
             base = base.where(DocumentRecord.status == status)
             count_base = count_base.where(DocumentRecord.status == status)
+        if q:
+            like = f"%{q}%"
+            base = base.where(DocumentRecord.filename.ilike(like))
+            count_base = count_base.where(DocumentRecord.filename.ilike(like))
+        if tag_ids:
+            tagged = (
+                select(DocumentTagRecord.document_id)
+                .where(DocumentTagRecord.tag_id.in_(tag_ids))
+            )
+            base = base.where(DocumentRecord.id.in_(tagged))
+            count_base = count_base.where(DocumentRecord.id.in_(tagged))
 
         total = (await session.execute(count_base)).scalar() or 0
         rows = (await session.execute(
             base.order_by(DocumentRecord.id.desc()).offset(offset).limit(limit)
         )).scalars().all()
 
-        # 批量查 kb_name
-        kb_ids = {r.kb_id for r in rows}
-        kb_map: dict[int, str] = {}
-        if kb_ids:
-            kbs = (await session.exec(
-                select(KnowledgeBaseRecord).where(KnowledgeBaseRecord.id.in_(kb_ids))
-            )).all()
-            kb_map = {kb.id: kb.name for kb in kbs}
+        # 批量查标签
+        doc_ids = [d.id for d in rows]
+        tag_map = await _get_doc_tags(session, doc_ids)
 
     items = [
         {
             "id": d.id, "filename": d.filename, "status": d.status,
             "chunk_count": d.chunk_count, "error": d.error,
-            "parse_duration_ms": d.parse_duration_ms,
+            "parse_duration_ms": d.parse_duration_ms, "file_size": d.file_size,
             "created_at": d.created_at.isoformat() if d.created_at else None,
-            "kb_id": d.kb_id, "kb_name": kb_map.get(d.kb_id, ""),
+            "tags": tag_map.get(d.id, []),
         }
         for d in rows
     ]
     return items, total
-
-
-async def list_documents(kb_id: int) -> list[dict[str, Any]]:
-    async with AsyncSessionLocal() as session:
-        rows = (await session.exec(
-            select(DocumentRecord)
-            .where(DocumentRecord.kb_id == kb_id)
-            .order_by(DocumentRecord.id.desc())
-        )).all()
-    return [
-        {
-            "id": d.id, "filename": d.filename, "status": d.status,
-            "chunk_count": d.chunk_count, "error": d.error,
-            "parse_duration_ms": d.parse_duration_ms,
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-        }
-        for d in rows
-    ]
 
 
 async def get_document(doc_id: int) -> dict[str, Any] | None:
@@ -463,7 +517,7 @@ async def get_document(doc_id: int) -> dict[str, Any] | None:
         if doc is None:
             return None
         return {
-            "id": doc.id, "kb_id": doc.kb_id, "filename": doc.filename,
+            "id": doc.id, "filename": doc.filename,
             "upload_id": doc.upload_id, "file_path": doc.file_path,
             "file_size": doc.file_size, "file_ext": doc.file_ext,
             "status": doc.status, "chunk_count": doc.chunk_count,

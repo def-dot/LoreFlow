@@ -11,8 +11,8 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.response import UnifiedResponseRoute
-from app.models.knowledge import DocumentRecord
-from app.schemas.knowledge import ChunkListResponse, DocumentListResponse, StatusCounts
+from app.models.knowledge import DocumentRecord, DocumentTagRecord, TagRecord
+from app.schemas.knowledge import ChunkListResponse, DocumentListResponse, StatusCounts, TagInfo
 from app.services import knowledge
 from app.utils import files
 
@@ -24,9 +24,9 @@ router = APIRouter(route_class=UnifiedResponseRoute, tags=["knowledge"])
 @router.post("/documents/upload", status_code=202)
 async def upload_document_direct(
     file: UploadFile = File(..., description="文档文件（.txt/.md/.pdf）"),
-    kb_id: int | None = Form(None, description="知识库 ID，留空则归入默认知识库"),
+    tag_ids: str = Form("", description="标签 ID 列表，逗号分隔"),
 ) -> dict:
-    """直接上传文档，无需预先指定知识库。"""
+    """直接上传文档。"""
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
     if suffix not in files.ALLOWED_SUFFIXES:
@@ -37,11 +37,9 @@ async def upload_document_direct(
     if len(data) > settings.UPLOAD_MAX_MB * 1024 * 1024:
         raise ValueError(f"文件超过大小上限（{settings.UPLOAD_MAX_MB}MB）")
 
-    if kb_id is None:
-        kb_id = await knowledge.get_or_create_default_kb()
-
+    parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()] if tag_ids else []
     stored = files.save_upload(data, suffix)
-    result = await knowledge.ingest_document(kb_id, stored, filename)
+    result = await knowledge.ingest_document(stored, filename, tag_ids=parsed_tag_ids)
     return {"doc_id": result["doc_id"], "filename": filename, "status": result["status"]}
 
 
@@ -50,8 +48,13 @@ async def list_all_documents(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     status: str = Query("", description="按状态筛选"),
+    q: str = Query("", description="按文件名搜索"),
+    tag_ids: str = Query("", description="按标签筛选，逗号分隔"),
 ) -> DocumentListResponse:
-    items, total = await knowledge.list_all_documents(limit=limit, offset=offset, status=status)
+    parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()] if tag_ids else []
+    items, total = await knowledge.list_all_documents(
+        limit=limit, offset=offset, status=status, q=q, tag_ids=parsed_tag_ids
+    )
     return DocumentListResponse(items=items, total=total)
 
 
@@ -170,53 +173,34 @@ async def get_page_image(doc_id: int, page_no: int) -> Response:
     return Response(content=buf.getvalue(), media_type="image/png")
 
 
-# ── 知识库 CRUD ──────────────────────────────────────────────────────
-
-kb_router = APIRouter(prefix="/knowledge-bases", route_class=UnifiedResponseRoute, tags=["knowledge"])
+# ── 标签 CRUD ────────────────────────────────────────────────────────
 
 
-class KBCreate(BaseModel):
+class TagCreate(BaseModel):
     name: str
-    description: str = ""
 
 
-@kb_router.post("", status_code=201)
-async def create_kb(body: KBCreate) -> dict:
-    return await knowledge.create_kb(body.name, body.description)
+@router.post("/tags", status_code=201)
+async def create_tag(body: TagCreate) -> dict:
+    tag = await knowledge.create_tag(body.name)
+    return {"id": tag["id"], "name": tag["name"]}
 
 
-@kb_router.get("")
-async def list_kbs() -> list[dict]:
-    return await knowledge.list_kbs()
+@router.get("/tags")
+async def list_tags() -> list[dict]:
+    return await knowledge.list_tags()
 
 
-@kb_router.delete("/{kb_id}")
-async def delete_kb(kb_id: int) -> dict:
-    if not await knowledge.delete_kb(kb_id):
-        raise HTTPException(status_code=404, detail="知识库不存在")
-    return {"deleted": kb_id}
+@router.put("/tags/{tag_id}")
+async def update_tag(tag_id: int, body: TagCreate) -> dict:
+    tag = await knowledge.update_tag(tag_id, body.name)
+    if not tag:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    return {"id": tag["id"], "name": tag["name"]}
 
 
-@kb_router.get("/{kb_id}/documents")
-async def list_documents(kb_id: int) -> list[dict]:
-    return await knowledge.list_documents(kb_id)
-
-
-@kb_router.post("/{kb_id}/documents/upload", status_code=202)
-async def upload_and_ingest(
-    kb_id: int,
-    file: UploadFile = File(..., description="文档文件（.txt/.md/.pdf）"),
-) -> dict:
-    filename = file.filename or ""
-    suffix = Path(filename).suffix.lower()
-    if suffix not in files.ALLOWED_SUFFIXES:
-        raise ValueError(f"不支持的文件类型 {suffix or '（无扩展名）'}")
-    data = await file.read()
-    if not data:
-        raise ValueError("上传的文件内容为空")
-    if len(data) > settings.UPLOAD_MAX_MB * 1024 * 1024:
-        raise ValueError(f"文件超过大小上限（{settings.UPLOAD_MAX_MB}MB）")
-
-    stored = files.save_upload(data, suffix)
-    result = await knowledge.ingest_document(kb_id, stored, filename)
-    return {"doc_id": result["doc_id"], "filename": filename, "status": result["status"]}
+@router.delete("/tags/{tag_id}")
+async def delete_tag(tag_id: int) -> dict:
+    if not await knowledge.delete_tag(tag_id):
+        raise HTTPException(status_code=404, detail="标签不存在")
+    return {"deleted": tag_id}
