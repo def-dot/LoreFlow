@@ -6,6 +6,7 @@ nodes:
   label: 知识库检索
   inputs:
     query: $params.question
+    tags: $params.tags
 - name: answer
   type: llm_chat
   label: LLM回答
@@ -31,3 +32,12 @@ params:
     type: paragraph
     label: 用户问题
     description: 输入要检索的问题
+  tags:
+    type: checkbox
+    label: 标签筛选
+    description: 按标签过滤知识库，不选则检索全部
+    options:
+    - 财务
+    - 人事
+    - 客服
+    - 技术

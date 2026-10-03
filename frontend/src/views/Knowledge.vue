@@ -11,6 +11,7 @@ import {
   uploadDocumentDirect,
   cancelDocument,
   retryDocument,
+  updateDocumentTags,
   getDocumentStatusCounts,
   listTags,
   createTag,
@@ -368,6 +369,21 @@ function openDocument(row: DocumentItem) {
   else openParseView(row)
 }
 
+// ---- 文档标签编辑 ----
+
+async function handleDocTagChange(row: DocumentItem, tagId: number, checked: boolean) {
+  const currentIds = row.tags.map(t => t.id)
+  const nextIds = checked
+    ? [...currentIds, tagId]
+    : currentIds.filter(id => id !== tagId)
+  try {
+    await updateDocumentTags(row.id, nextIds)
+    row.tags = tags.value.filter(t => nextIds.includes(t.id))
+  } catch {
+    ElMessage.error('更新标签失败')
+  }
+}
+
 // ---- 格式化 ----
 
 function formatFileSize(bytes: number | null): string {
@@ -525,7 +541,25 @@ onUnmounted(() => {
                   :title="row.filename"
                   @click="openDocument(row)"
                 >{{ row.filename }}</span>
-                <span v-for="t in row.tags" :key="t.id" class="doc-tag">{{ t.name }}</span>
+                <span class="doc-tags-wrap">
+                  <span v-for="t in row.tags" :key="t.id" class="doc-tag">{{ t.name }}</span>
+                  <el-popover trigger="click" :width="200">
+                    <template #reference>
+                      <span class="doc-tag doc-tag-edit">+/-</span>
+                    </template>
+                  <div class="doc-tag-popover">
+                    <label v-for="t in tags" :key="t.id" class="doc-tag-option">
+                      <input
+                        type="checkbox"
+                        :checked="row.tags.some((rt: TagInfo) => rt.id === t.id)"
+                        @change="handleDocTagChange(row, t.id, ($event.target as HTMLInputElement).checked)"
+                      />
+                      {{ t.name }}
+                    </label>
+                    <p v-if="!tags.length" class="muted" style="margin:0;font-size:12px;">暂无标签</p>
+                  </div>
+                </el-popover>
+                </span>
               </div>
               <p v-if="row.error" class="doc-error" :title="row.error">{{ row.error }}</p>
             </template>
@@ -829,6 +863,39 @@ onUnmounted(() => {
   border-radius: 999px;
   font-size: 11px;
   color: var(--ink-3);
+}
+.doc-tags-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  max-width: 260px;
+  flex-wrap: wrap;
+}
+.doc-tag-edit {
+  border-style: dashed;
+  color: var(--ink-3);
+  font-size: 10px;
+  padding: 1px 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.doc-tags-wrap:hover .doc-tag-edit {
+  opacity: 1;
+}
+.doc-tag-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.doc-tag-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
 }
 .doc-chunks {
   font-family: var(--font-mono);

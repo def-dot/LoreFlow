@@ -178,7 +178,6 @@ onMounted(async () => {
         <span class="pipeline-count">共 {{ pipelineCount }} 个工作流</span>
       </div>
       <span v-if="loadError" class="load-error">加载失败，请检查后端是否可用</span>
-      <el-button plain :loading="loading" @click="fetchAll">↻ 刷新</el-button>
       <el-button type="primary" @click="openCreate">＋ 新建</el-button>
       <span class="guide-link" @click="guideOpen = true">编写指南</span>
     </header>

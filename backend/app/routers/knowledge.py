@@ -90,6 +90,17 @@ async def delete_document(doc_id: int) -> dict:
     return {"deleted": doc_id}
 
 
+class UpdateDocTags(BaseModel):
+    tag_ids: list[int]
+
+
+@router.put("/documents/{doc_id}/tags")
+async def update_document_tags(doc_id: int, body: UpdateDocTags) -> dict:
+    if not await knowledge.update_document_tags(doc_id, body.tag_ids):
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"document_id": doc_id, "tag_ids": body.tag_ids}
+
+
 @router.post("/documents/{doc_id}/cancel")
 async def cancel_document(doc_id: int) -> dict:
     ok = await knowledge.cancel_document(doc_id)

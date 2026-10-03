@@ -558,6 +558,19 @@ async def delete_document(doc_id: int) -> bool:
     return True
 
 
+async def update_document_tags(doc_id: int, tag_ids: list[int]) -> bool:
+    """替换文档的标签关联。"""
+    async with AsyncSessionLocal() as session:
+        doc = await session.get(DocumentRecord, doc_id)
+        if not doc:
+            return False
+        await session.execute(delete(DocumentTagRecord).where(DocumentTagRecord.document_id == doc_id))
+        for tid in tag_ids:
+            session.add(DocumentTagRecord(document_id=doc_id, tag_id=tid))
+        await session.commit()
+    return True
+
+
 async def get_document_status_counts() -> dict[str, int]:
     """按状态统计文档数量。"""
     async with AsyncSessionLocal() as session:

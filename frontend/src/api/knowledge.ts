@@ -71,6 +71,9 @@ export const cancelDocument = (docId: number) =>
 export const retryDocument = (docId: number) =>
   api.post(`/documents/${docId}/retry`)
 
+export const updateDocumentTags = (docId: number, tagIds: number[]) =>
+  api.put(`/documents/${docId}/tags`, { tag_ids: tagIds })
+
 // 直接上传文档
 export const uploadDocumentDirect = (file: File, tagIds?: number[]) => {
   const formData = new FormData()
