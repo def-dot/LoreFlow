@@ -355,7 +355,7 @@ async def _insert_chunks(chunks: list[dict[str, Any]], document_id: int) -> int:
 # ── 检索（BM25 + Vector + RRF + Reranker） ─────────────────────────
 
 
-async def search_chunks(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+async def search_chunks(query: str, top_k: int = 5, *, tags: list[str] | None = None) -> list[dict[str, Any]]:
     """混合检索：BM25 + 向量 + RRF 融合 + Reranker 精排。"""
     t0 = time.perf_counter()
     query_vec = await embed_query(query)
@@ -368,6 +368,7 @@ async def search_chunks(query: str, top_k: int = 5) -> list[dict[str, Any]]:
         vec_threshold=settings.VECTOR_THRESHOLD,
         limit=settings.RECALL_COUNT,
         rrf_k=settings.RRF_K,
+        tags=tags,
     )
     logger.info("[perf] hybrid_rrf: %.2fs (%d results)", time.perf_counter() - t0, len(recalls))
 
@@ -400,11 +401,23 @@ async def _get_chunks_hybrid_rrf(
     vec_threshold: float = 0.35,
     limit: int = 100,
     rrf_k: int = 60,
+    tags: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """单 SQL 完成稠密向量 + tsvector BM25 双路召回 + RRF 融合。"""
     query_vec_str = _vector_to_str(query_vec)
 
-    hybrid_sql = text("""
+    # 标签过滤：按标签名称限定 document_id 范围
+    tag_filter = ""
+    if tags:
+        tag_filter = (
+            "AND c.document_id IN ("
+            "  SELECT dt.document_id FROM document_tags dt"
+            "  JOIN tags t ON t.id = dt.tag_id"
+            "  WHERE t.name = ANY(:tags)"
+            ")"
+        )
+
+    hybrid_sql = text(f"""
         WITH qv AS (
             SELECT CAST(:qvec AS vector) AS v
         ),
@@ -419,6 +432,7 @@ async def _get_chunks_hybrid_rrf(
             FROM chunks c, qv
             WHERE c.embedding IS NOT NULL
               AND 1.0 - (c.embedding <=> qv.v) > :threshold
+              {tag_filter}
             ORDER BY c.embedding <=> qv.v
             LIMIT :limit
         ),
@@ -427,6 +441,7 @@ async def _get_chunks_hybrid_rrf(
                    ROW_NUMBER() OVER (ORDER BY ts_rank(c.tsv_content, qt.q) DESC) AS rank
             FROM chunks c, qt
             WHERE c.tsv_content @@ qt.q
+              {tag_filter}
             ORDER BY ts_rank(c.tsv_content, qt.q) DESC
             LIMIT :limit
         )
@@ -449,6 +464,8 @@ async def _get_chunks_hybrid_rrf(
         "limit": limit,
         "rrf_k": rrf_k,
     }
+    if tags:
+        params["tags"] = tags
 
     async with AsyncSessionLocal() as session:
         rows = (await session.execute(hybrid_sql, params)).fetchall()

@@ -5,7 +5,6 @@ RAG 节点 — 知识库检索。
 管线和 Agent 只需要检索节点。
 """
 
-import contextvars
 import logging
 
 from pydantic import BaseModel, Field
@@ -30,23 +29,7 @@ class SearchKnowledgeOutput(BaseModel):
 
 class SearchKnowledgeParams(BaseModel):
     query: str = Field(description="检索关键词或自然语言问题", min_length=1)
-
-
-# ---------------------------------------------------------------------------
-# Agent 工具上下文
-# ---------------------------------------------------------------------------
-
-_tool_kb_ctx: contextvars.ContextVar[int | None] = contextvars.ContextVar(
-    "_tool_kb_ctx", default=None
-)
-
-
-def set_tool_kb_id(kb_id: int | None) -> contextvars.Token:
-    return _tool_kb_ctx.set(kb_id)
-
-
-def reset_tool_kb_id(token: contextvars.Token) -> None:
-    _tool_kb_ctx.reset(token)
+    tags: list[str] = Field(default_factory=list, description="按标签名称筛选，为空则检索全部")
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +47,11 @@ logger = logging.getLogger(__name__)
     ),
     metadata={"group": "基础", "order": 30},
 )
-async def search_knowledge(params: SearchKnowledgeParams) -> SearchKnowledgeOutput:
-    kb_id = _tool_kb_ctx.get()
-    results = await knowledge.search_chunks(kb_id, params.query, top_k=5)
+async def retrieve_knowledge(params: SearchKnowledgeParams) -> SearchKnowledgeOutput:
+    results = await knowledge.search_chunks(
+        params.query, top_k=5, tags=params.tags or None,
+    )
     return SearchKnowledgeOutput(result=[
         SearchKnowledgeItem(source=r["filename"], text=r["content"])
         for r in results
     ])
-

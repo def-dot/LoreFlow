@@ -600,7 +600,7 @@ async def _run_condition_yaml(
             content = "闲聊支路答复"
         return {"content": content, "tool_calls": []}
 
-    async def fake_search(kb_id: int, query: str, top_k: int = 5) -> list[dict]:
+    async def fake_search(query: str, top_k: int = 5, *, tags=None) -> list[dict]:
         return [
             {"content": "北境要塞建于第二纪元，横贯大陆北端的霜脊山脉。", "filename": "lore-001", "similarity": 0.95},
             {"content": "要塞由风哨、寒鸦、冬炉三段堡垒群组成，常驻兵力约八千。", "filename": "lore-001", "similarity": 0.88},
@@ -608,15 +608,9 @@ async def _run_condition_yaml(
 
     monkeypatch.setattr(llm_mod, "llm_chat_call", fake_chat)
     monkeypatch.setattr(kb_mod, "search_chunks", fake_search)
-    # 设置 kb_id 上下文，使 search_knowledge 能正常工作
-    from app.registry.funcs.rag import set_tool_kb_id, reset_tool_kb_id
-    token = set_tool_kb_id(1)
-    try:
-        config = yaml.safe_load((settings.PIPELINES_DIR / "条件分支.yaml").read_text(encoding="utf-8"))
-        dag = Pipeline.model_validate(config)
-        return await dag.run(inputs={"prompt": prompt})
-    finally:
-        reset_tool_kb_id(token)
+    config = yaml.safe_load((settings.PIPELINES_DIR / "条件分支.yaml").read_text(encoding="utf-8"))
+    dag = Pipeline.model_validate(config)
+    return await dag.run(inputs={"prompt": prompt})
 
 async def test_condition_yaml_chat_branch_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """chat 支路：rag 支路整条级联跳过，final_answer 汇合取 chat 答复。"""

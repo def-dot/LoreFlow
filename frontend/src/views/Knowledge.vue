@@ -520,11 +520,6 @@ onUnmounted(() => {
             <template #default="{ row }">
               <div class="cell-name">
                 <span
-                  class="doc-dot"
-                  :class="{ live: statusMeta[row.status]?.live }"
-                  :style="{ background: statusMeta[row.status]?.color }"
-                ></span>
-                <span
                   class="doc-name"
                   :class="{ link: row.status === 'completed' }"
                   :title="row.filename"
@@ -806,19 +801,6 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-.doc-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.doc-dot.live {
-  animation: breathe 1.8s ease-in-out infinite;
-}
-@keyframes breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
 }
 .doc-name {
   min-width: 0;

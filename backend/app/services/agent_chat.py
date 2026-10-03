@@ -21,7 +21,6 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.agent import AgentRecord, MessageRecord
 from app.services.agent_tools import execute_tool_call
-from app.registry.funcs.rag import set_tool_kb_id, reset_tool_kb_id
 from app.services.agent_tools import build_tools, build_skill_prompt
 from app.services.llm import llm_chat_stream
 
@@ -100,8 +99,6 @@ async def run_agent_chat(
     max_iter = settings.AGENT_MAX_ROUNDS
     full_content = ""
     _chat_start = time.monotonic()
-    _kb_token = set_tool_kb_id(getattr(agent, "kb_id", None))
-
     try:
 
         for iteration in range(1, max_iter + 1):
@@ -190,5 +187,3 @@ async def run_agent_chat(
     except Exception as exc:
         logger.exception("[agent_chat] error in conv=%d", conversation_id)
         yield f'event: error\ndata: {json.dumps({"message": str(exc)}, ensure_ascii=False)}\n\n'
-    finally:
-        reset_tool_kb_id(_kb_token)
