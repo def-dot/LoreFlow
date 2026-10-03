@@ -237,29 +237,30 @@ async def _insert_chunks(chunks: list[dict[str, Any]], document_id: int) -> int:
         failed = 0
         for chunk_data, dense_vec in zip(chunks, dense_vectors, strict=True):
             try:
-                meta = chunk_data["metadata"]
-                await session.execute(
-                    text(
-                        """
-                        INSERT INTO chunks
-                            (document_id, file_name, page_numbers, heading_context,
-                             raw_content, content, embedding)
-                        VALUES
-                            (:document_id, :file_name, CAST(:page_numbers AS INTEGER[]),
-                             :heading_context, :raw_content, :content,
-                             CAST(:embedding AS vector))
-                        """
-                    ),
-                    {
-                        "document_id": document_id,
-                        "file_name": meta["source_file"],
-                        "page_numbers": meta["page_numbers"],
-                        "heading_context": meta["heading_context"],
-                        "raw_content": chunk_data["raw_text"],
-                        "content": chunk_data["enriched_text"],
-                        "embedding": _vector_to_str(dense_vec),
-                    },
-                )
+                async with session.begin_nested():
+                    meta = chunk_data["metadata"]
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO chunks
+                                (document_id, file_name, page_numbers, heading_context,
+                                 raw_content, enriched_content, embedding)
+                            VALUES
+                                (:document_id, :file_name, CAST(:page_numbers AS INTEGER[]),
+                                 :heading_context, :raw_content, :enriched_content,
+                                 CAST(:embedding AS vector))
+                            """
+                        ),
+                        {
+                            "document_id": document_id,
+                            "file_name": meta["source_file"],
+                            "page_numbers": meta["page_numbers"],
+                            "heading_context": meta["heading_context"],
+                            "raw_content": chunk_data["raw_text"],
+                            "enriched_content": chunk_data["enriched_text"],
+                            "embedding": _vector_to_str(dense_vec),
+                        },
+                    )
             except Exception:
                 failed += 1
                 logger.exception("Failed to insert chunk for document %d", document_id)
@@ -340,7 +341,7 @@ async def _get_chunks_hybrid_rrf(
             )) AS q
         ),
         dense_search AS (
-            SELECT c.id, c.document_id, c.file_name, c.raw_content, c.content,
+            SELECT c.id, c.document_id, c.file_name, c.raw_content, c.enriched_content,
                    ROW_NUMBER() OVER (ORDER BY c.embedding <=> qv.v) AS rank
             FROM chunks c, qv, documents d
             WHERE c.document_id = d.id
@@ -351,7 +352,7 @@ async def _get_chunks_hybrid_rrf(
             LIMIT :limit
         ),
         sparse_search AS (
-            SELECT c.id, c.document_id, c.file_name, c.raw_content, c.content,
+            SELECT c.id, c.document_id, c.file_name, c.raw_content, c.enriched_content,
                    ROW_NUMBER() OVER (ORDER BY ts_rank(c.tsv_content, qt.q) DESC) AS rank
             FROM chunks c, qt, documents d
             WHERE c.document_id = d.id
@@ -364,7 +365,7 @@ async def _get_chunks_hybrid_rrf(
             COALESCE(d.id, s.id)                        AS id,
             COALESCE(d.document_id, s.document_id)      AS document_id,
             COALESCE(d.file_name, s.file_name)          AS file_name,
-            COALESCE(d.raw_content, s.raw_content)      AS content,
+            COALESCE(d.enriched_content, s.enriched_content)      AS content,
             COALESCE(1.0 / (:rrf_k + d.rank), 0.0)
                 + COALESCE(1.0 / (:rrf_k + s.rank), 0.0) AS score
         FROM dense_search d

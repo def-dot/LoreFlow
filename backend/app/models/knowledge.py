@@ -67,7 +67,6 @@ class ChunkRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     document_id: int = Field(index=True, foreign_key="documents.id")
     file_name: str | None = Field(default=None, max_length=255)
-    content: str = Field(sa_column=Column(Text))
     embedding: list[float] | None = Field(
         default=None,
         sa_column=Column(Vector(settings.EMBEDDING_DIMENSION)),
@@ -77,8 +76,6 @@ class ChunkRecord(SQLModel, table=True):
     raw_content: str | None = Field(default=None, sa_column=Column(Text))
     enriched_content: str | None = Field(default=None, sa_column=Column(Text))
     tsv_content: str | None = Field(default=None, sa_type=TSVECTOR)
-    chunk_index: int = 0
-    created_at: datetime = Field(default_factory=datetime.now)
 
     __table_args__ = (
         Index(

@@ -1,12 +1,17 @@
 """知识库管理 API。"""
 
+from io import BytesIO
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+import pypdfium2 as pdfium
+from docling_core.types.doc import DoclingDocument  # type: ignore[attr-defined]
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.core.response import UnifiedResponseRoute
+from app.models.knowledge import DocumentRecord
 from app.schemas.knowledge import ChunkListResponse, DocumentListResponse, StatusCounts
 from app.services import knowledge
 from app.utils import files
@@ -96,6 +101,73 @@ async def retry_document(doc_id: int) -> dict:
     if not ok:
         raise HTTPException(status_code=400, detail="该文档当前无法重试")
     return {"document_id": doc_id, "retried": True}
+
+
+@router.get("/documents/{doc_id}/pages/{page_no}")
+async def get_document_page(doc_id: int, page_no: int) -> dict:
+    """获取文档单页的解析结果（Markdown + 元数据）"""
+    json_path = Path("parsed") / f"{doc_id}.json"
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail="解析结果不存在")
+
+    doc = DoclingDocument.load_from_json(json_path)
+    total = len(doc.pages)
+
+    # 非 PDF 文件可能没有分页，整体作为第 1 页
+    if total == 0:
+        markdown = doc.export_to_markdown()
+        table_count = len(doc.tables)
+        picture_count = len(doc.pictures)
+        return {
+            "page_no": 1,
+            "total": 1,
+            "markdown": markdown,
+            "table_count": table_count,
+            "picture_count": picture_count,
+        }
+
+    markdown = doc.export_to_markdown(page_no=page_no)
+    table_count = sum(1 for item in doc.tables for prov in item.prov if prov.page_no == page_no)
+    picture_count = sum(1 for item in doc.pictures for prov in item.prov if prov.page_no == page_no)
+
+    return {
+        "page_no": page_no,
+        "total": total,
+        "markdown": markdown,
+        "table_count": table_count,
+        "picture_count": picture_count,
+    }
+
+
+@router.get("/documents/{doc_id}/pages/{page_no}/image")
+async def get_page_image(doc_id: int, page_no: int) -> Response:
+    """渲染 PDF 单页为 PNG 图片，非 PDF 返回原文纯文本"""
+    async with AsyncSessionLocal() as db:
+        doc_record = await db.get(DocumentRecord, doc_id)
+    if doc_record is None or not doc_record.file_path:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    file_path = doc_record.file_path
+    if not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="原始文件不存在")
+
+    if not file_path.lower().endswith(".pdf"):
+        try:
+            text = Path(file_path).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            raise HTTPException(status_code=500, detail="无法读取原文")
+        return Response(content=text.encode("utf-8"), media_type="text/plain; charset=utf-8")
+
+    pdf = pdfium.PdfDocument(file_path)
+    page = pdf[page_no - 1]  # pypdfium2 0-indexed
+    bitmap = page.render(scale=2.0)
+    img = bitmap.to_pil().convert("RGB")
+    buf = BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    page.close()
+    pdf.close()
+    return Response(content=buf.getvalue(), media_type="image/png")
 
 
 # ── 知识库 CRUD ──────────────────────────────────────────────────────

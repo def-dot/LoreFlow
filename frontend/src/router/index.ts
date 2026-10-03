@@ -18,6 +18,7 @@ const router = createRouter({
     { path: '/agents/:id/chat', name: 'agent-chat', component: AgentChat },
     { path: '/knowledge', name: 'knowledge', component: Knowledge },
     { path: '/knowledge/:id/chunks', name: 'Chunks', component: Chunks },
+    { path: '/knowledge/:id/parse', name: 'ParseView', component: () => import('@/views/ParseView.vue') },
   ],
 })
 

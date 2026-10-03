@@ -97,3 +97,15 @@ export const uploadDocumentDirect = (file: File, kbId?: number) => {
     formData,
   )
 }
+
+// 解析结果对照
+export interface PageData {
+  page_no: number
+  total: number
+  markdown: string
+  table_count: number
+  picture_count: number
+}
+
+export const getDocumentPage = (docId: number, pageNo: number) =>
+  api.get<PageData>(`/documents/${docId}/pages/${pageNo}`)

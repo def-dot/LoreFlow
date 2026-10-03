@@ -127,6 +127,10 @@ function openChunks(row: DocumentItem) {
   router.push({ name: 'Chunks', params: { id: row.id }, query: { name: row.filename } })
 }
 
+function openParseView(row: DocumentItem) {
+  router.push({ name: 'ParseView', params: { id: row.id }, query: { name: row.filename } })
+}
+
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '-'
   if (bytes < 1024) return `${bytes} B`
@@ -284,9 +288,9 @@ onUnmounted(() => {
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" align="center">
+        <el-table-column label="操作" width="160" align="center">
           <template #default="{ row }">
-            <span class="action-slot">
+            <div class="action-group">
               <template v-if="row.status === 'pending' || row.status === 'processing'">
                 <el-tooltip content="取消">
                   <el-button :icon="VideoPause" type="warning" text size="small" @click.stop="handleCancel(row)" />
@@ -294,20 +298,21 @@ onUnmounted(() => {
               </template>
               <template v-else-if="row.status === 'failed' || row.status === 'cancelled'">
                 <el-tooltip content="重试">
-                  <el-button :icon="RefreshRight" type="primary" text size="small" @click.stop="handleRetry(row)" />
+                  <el-button :icon="RefreshRight" type="warning" text size="small" class="retry-btn" @click.stop="handleRetry(row)" />
                 </el-tooltip>
               </template>
               <template v-else-if="row.status === 'completed'">
+                <el-tooltip content="解析对照">
+                  <el-button :icon="Document" type="primary" text size="small" class="parse-btn" @click.stop="openParseView(row)" />
+                </el-tooltip>
                 <el-tooltip content="查看切片">
-                  <el-button :icon="View" type="primary" text size="small" @click.stop="openChunks(row)" />
+                  <el-button :icon="View" type="primary" text size="small" class="view-btn" @click.stop="openChunks(row)" />
                 </el-tooltip>
               </template>
-            </span>
-            <span class="action-slot">
               <el-tooltip content="删除">
                 <el-button :icon="Delete" type="danger" text size="small" @click.stop="handleDelete(row)" />
               </el-tooltip>
-            </span>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -485,12 +490,14 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.action-slot {
+.action-group {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 24px;
+  gap: 2px;
+}
+
+.action-group :deep(.el-button) {
+  padding: 4px 6px;
 }
 
 .time-cell {
@@ -537,5 +544,26 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   padding-top: 16px;
+}
+
+.retry-btn {
+  color: #e6a23c !important;
+}
+.retry-btn:hover {
+  color: #f0c78a !important;
+}
+
+.view-btn {
+  color: #409eff !important;
+}
+.view-btn:hover {
+  color: #79bbff !important;
+}
+
+.parse-btn {
+  color: #67c23a !important;
+}
+.parse-btn:hover {
+  color: #95d475 !important;
 }
 </style>

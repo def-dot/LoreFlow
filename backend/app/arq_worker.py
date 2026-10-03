@@ -13,8 +13,9 @@ from arq.connections import RedisSettings
 from arq.typing import WorkerSettingsType
 
 from app.core.config import settings
+from app.core.logging import get_logger, setup_logging
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ── 分布式锁装饰器 ─────────────────────────────────────────────────
@@ -86,7 +87,8 @@ async def reconcile_cron(ctx: dict[str, Any]) -> None:
 
 
 # ── Worker Settings ─────────────────────────────────────────────────
-
+async def _on_startup(ctx: dict) -> None:
+    setup_logging("arq.log")
 
 class ParseWorkerSettings:
     """文档解析专用 worker。"""
@@ -96,6 +98,7 @@ class ParseWorkerSettings:
     job_timeout: int = settings.PARSE_JOB_TIMEOUT
     max_tries: int = 1
     allow_abort_jobs: bool = True
+    on_startup = _on_startup
     redis_settings: RedisSettings = RedisSettings.from_dsn(settings.REDIS_URL)
 
 
@@ -107,4 +110,5 @@ class DefaultWorkerSettings:
     ]
     queue_name: str = settings.DEFAULT_QUEUE_NAME
     max_jobs: int = settings.DEFAULT_MAX_JOBS
+    on_startup = _on_startup
     redis_settings: RedisSettings = RedisSettings.from_dsn(settings.REDIS_URL)
