@@ -35,7 +35,7 @@ class LLMClassifyOutput(BaseModel):
 class LLMChatParams(BaseModel):
     prompt: str = Field(description="用户提示词", min_length=1)
     system: str | None = Field(default=None, description="系统提示词")
-    context: str | None = Field(default=None, description="上下文")
+    context: str | list[Any] | None = Field(default=None, description="上下文")
     model: str | None = Field(default=None, description="模型名")
     tools: list[str] | None = Field(default=None, description="工具定义列表（OpenAI function calling 格式）")
 

@@ -63,11 +63,7 @@ async def sync_pipelines_from_yaml() -> None:
                     result = await session.execute(stmt)
                     existing = result.scalars().first()
 
-                    if existing:
-                        existing.description = description
-                        existing.definition = raw
-                        session.add(existing)
-                    else:
+                    if not existing:
                         session.add(PipelineRecord(name=name, description=description, definition=raw))
                 except Exception:
                     logger.warning("跳过 %s", f.name, exc_info=True)

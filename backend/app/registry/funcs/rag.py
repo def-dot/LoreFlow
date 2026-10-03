@@ -18,13 +18,8 @@ from app.services import knowledge
 # ---------------------------------------------------------------------------
 
 
-class SearchKnowledgeItem(BaseModel):
-    source: str = Field(description="片段来源（文件名）")
-    text: str = Field(description="片段正文")
-
-
 class SearchKnowledgeOutput(BaseModel):
-    result: list[SearchKnowledgeItem] = Field(description="检索结果列表")
+    result: str = Field(description="检索结果")
 
 
 class SearchKnowledgeParams(BaseModel):
@@ -51,7 +46,7 @@ async def retrieve_knowledge(params: SearchKnowledgeParams) -> SearchKnowledgeOu
     results = await knowledge.search_chunks(
         params.query, top_k=5, tags=params.tags or None,
     )
-    return SearchKnowledgeOutput(result=[
-        SearchKnowledgeItem(source=r["filename"], text=r["content"])
-        for r in results
-    ])
+    if not results:
+        return SearchKnowledgeOutput(result="（未检索到相关内容）")
+    parts = [f"[{i}] 来源：{r['filename']}\n{r['content']}" for i, r in enumerate(results, 1)]
+    return SearchKnowledgeOutput(result="\n\n".join(parts))
