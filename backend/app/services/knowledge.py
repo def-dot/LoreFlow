@@ -533,8 +533,9 @@ async def delete_document(doc_id: int) -> bool:
         doc = await session.get(DocumentRecord, doc_id)
         if not doc:
             return False
-        # 删除关联切片
+        # 删除关联切片和标签
         await session.execute(delete(ChunkRecord).where(ChunkRecord.document_id == doc_id))
+        await session.execute(delete(DocumentTagRecord).where(DocumentTagRecord.document_id == doc_id))
         await session.delete(doc)
         await session.commit()
     return True

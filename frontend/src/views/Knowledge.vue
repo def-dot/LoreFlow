@@ -433,8 +433,7 @@ onUnmounted(() => {
       <div class="toolbar">
         <div class="toolbar-row">
           <div class="bar-left">
-            <span class="bar-title">已入库文档</span>
-            <span class="bar-count">{{ total }}</span>
+            <span class="bar-title">已入库文档 <span class="bar-count">{{ total }}</span></span>
             <el-input
               v-model="searchFileName"
               placeholder="搜索文件名"
@@ -516,61 +515,89 @@ onUnmounted(() => {
       </div>
 
       <div v-loading="loading" class="ledger-body">
-        <div v-for="row in documents" :key="row.id" class="doc-row">
-          <div class="doc-main">
-            <span
-              class="doc-dot"
-              :class="{ live: statusMeta[row.status]?.live }"
-              :style="{ background: statusMeta[row.status]?.color }"
-            ></span>
-            <button
-              type="button"
-              class="doc-name"
-              :class="{ link: row.status === 'completed' }"
-              :title="row.filename"
-              @click="openDocument(row)"
-            >{{ row.filename }}</button>
-            <span v-for="t in row.tags" :key="t.id" class="doc-tag">{{ t.name }}</span>
-            <span class="doc-chunks" :class="{ link: row.chunk_count > 0 }" @click="openChunks(row)">
-              {{ row.chunk_count }} 片
-            </span>
-          </div>
-
-          <div class="doc-meta">
-            <span class="meta-status" :style="{ color: statusMeta[row.status]?.color }">
-              {{ statusMeta[row.status]?.label ?? row.status }}
-            </span>
-            <span class="meta-item">{{ formatDuration(row.parse_duration_ms) }}</span>
-            <span class="meta-item">{{ formatFileSize(row.file_size) }}</span>
-            <span class="meta-item">{{ formatTime(row.created_at) }}</span>
-          </div>
-
-          <div class="doc-acts">
-            <template v-if="row.status === 'pending' || row.status === 'processing'">
-              <button type="button" class="act warn" title="停止解析" @click="handleCancel(row)">
-                <el-icon><VideoPause /></el-icon>
-              </button>
+        <el-table :data="documents" size="small" style="width: 100%" empty-text=" ">
+          <el-table-column label="文件名" min-width="260">
+            <template #default="{ row }">
+              <div class="cell-name">
+                <span
+                  class="doc-dot"
+                  :class="{ live: statusMeta[row.status]?.live }"
+                  :style="{ background: statusMeta[row.status]?.color }"
+                ></span>
+                <span
+                  class="doc-name"
+                  :class="{ link: row.status === 'completed' }"
+                  :title="row.filename"
+                  @click="openDocument(row)"
+                >{{ row.filename }}</span>
+                <span v-for="t in row.tags" :key="t.id" class="doc-tag">{{ t.name }}</span>
+              </div>
+              <p v-if="row.error" class="doc-error" :title="row.error">{{ row.error }}</p>
             </template>
-            <template v-else-if="row.status === 'failed' || row.status === 'cancelled'">
-              <button type="button" class="act warn" title="重新解析" @click="handleRetry(row)">
-                <el-icon><RefreshRight /></el-icon>
-              </button>
-            </template>
-            <template v-else-if="row.status === 'completed'">
-              <button type="button" class="act" title="解析对照" @click="openParseView(row)">
-                <el-icon><Document /></el-icon>
-              </button>
-              <button type="button" class="act" title="查看切片" @click="openChunks(row)">
-                <el-icon><View /></el-icon>
-              </button>
-            </template>
-            <button type="button" class="act danger" title="删除文档" @click="handleDelete(row)">
-              <el-icon><Delete /></el-icon>
-            </button>
-          </div>
+          </el-table-column>
 
-          <p v-if="row.error" class="doc-error" :title="row.error">{{ row.error }}</p>
-        </div>
+          <el-table-column label="状态" width="90" align="center">
+            <template #default="{ row }">
+              <span class="meta-status" :style="{ color: statusMeta[row.status]?.color }">
+                {{ statusMeta[row.status]?.label ?? row.status }}
+              </span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="切片" width="70" align="right">
+            <template #default="{ row }">
+              <span class="doc-chunks" :class="{ link: row.chunk_count > 0 }" @click="openChunks(row)">
+                {{ row.chunk_count }}
+              </span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="耗时" width="80" align="center">
+            <template #default="{ row }">
+              <span class="cell-mono">{{ formatDuration(row.parse_duration_ms) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="大小" width="80" align="center">
+            <template #default="{ row }">
+              <span class="cell-mono">{{ formatFileSize(row.file_size) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="时间" width="130" align="center">
+            <template #default="{ row }">
+              <span class="cell-mono">{{ formatTime(row.created_at) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="" width="100" align="right">
+            <template #default="{ row }">
+              <div class="doc-acts">
+                <template v-if="row.status === 'pending' || row.status === 'processing'">
+                  <button type="button" class="act warn" title="停止解析" @click="handleCancel(row)">
+                    <el-icon><VideoPause /></el-icon>
+                  </button>
+                </template>
+                <template v-else-if="row.status === 'failed' || row.status === 'cancelled'">
+                  <button type="button" class="act warn" title="重新解析" @click="handleRetry(row)">
+                    <el-icon><RefreshRight /></el-icon>
+                  </button>
+                </template>
+                <template v-else-if="row.status === 'completed'">
+                  <button type="button" class="act" title="解析对照" @click="openParseView(row)">
+                    <el-icon><Document /></el-icon>
+                  </button>
+                  <button type="button" class="act" title="查看切片" @click="openChunks(row)">
+                    <el-icon><View /></el-icon>
+                  </button>
+                </template>
+                <button type="button" class="act danger" title="删除文档" @click="handleDelete(row)">
+                  <el-icon><Delete /></el-icon>
+                </button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
 
         <!-- 空态 -->
         <div v-if="!loading && !documents.length" class="empty">
@@ -744,12 +771,15 @@ onUnmounted(() => {
 }
 .bar-count {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--ink-3);
-  padding: 1px 8px;
+  color: var(--ink-2);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 .bar-right {
   display: flex;
@@ -770,24 +800,8 @@ onUnmounted(() => {
   min-height: 200px;
 }
 
-/* 文档行 */
-.doc-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    'main acts'
-    'meta acts'
-    'error error';
-  column-gap: 16px;
-  padding: 12px 4px 12px 0;
-  border-bottom: 1px solid var(--line);
-  transition: background 0.15s;
-}
-.doc-row:hover {
-  background: rgba(77, 196, 178, 0.03);
-}
-.doc-main {
-  grid-area: main;
+/* 表格内单元格 */
+.cell-name {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -835,14 +849,10 @@ onUnmounted(() => {
   color: var(--ink-3);
 }
 .doc-chunks {
-  flex: none;
-  margin-left: auto;
-  padding-left: 12px;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
-  white-space: nowrap;
 }
 .doc-chunks.link {
   color: var(--accent);
@@ -851,39 +861,22 @@ onUnmounted(() => {
 .doc-chunks.link:hover {
   opacity: 0.75;
 }
-
-.doc-meta {
-  grid-area: meta;
-  display: flex;
-  align-items: center;
-  margin-top: 6px;
-  padding-left: 15px;
+.cell-mono {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
 }
 .meta-status {
+  font-size: 12px;
   color: var(--ink-2);
-}
-.meta-item {
-  padding-left: 10px;
-}
-.meta-item + .meta-item {
-  border-left: 1px solid var(--line);
 }
 
 .doc-acts {
-  grid-area: acts;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
-  opacity: 0.35;
-  transition: opacity 0.15s;
-}
-.doc-row:hover .doc-acts,
-.doc-row:focus-within .doc-acts {
-  opacity: 1;
 }
 .act {
   display: inline-flex;
@@ -904,8 +897,7 @@ onUnmounted(() => {
 }
 
 .doc-error {
-  grid-area: error;
-  margin: 6px 0 0 15px;
+  margin: 4px 0 0;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
