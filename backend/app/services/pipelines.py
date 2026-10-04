@@ -24,6 +24,7 @@ from app.engine.pipeline import Pipeline
 logger = get_logger(__name__)
 from app.models.pipeline import PipelineRecord
 from app.registry import REGISTRY
+from app.registry.pipeline_tool import register_pipeline_tool, unregister_pipeline_tool
 
 PIPELINES_DIR = settings.PIPELINES_DIR
 
@@ -56,15 +57,22 @@ async def sync_pipelines_from_yaml() -> None:
                 try:
                     raw = f.read_text(encoding="utf-8")
                     data = yaml.safe_load(raw)
-                    name = data.get("name", f.stem)
-                    description = data.get("description", "")
+                    cfg = Pipeline.model_validate(data)
 
-                    stmt = select(PipelineRecord).where(PipelineRecord.name == name)
+                    stmt = select(PipelineRecord).where(PipelineRecord.name == cfg.name)
                     result = await session.execute(stmt)
                     existing = result.scalars().first()
 
                     if not existing:
-                        session.add(PipelineRecord(name=name, description=description, definition=raw))
+                        session.add(PipelineRecord(
+                            name=cfg.name,
+                            description=cfg.description or "",
+                            agent_tool=cfg.metadata.agent_tool,
+                            definition=raw,
+                        ))
+
+                    # 注册为 Agent 工具
+                    register_pipeline_tool(cfg)
                 except Exception:
                     logger.warning("跳过 %s", f.name, exc_info=True)
 
@@ -100,10 +108,17 @@ def detail_from_config(raw: str) -> dict[str, Any]:
         row["type_output_schema"] = node_type.json_output_schema() if node_type else None
         rows.append(row)
 
+    # params 需要转为 plain dict（ParamSchema 不可直接 JSON 序列化）
+    params_dict = (
+        {k: v.model_dump() for k, v in pipeline.params.items()}
+        if pipeline.params else None
+    )
+
     return {
         "name": pipeline.name or "",
         "description": pipeline.description or "",
-        "params": pipeline.params,
+        "params": params_dict,
+        "required": pipeline.required,
         "node_count": len(pipeline.nodes),
         "mermaid": pipeline.to_mermaid(),
         "source": raw,
@@ -117,7 +132,7 @@ def detail_from_config(raw: str) -> dict[str, Any]:
 
 
 async def create_pipeline(definition: str) -> PipelineRecord:
-    """创建 pipeline：校验 YAML → 写入 DB。"""
+    """创建 pipeline：校验 YAML → 写入 DB → 注册工具。"""
     try:
         data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
@@ -128,11 +143,14 @@ async def create_pipeline(definition: str) -> PipelineRecord:
         exists = await session.exec(select(PipelineRecord).where(PipelineRecord.name == cfg.name))
         if exists.first():
             raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
-        rec = PipelineRecord(name=cfg.name, description=cfg.description or "", definition=definition)
+        rec = PipelineRecord(name=cfg.name, description=cfg.description or "", agent_tool=cfg.metadata.agent_tool, definition=definition)
         session.add(rec)
         await session.commit()
         await session.refresh(rec)
-        return rec
+
+    # 注册为 Agent 工具
+    register_pipeline_tool(cfg)
+    return rec
 
 
 async def get_pipeline(pipeline_id: int) -> PipelineRecord | None:
@@ -149,7 +167,7 @@ async def get_pipeline_by_name(name: str) -> PipelineRecord | None:
 
 
 async def update_pipeline(pipeline_id: int, definition: str) -> PipelineRecord:
-    """更新 pipeline：校验 YAML → 更新 DB。name 变更时检查冲突。"""
+    """更新 pipeline：校验 YAML → 更新 DB → 重新注册工具。name 变更时检查冲突。"""
     try:
         data = yaml.safe_load(definition)
     except yaml.YAMLError as exc:
@@ -160,6 +178,7 @@ async def update_pipeline(pipeline_id: int, definition: str) -> PipelineRecord:
         rec = await session.get(PipelineRecord, pipeline_id)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"流水线 {pipeline_id} 不存在")
+        old_name = rec.name
         # name 变了，检查新 name 是否冲突
         if cfg.name != rec.name:
             dup = await session.exec(select(PipelineRecord).where(PipelineRecord.name == cfg.name))
@@ -167,11 +186,16 @@ async def update_pipeline(pipeline_id: int, definition: str) -> PipelineRecord:
                 raise HTTPException(status_code=409, detail=f"工作流 {cfg.name!r} 已存在")
         rec.name = cfg.name
         rec.description = cfg.description or ""
+        rec.agent_tool = cfg.metadata.agent_tool
         rec.definition = definition
         rec.updated_at = datetime.now()
         await session.commit()
         await session.refresh(rec)
-        return rec
+
+    # 更新工具注册
+    unregister_pipeline_tool(old_name)
+    register_pipeline_tool(cfg)
+    return rec
 
 
 async def delete_pipeline(pipeline_id: int) -> bool:
@@ -180,6 +204,10 @@ async def delete_pipeline(pipeline_id: int) -> bool:
         rec = await session.get(PipelineRecord, pipeline_id)
         if rec is None:
             return False
+        pipeline_name = rec.name
         await session.delete(rec)
         await session.commit()
-        return True
+
+    # 移除工具注册
+    unregister_pipeline_tool(pipeline_name)
+    return True
