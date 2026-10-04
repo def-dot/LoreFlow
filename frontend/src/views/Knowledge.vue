@@ -449,7 +449,7 @@ onUnmounted(() => {
       <div class="toolbar">
         <div class="toolbar-row">
           <div class="bar-left">
-            <span class="bar-title">已入库文档 <span class="bar-count">{{ total }}</span></span>
+            <span class="bar-title">已入库文档 <span class="bar-count">共 {{ total }} 个</span></span>
             <el-input
               v-model="searchFileName"
               placeholder="搜索文件名"
