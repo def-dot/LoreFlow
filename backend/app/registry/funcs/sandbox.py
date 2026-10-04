@@ -30,15 +30,15 @@ class CodeParams(BaseModel):
     metadata={"group": "基础", "order": 19},
 )
 async def code(params: CodeParams) -> CodeOutput:
-    async with http_client() as client:
-        resp = await client.post(
-            f"{settings.SANDBOX_URL}/exec",
-            json={"code": params.code, "params": params.params, "timeout": params.timeout},
-            timeout=params.timeout + 5,
-        )
-        result = resp.json()
-        if resp.status_code != 200:
-            raise RuntimeError(result.get("error", "执行失败"))
+    client = http_client()
+    resp = await client.post(
+        f"{settings.SANDBOX_URL}/exec",
+        json={"code": params.code, "params": params.params, "timeout": params.timeout},
+        timeout=params.timeout + 5,
+    )
+    result = resp.json()
+    if resp.status_code != 200:
+        raise RuntimeError(result.get("error", "执行失败"))
     return CodeOutput(result=result.get("result"))
 
 
@@ -62,15 +62,15 @@ class RunCodeParams(BaseModel):
     metadata={"group": "基础", "order": 20},
 )
 async def run_code(params: RunCodeParams) -> RunCodeOutput:
-    async with http_client() as client:
-        resp = await client.post(
-            f"{settings.SANDBOX_URL}/run",
-            json={"code": params.code, "timeout": params.timeout},
-            timeout=params.timeout + 5,
-        )
-        result = resp.json()
-        if result.get("returncode", -1) != 0:
-            raise RuntimeError(result.get("stderr", "执行失败"))
+    client = http_client()
+    resp = await client.post(
+        f"{settings.SANDBOX_URL}/run",
+        json={"code": params.code, "timeout": params.timeout},
+        timeout=params.timeout + 5,
+    )
+    result = resp.json()
+    if result.get("returncode", -1) != 0:
+        raise RuntimeError(result.get("stderr", "执行失败"))
     return RunCodeOutput(stdout=result.get("stdout"))
 
 
@@ -93,13 +93,13 @@ class PipInstallParams(BaseModel):
     metadata={"group": "基础", "order": 21},
 )
 async def pip_install(params: PipInstallParams) -> PipInstallOutput:
-    async with http_client() as client:
-        resp = await client.post(
-            f"{settings.SANDBOX_URL}/pip",
-            json={"packages": params.packages},
-            timeout=120,
-        )
-        result = resp.json()
-        if result.get("returncode", -1) != 0:
-            raise RuntimeError(f"pip install 失败: {result.get('stderr', '')}")
+    client = http_client()
+    resp = await client.post(
+        f"{settings.SANDBOX_URL}/pip",
+        json={"packages": params.packages},
+        timeout=120,
+    )
+    result = resp.json()
+    if result.get("returncode", -1) != 0:
+        raise RuntimeError(f"pip install 失败: {result.get('stderr', '')}")
     return PipInstallOutput(result=result["stdout"].strip())

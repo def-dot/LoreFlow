@@ -1,6 +1,6 @@
 """start — 工作流输入节点。
 
-声明输入参数（InputParamDef），执行时透传外部输入供下游 $ 引用。
+声明输入参数（JSON Schema），执行时透传外部输入供下游 $ 引用。
 """
 
 from __future__ import annotations

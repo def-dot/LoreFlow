@@ -12,7 +12,7 @@ import json
 import logging
 import os
 from contextlib import AsyncExitStack
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ from mcp import ClientSession
 from pydantic import BaseModel, Field, computed_field
 
 from app.core.config import settings
-from app.registry.types import TOOL_REGISTRY, FuncDef
+from app.registry.mcp_tool import register_mcp_tools, unregister_mcp_tools
 from app.schemas.mcp import McpServerConfigIn, McpStdioConfig, McpHttpConfig
 
 logger = logging.getLogger(__name__)
@@ -51,10 +51,6 @@ STATUS_CONNECTING = "connecting"
 STATUS_CONNECTED = "connected"
 STATUS_FAILED = "failed"
 
-#: 默认工具调用超时（秒）
-DEFAULT_TIMEOUT = 60
-
-
 class McpServerState(BaseModel):
     """单个 MCP 服务器的运行状态。"""
 
@@ -75,19 +71,6 @@ class McpServerState(BaseModel):
 _servers: dict[str, McpServerState] = {}
 _stacks: dict[str, AsyncExitStack] = {}
 _lock = asyncio.Lock()
-
-
-def _make_call(sess: ClientSession, tool_name: str, timeout: float | None = None):
-    """把 MCP 工具包成 FuncDef 可调用的异步函数。"""
-    read_timeout = timedelta(seconds=timeout) if timeout else None
-
-    async def _call(**kwargs: Any) -> str:
-        result = await sess.call_tool(tool_name, kwargs, read_timeout_seconds=read_timeout)
-        texts = [item.text for item in result.content if getattr(item, "type", None) == "text"]
-        if result.isError:
-            raise RuntimeError("\n".join(texts) or "MCP 工具返回错误（无错误详情）")
-        return "\n".join(texts)
-    return _call
 
 
 async def _connect_server(name: str, config: McpStdioConfig | McpHttpConfig) -> McpServerState:
@@ -115,22 +98,7 @@ async def _connect_server(name: str, config: McpStdioConfig | McpHttpConfig) -> 
         await session.initialize()
 
         # ── 注册工具 ──
-        tools_result = await session.list_tools()
-        for t in tools_result.tools:
-            if t.name in TOOL_REGISTRY:
-                logger.warning("[mcp] 工具名 %s 与已有工具冲突，服务器 %s 将覆盖它", t.name, name)
-            td = FuncDef(
-                name=t.name,
-                func=_make_call(session, t.name, timeout=DEFAULT_TIMEOUT),
-                description=t.description or "",
-                label=t.name,
-                metadata={"group": name, "source": "mcp", "source_name": name},
-                input_schema=t.inputSchema,
-                output_schema=t.outputSchema,
-            )
-            TOOL_REGISTRY[t.name] = td
-
-        state.tool_names = [t.name for t in tools_result.tools]
+        state.tool_names = await register_mcp_tools(name, session)
         _stacks[name] = stack
         state.status = STATUS_CONNECTED
         state.error = None
@@ -151,8 +119,7 @@ async def _close_server(name: str) -> None:
     state = _servers.pop(name, None)
     if state is None:
         return
-    for t in state.tool_names:
-        TOOL_REGISTRY.pop(t, None)
+    unregister_mcp_tools(state.tool_names)
     stack = _stacks.pop(name, None)
     if stack is not None:
         try:
