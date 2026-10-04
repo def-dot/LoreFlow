@@ -1,13 +1,16 @@
 """
-LLM 节点 — llm_chat / llm_classify，调用 app.services.llm 的公共接口。
+LLM 节点 — llm_chat / llm_classify / llm_rewrite_query，调用 app.services.llm 的公共接口。
 """
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.services.llm import llm_chat_call
 from app.registry.types import func
+
+logger = logging.getLogger(__name__)
 
 
 _CLASSIFY_SYSTEM = (
@@ -76,3 +79,67 @@ async def llm_classify(params: LLMClassifyParams) -> LLMClassifyOutput:
     )
     text = raw["content"].strip().strip('"').lower()
     return LLMClassifyOutput(intent=text, raw=raw["content"].strip())
+
+
+# ---------------------------------------------------------------------------
+# 查询改写 + 拆分
+# ---------------------------------------------------------------------------
+
+_REWRITE_SYSTEM = """\
+你是检索查询优化器。对用户问题做两步处理：
+1. 改写：将问题改写为更适合向量检索的短句（补全省略、消除指代、展开缩写）
+2. 拆分：将改写后的问题拆分为多个独立的检索子问题
+
+输出 JSON 格式：
+- search_query：改写后的主查询，用于最终生成回答
+- sub_queries：拆分后的检索子问题列表，用于并发检索
+
+规则：
+- 简单问题：search_query 和 sub_queries 相同（一个元素）
+- 复杂问题（对比、多实体、多维度）：sub_queries 拆分为 2-4 个独立子问题
+- 每个子问题应改写为适合向量检索的短句形式"""
+
+
+class RewriteQueryParams(BaseModel):
+    query: str = Field(description="用户问题", min_length=1)
+    history: str | None = Field(default=None, description="对话历史（JSON 字符串）")
+    model: str | None = Field(default=None, description="模型名")
+
+
+class RewriteQueryOutput(BaseModel):
+    search_query: str = Field(description="改写后的主查询")
+    sub_queries: list[str] = Field(description="拆分后的子问题列表")
+
+
+@func(
+    label="查询改写",
+    description="改写用户问题并拆分为多个检索子问题",
+    metadata={"group": "LLM", "order": 35},
+    tool=False,
+)
+async def llm_rewrite_query(params: RewriteQueryParams) -> RewriteQueryOutput:
+    user_content = params.query
+    if params.history:
+        user_content = f"对话历史：\n{params.history}\n\n当前问题：{params.query}"
+
+    raw = await llm_chat_call(
+        params.model,
+        [
+            {"role": "system", "content": _REWRITE_SYSTEM},
+            {"role": "user", "content": user_content},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "rewrite_query",
+                "strict": True,
+                "schema": RewriteQueryOutput.model_json_schema(),
+            },
+        },
+    )
+
+    try:
+        return RewriteQueryOutput.model_validate_json(raw["content"])
+    except Exception:
+        logger.warning("[llm_rewrite_query] 解析失败，使用原问题: %s", raw["content"][:200])
+        return RewriteQueryOutput(search_query=params.query, sub_queries=[params.query])

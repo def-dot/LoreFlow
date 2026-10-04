@@ -390,9 +390,44 @@ async def search_chunks(query: str, top_k: int = 5, *, tags: list[str] | None = 
     ranked.sort(key=lambda x: x["similarity"], reverse=True)
 
     return [
-        {"content": r["content"], "filename": r["filename"], "similarity": r["similarity"]}
+        {"chunk_id": r["id"], "content": r["content"], "filename": r["filename"], "similarity": r["similarity"]}
         for r in ranked[:top_k]
     ]
+
+
+async def search_multi(
+    queries: list[str],
+    tags: list[str] | None = None,
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
+    """并发检索多个 query，多 query 时自动去重，返回结构化结果列表。"""
+
+    async def _retrieve_one(q: str):
+        return await search_chunks(q, top_k=top_k, tags=tags)
+
+    all_results = await asyncio.gather(*[_retrieve_one(q) for q in queries])
+
+    # 多 query 时按 chunk_id 去重
+    if len(queries) > 1:
+        seen: dict[int, dict] = {}
+        for results in all_results:
+            for r in results:
+                cid = r.get("chunk_id")
+                if cid is None:
+                    cid = hash(r["content"][:100])
+                if cid not in seen or r["similarity"] > seen[cid]["similarity"]:
+                    seen[cid] = r
+        return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)[:top_k]
+
+    return all_results[0][:top_k] if all_results else []
+
+
+def format_sources(sources: list[dict[str, Any]]) -> str:
+    """将检索结果列表格式化为可读文本。"""
+    if not sources:
+        return "（未检索到相关内容）"
+    parts = [f"[{i}] 来源：{r['filename']}\n{r['content']}" for i, r in enumerate(sources, 1)]
+    return "\n\n".join(parts)
 
 
 async def _get_chunks_hybrid_rrf(

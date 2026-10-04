@@ -39,6 +39,7 @@ async def llm_chat_call(
     model: str | None,
     messages: list[dict[str, str]],
     tools: list[dict[str, Any]] | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """POST /chat/completions（非流式）→ ``{"content": str, "tool_calls": list}``。"""
     with open(settings.PROVIDERS_FILE, encoding="utf-8") as f:
@@ -51,6 +52,8 @@ async def llm_chat_call(
     payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": False}
     if tools is not None:
         payload["tools"] = tools
+    if response_format is not None:
+        payload["response_format"] = response_format
 
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if provider_cfg.get("api_key"):
