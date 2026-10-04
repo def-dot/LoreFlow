@@ -1,4 +1,4 @@
-name: rag-qa
+name: 完整示例-RAG检索
 description: 知识库问答（意图分类 → 查询改写 → 检索 → 回答）。LLM 判断意图后，rag 类问题自动改写、拆分、并发检索、去重，基于结果生成回答。
 params:
   query:
@@ -10,6 +10,15 @@ params:
     type: paragraph
     label: 对话历史
     description: JSON 格式的对话历史（可选）
+  tags:
+    type: checkbox
+    label: 标签筛选
+    description: 按标签过滤知识库，不选则检索全部
+    options:
+    - 财务
+    - 人事
+    - 客服
+    - 技术
 
 nodes:
 - name: classify
@@ -42,12 +51,14 @@ nodes:
   - rewrite
   inputs:
     queries: $rewrite.sub_queries
+    tags: $params.tags
 
 - name: answer
   type: llm_chat
   label: LLM回答
   depends_on:
   - classify
+  - retrieve
   inputs:
     prompt: $params.query
     context: $retrieve.context
