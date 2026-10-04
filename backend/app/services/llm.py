@@ -97,7 +97,8 @@ async def llm_chat_stream(
 
     tool_calls: dict[int, dict[str, Any]] = {}
 
-    async with http_client().stream(
+    client = http_client()
+    async with client.stream(
         "POST", f"{provider_cfg['base_url']}/chat/completions", json=payload, headers=headers
     ) as resp:
         resp.raise_for_status()
