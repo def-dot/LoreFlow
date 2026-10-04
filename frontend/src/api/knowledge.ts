@@ -51,7 +51,9 @@ export const listAllDocuments = (params?: {
   status?: string
   q?: string
   tag_ids?: number[]
-}) => api.get<DocumentListResponse>('/documents', { params })
+}) => api.get<DocumentListResponse>('/documents', {
+  params: { ...params, tag_ids: params?.tag_ids?.length ? params.tag_ids.join(',') : undefined },
+})
 
 export const getDocument = (docId: number) =>
   api.get<DocumentItem>(`/documents/${docId}`)
