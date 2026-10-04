@@ -21,7 +21,9 @@ nodes:
     mood: $classify.intent
 params:
   prompt:
-    required: true
-    type: paragraph
-    label: 说点什么
+    type: string
+    title: 说点什么
     description: 输入一句话，识别你的心情
+    ui: textarea
+required:
+- prompt

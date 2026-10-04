@@ -22,6 +22,8 @@ nodes:
     answer: $chat.content
 params:
   prompt:
-    required: true
-    type: paragraph
-    label: 问题
+    type: string
+    title: 问题
+    ui: textarea
+required:
+- prompt

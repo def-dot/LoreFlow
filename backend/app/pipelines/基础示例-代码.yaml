@@ -18,10 +18,11 @@ nodes:
     result: $task_a.result
 params:
   a:
-    required: true
-    label: a
     type: number
+    title: a
   b:
-    required: true
-    label: b
     type: number
+    title: b
+required:
+- a
+- b

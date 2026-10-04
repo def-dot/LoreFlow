@@ -16,20 +16,20 @@ export interface PipelineNodeInfo {
   condition: string | null
 }
 
-/** 参数类型枚举（与后端 ParamType 对齐） */
-export type ParamType = 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'file_list'
+/** UI 渲染控件类型（从 JSON Schema ui:widget 派生） */
+export type WidgetType = 'text' | 'textarea' | 'number' | 'select' | 'checkbox' | 'file' | 'file_list'
 
-/** 一个运行时输入参数的声明（后端直接返回 YAML 原始结构） */
+/** 一个运行时输入参数的声明（JSON Schema property + ui 扩展） */
 export interface ParamSpec {
   name: string            // ctx 里的键（从 dict key 派生）
-  label?: string          // 展示名（未声明时退化为键名）
+  type?: string           // JSON Schema type: string/number/array/boolean
+  title?: string          // 展示名（JSON Schema title）
   description?: string
   default?: unknown
-  required?: boolean
-  type?: ParamType        // 参数类型（未声明时退化为 text）
-  options?: string[]      // type=select/checkbox 时的选项列表
-  multiline?: boolean     // 多行文本（渲染 textarea，如文章正文）— 旧版兼容
-  file?: boolean          // 文件上传（渲染上传控件）— 旧版兼容
+  required?: boolean      // 从顶层 required 数组派生
+  enum?: string[]         // JSON Schema enum（select 选项）
+  items?: { type: string; enum?: string[] }  // array items（checkbox 选项）
+  ui?: string             // UI 控件：textarea/select/checkbox/file/file_list
 }
 
 export interface PipelineListItem {
@@ -42,22 +42,38 @@ export interface PipelineDetail {
   name: string
   description: string
   params: Record<string, unknown> | null
+  required?: string[] | null
   mermaid: string
   source: string
   nodes: PipelineNodeInfo[]
 }
 
-/** 将 YAML inputs 原始结构转为 ParamSpec 数组（name 从 key 派生） */
-export function toParamSpecs(params: Record<string, Omit<ParamSpec, 'name'>>): ParamSpec[] {
-  return Object.entries(params).map(([name, spec]) => ({ name, ...spec }))
+/** 将 JSON Schema properties 转为 ParamSpec 数组，标记 required */
+export function toParamSpecs(
+  params: Record<string, unknown>,
+  required?: string[] | null,
+): ParamSpec[] {
+  const reqSet = new Set(required ?? [])
+  return Object.entries(params).map(([name, spec]: [string, any]) => ({
+    name,
+    required: reqSet.has(name),
+    ...spec,
+  }))
 }
 
-/** 解析参数的实际类型：优先 type 字段，兼容旧版 multiline/file 布尔标记 */
-export function resolveParamType(spec: ParamSpec): ParamType {
-  if (spec.type) return spec.type
-  if (spec.file) return 'file'
-  if (spec.multiline) return 'paragraph'
+/** 解析参数的 UI 控件类型：优先 ui，退化到 JSON Schema type */
+export function resolveParamType(spec: ParamSpec): WidgetType {
+  if (spec.ui) return spec.ui as WidgetType
+  if (spec.type === 'number') return 'number'
+  if (spec.type === 'array') return 'checkbox'
   return 'text'
+}
+
+/** 获取 select/checkbox 的选项列表 */
+export function resolveOptions(spec: ParamSpec): string[] {
+  if (spec.enum) return spec.enum
+  if (spec.items?.enum) return spec.items.enum
+  return []
 }
 
 export function listPipelines(q?: string): Promise<PipelineListItem[]> {

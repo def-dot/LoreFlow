@@ -17,17 +17,17 @@ nodes:
     result: $task_a.result
 params:
   to:
-    required: true
-    type: text
-    label: 收件人
+    type: string
+    title: 收件人
     description: 收件人邮箱地址
   subject:
-    required: false
-    type: text
-    label: 邮件主题
+    type: string
+    title: 邮件主题
     default: 测试邮件
   body:
-    required: false
-    type: paragraph
-    label: 邮件正文
+    type: string
+    title: 邮件正文
     default: 这是一封测试邮件
+    ui: textarea
+required:
+- to

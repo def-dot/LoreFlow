@@ -19,6 +19,8 @@ nodes:
     result: $task_a.result
 params:
   content:
-    required: true
-    type: paragraph
-    label: 内容
+    type: string
+    title: 内容
+    ui: textarea
+required:
+- content

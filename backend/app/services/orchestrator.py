@@ -118,7 +118,7 @@ async def create_run(
     raw = pipeline_rec.definition
     config = yaml.safe_load(raw)
     pipeline = Pipeline.model_validate(config)
-    validate_inputs(pipeline.params or {}, inputs)
+    validate_inputs(pipeline.params or {}, pipeline.required, inputs)
 
     record = RunRecord(
         name=name or pipeline.name,

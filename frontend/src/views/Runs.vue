@@ -4,8 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import RunList from '@/components/RunList.vue'
 import RunDetail from '@/components/RunDetail.vue'
 import PipelineDetailPanel from '@/components/PipelineDetailPanel.vue'
-import type { ParamSpec, PipelineDetail, PipelineListItem, ParamType } from '@/api/pipelines'
-import { getPipeline, listPipelines, toParamSpecs, resolveParamType } from '@/api/pipelines'
+import type { ParamSpec, PipelineDetail, PipelineListItem, WidgetType } from '@/api/pipelines'
+import { getPipeline, listPipelines, toParamSpecs, resolveParamType, resolveOptions } from '@/api/pipelines'
 import { listSkills, listTools } from '@/api/registry'
 import { uploadFile, type UploadRecord } from '@/api/uploads'
 import { useRunsStore } from '@/stores/runs'
@@ -99,7 +99,7 @@ async function searchWorkflows(q: string) {
 const paramSpecs = computed(() => {
   const d = pipelinesStore.detail
   if (!d) return []
-  return toParamSpecs((d.params as Record<string, unknown>) ?? {})
+  return toParamSpecs((d.params as Record<string, unknown>) ?? {}, d.required)
 })
 // run 详情「⚙ 参数」弹层的声明标签：按该 run 的 pipeline 取
 const runPipelineDetail = ref<PipelineDetail | null>(null)
@@ -112,7 +112,7 @@ watch(
   { immediate: true },
 )
 const detailParams = computed(() =>
-  toParamSpecs((runPipelineDetail.value?.params as Record<string, unknown>) ?? {}),
+  toParamSpecs((runPipelineDetail.value?.params as Record<string, unknown>) ?? {}, runPipelineDetail.value?.required),
 )
 // 必填键/默认值从参数行派生（声明行是单一事实源，后端不再单独输出）
 const requiredInputs = computed(() => paramSpecs.value.filter((p) => p.required).map((p) => p.name))
@@ -138,8 +138,9 @@ watch(
         .filter((s) => {
           if (s.default == null) return false
           const t = resolveParamType(s)
-          // file / file_list / checkbox / number 的非字符串默认值不预填文本
+          // file / file_list / checkbox / number / select+array 的非字符串默认值不预填文本
           if (t === 'file' || t === 'file_list' || t === 'checkbox' || t === 'number') return false
+          if (t === 'select' && s.type === 'array') return false
           return typeof s.default === 'string'
         })
         .map((s) => [s.name, defaultToText(s.default)]),
@@ -151,19 +152,20 @@ watch(
         .map((s) => [s.name, s.default as number]),
     )
     // checkbox 参数预填（数组原样；标量包成单元素）
+    // 也处理 select+array（下拉多选），共用 checkboxValues
     checkboxValues.value = Object.fromEntries(
       paramSpecs.value
-        .filter((s) => resolveParamType(s) === 'checkbox')
+        .filter((s) => resolveParamType(s) === 'checkbox' || (resolveParamType(s) === 'select' && s.type === 'array'))
         .map((s) => {
           const d = s.default
           const val = d == null ? [] : Array.isArray(d) ? d.map(String) : [String(d)]
           return [s.name, val]
         }),
     )
-    // select 参数预填（标量；误写成数组时取第一个）
+    // select 参数预填（标量；误写成数组时取第一个；跳过 type=array 的多选）
     selectValues.value = Object.fromEntries(
       paramSpecs.value
-        .filter((s) => resolveParamType(s) === 'select')
+        .filter((s) => resolveParamType(s) === 'select' && s.type !== 'array')
         .map((s) => {
           const d = s.default
           const val = d == null ? null : Array.isArray(d) ? (d[0] == null ? null : String(d[0])) : String(d)
@@ -251,7 +253,13 @@ const formInputs = computed(() => {
         break
       }
       case 'select': {
-        value[spec.name] = selectValues.value[spec.name] ?? null
+        // type=array 时多选，提交数组；否则单选，提交字符串
+        if (spec.type === 'array') {
+          const selected = checkboxValues.value[spec.name]
+          value[spec.name] = selected?.length ? selected : null
+        } else {
+          value[spec.name] = selectValues.value[spec.name] ?? null
+        }
         break
       }
       case 'paragraph': {
@@ -291,21 +299,23 @@ const missingRequired = computed(() => {
 // 表单模式 = 声明了参数且未切 JSON：弹层主体按声明渲染字段
 const formMode = computed(() => !jsonMode.value && paramSpecs.value.length > 0)
 
-// 参数键 → 展示名（JSON 模式标签用）：label 优先，与键不同才附 (key) 供照抄；
-// 简式声明 label=键名，展示不变
+// 参数键 → 展示名（JSON 模式标签用）：title 优先，与键不同才附 (key) 供照抄；
+// 简式声明 title=键名，展示不变
 function keyLabel(name: string): string {
   const spec = paramSpecs.value.find((p) => p.name === name)
-  return spec && spec.label !== name ? `${spec.label}(${name})` : name
+  const title = spec?.title ?? name
+  return title !== name ? `${title}(${name})` : name
 }
 
-// 缺参提示文本按模式取形：表单模式只给 label（用户不接触键），
+// 缺参提示文本按模式取形：表单模式只给 title（用户不接触键），
 // JSON 模式附 (key)（键就是要敲进 JSON 的内容）
 const missingRequiredText = computed(() =>
   missingRequired.value
     .map((name) => {
       const spec = paramSpecs.value.find((p) => p.name === name)
-      if (!spec || spec.label === name) return name
-      return formMode.value ? spec.label : `${spec.label}(${name})`
+      const title = spec?.title ?? name
+      if (!spec || title === name) return name
+      return formMode.value ? title : `${title}(${name})`
     })
     .join('、'),
 )
@@ -685,7 +695,7 @@ onUnmounted(() => {
             <template v-if="formMode">
               <div v-for="spec in paramSpecs" :key="spec.name" class="param-field">
                 <div class="param-label">
-                  {{ spec.label }}<span v-if="spec.required" class="param-star">*</span>
+                  {{ spec.title ?? spec.name }}<span v-if="spec.required" class="param-star">*</span>
                   <span v-else class="param-optional">可选</span>
                 </div>
 
@@ -746,9 +756,9 @@ onUnmounted(() => {
                   style="width: 100%"
                 />
 
-                <!-- select: 下拉单选 -->
+                <!-- select: 下拉单选/多选（type=array 时多选） -->
                 <el-select
-                  v-else-if="resolveParamType(spec) === 'select'"
+                  v-else-if="resolveParamType(spec) === 'select' && spec.type !== 'array'"
                   v-model="selectValues[spec.name]"
                   clearable
                   filterable
@@ -768,10 +778,44 @@ onUnmounted(() => {
                       <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
                     </el-option>
                   </template>
-                  <!-- 静态选项（YAML options 声明） -->
+                  <!-- 静态选项（JSON Schema enum/items.enum） -->
                   <template v-else>
                     <el-option
-                      v-for="opt in (spec.options ?? [])"
+                      v-for="opt in resolveOptions(spec)"
+                      :key="opt"
+                      :label="opt"
+                      :value="opt"
+                    />
+                  </template>
+                </el-select>
+
+                <!-- select + array: 下拉多选 -->
+                <el-select
+                  v-else-if="resolveParamType(spec) === 'select' && spec.type === 'array'"
+                  v-model="checkboxValues[spec.name]"
+                  multiple
+                  clearable
+                  filterable
+                  placeholder="请选择（可多选）"
+                  size="small"
+                  style="width: 100%"
+                >
+                  <!-- 动态选项（skills/tools） -->
+                  <template v-if="spec.name in DYNAMIC_OPTION_FETCHERS">
+                    <el-option
+                      v-for="opt in (dynamicOptions[spec.name] ?? [])"
+                      :key="opt.name"
+                      :label="opt.name"
+                      :value="opt.name"
+                    >
+                      <span>{{ opt.name }}</span>
+                      <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
+                    </el-option>
+                  </template>
+                  <!-- 静态选项（JSON Schema enum/items.enum） -->
+                  <template v-else>
+                    <el-option
+                      v-for="opt in resolveOptions(spec)"
                       :key="opt"
                       :label="opt"
                       :value="opt"
@@ -797,10 +841,10 @@ onUnmounted(() => {
                       <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
                     </el-checkbox>
                   </template>
-                  <!-- 静态选项（YAML options 声明） -->
+                  <!-- 静态选项（JSON Schema items.enum） -->
                   <template v-else>
                     <el-checkbox
-                      v-for="opt in (spec.options ?? [])"
+                      v-for="opt in resolveOptions(spec)"
                       :key="opt"
                       :value="opt"
                       size="small"
@@ -812,7 +856,7 @@ onUnmounted(() => {
 
                 <!-- paragraph: 多行文本 -->
                 <el-input
-                  v-else-if="resolveParamType(spec) === 'paragraph'"
+                  v-else-if="resolveParamType(spec) === 'textarea'"
                   v-model="paramValues[spec.name]"
                   type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"

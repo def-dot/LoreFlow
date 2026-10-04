@@ -16,6 +16,8 @@ nodes:
     result: $answer.content
 params:
   prompt:
-    required: true
-    type: paragraph
-    label: 用户问题
+    type: string
+    title: 用户问题
+    ui: textarea
+required:
+- prompt

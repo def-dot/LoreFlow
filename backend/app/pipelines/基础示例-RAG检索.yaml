@@ -28,16 +28,17 @@ nodes:
     sources: $search.context
 params:
   question:
-    required: true
-    type: paragraph
-    label: 用户问题
+    type: string
+    title: 用户问题
     description: 输入要检索的问题
+    ui: textarea
   tags:
-    type: checkbox
-    label: 标签筛选
+    type: array
+    title: 标签筛选
     description: 按标签过滤知识库，不选则检索全部
-    options:
-    - 财务
-    - 人事
-    - 客服
-    - 技术
+    items:
+      type: string
+      enum: [财务, 人事, 客服, 技术]
+    ui: select
+required:
+- question

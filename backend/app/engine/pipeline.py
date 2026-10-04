@@ -1,7 +1,8 @@
 """Pipeline — JSON dict → pydantic 对象 + 运行时执行。
 
 - ``nodes`` 是 ``list[Node]``（pydantic 校验，未知字段拒绝）
-- ``params`` 是 Pipeline 级输入参数声明（InputParamDef），与节点 inputs（数据接线）分离
+- ``params`` 是 Pipeline 级输入参数声明（JSON Schema properties），与节点 inputs（数据接线）分离
+- ``required`` 是必填参数名列表（JSON Schema required）
 - 所有节点的 inputs 统一保持 dict（数据接线）；
 - ``run()`` / ``validate()`` / ``to_mermaid()`` 直接查 REGISTRY 取函数 / output_schema
 - YAML 加载由调用方（services/pipelines.py）负责，Pipeline 只认 dict
@@ -9,7 +10,6 @@
 
 from __future__ import annotations
 
-import enum
 import logging
 import random
 import re
@@ -17,6 +17,21 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
+
+_JSON_SCHEMA_TYPES = frozenset({
+    "string", "number", "integer", "boolean", "array", "object", "null",
+})
+_UI_WIDGETS = frozenset({
+    "text", "textarea", "select", "checkbox", "file", "file_list", "number",
+})
+# type → 允许的 ui 组合（None 表示不写 ui 时的默认值）
+_TYPE_UI_COMPAT: dict[str, frozenset[str | None]] = {
+    "string":  frozenset({None, "text", "textarea", "select"}),
+    "number":  frozenset({None, "number"}),
+    "integer": frozenset({None, "number"}),
+    "array":   frozenset({None, "checkbox", "select", "file_list"}),
+    "object":  frozenset({None, "file"}),
+}
 
 from app.registry import REGISTRY
 from .types import ApproverFunc
@@ -26,42 +41,60 @@ from .validator import validate_dag, validate_ref
 logger = logging.getLogger(__name__)
 
 
-class ParamType(str, enum.Enum):
-    """输入参数类型（类似 Dify）。"""
+class ParamSchema(BaseModel):
+    """单个参数的 JSON Schema 声明。
 
-    TEXT = "text"            # 单行文本
-    PARAGRAPH = "paragraph"  # 多行文本（textarea）
-    NUMBER = "number"        # 数字
-    SELECT = "select"        # 下拉单选（提交标量字符串）
-    CHECKBOX = "checkbox"    # 多选选项（提交字符串列表）
-    FILE = "file"            # 单文件
-    FILE_LIST = "file_list"  # 文件列表
+    type 必填；常用字段显式声明；其余字段（如 ui等）自由扩展。
+    """
 
+    model_config = {"extra": "allow"}
 
-class InputParamDef(BaseModel):
-    """Pipeline 级单个输入参数的声明（required / label / …）。"""
+    type: str | list[str]
+    title: str | None = None
 
-    model_config = {"extra": "forbid"}
-
-    required: bool | None = None
-    default: Any = None
-    label: str | None = None
+    @field_validator("type")
+    @classmethod
+    def _validate_type(cls, v: str | list[str]) -> str | list[str]:
+        types = [v] if isinstance(v, str) else v
+        for t in types:
+            if t not in _JSON_SCHEMA_TYPES:
+                raise ValueError(f"非法的 JSON Schema 类型 {t!r}，可选: {sorted(_JSON_SCHEMA_TYPES)}")
+        return v
     description: str | None = None
-    type: ParamType = ParamType.TEXT
-    options: list[str] | None = None  # type=select/checkbox 时的选项列表
+    default: Any = None
+    enum: list[Any] | None = None
+    items: dict[str, Any] | None = None       # array 的元素 schema
+    properties: dict[str, Any] | None = None   # object 的属性 schema
+    ui: str | None = None                     # UI 控件：textarea / select / checkbox / file / file_list
+
+    @field_validator("ui")
+    @classmethod
+    def _validate_ui(cls, v: str | None) -> str | None:
+        if v is not None and v not in _UI_WIDGETS:
+            raise ValueError(f"非法的 ui 控件 {v!r}，可选: {sorted(_UI_WIDGETS)}")
+        return v
+
+    @model_validator(mode="after")
+    def _check_type_ui_compat(self) -> "ParamSchema":
+        t = self.type if isinstance(self.type, str) else self.type[0] if self.type else None
+        allowed = _TYPE_UI_COMPAT.get(t)
+        if allowed is not None and self.ui not in allowed:
+            raise ValueError(f"type={t!r} 不支持 ui={self.ui!r}，可选: {sorted(allowed - {None}) or '不写 ui'}")
+        return self
 
 
 def validate_inputs(
-    params: dict[str, InputParamDef],
+    params: dict[str, ParamSchema],
+    required: list[str] | None,
     inputs: dict[str, Any] | None,
 ) -> None:
     """校验必填 / 多余参数，不合并默认值。"""
     inputs = inputs or {}
-    if missing := {k for k, v in params.items() if v.required} - set(inputs):
+    required = required or []
+    if missing := set(required) - set(inputs):
         raise ValueError(f"必填参数缺失: {missing}")
     if extra := set(inputs) - set(params):
         raise ValueError(f"多余的参数: {extra}")
-
 
 
 class RetryPolicy(BaseModel):
@@ -207,22 +240,32 @@ class Pipeline(BaseModel):
         p = Pipeline.model_validate(data)
         results, _ = await p.run(inputs={"q": "hello"})
 
-    ``params`` 是 Pipeline 级输入参数声明（InputParamDef）；
+    ``params`` 是 Pipeline 级输入参数声明（JSON Schema properties）；
     YAML 加载由 ``services/pipelines.py`` 负责，本类只认 dict。
     """
 
     name: str
     description: str | None = None
-    params: dict[str, InputParamDef] | None = None
+    params: dict[str, ParamSchema] | None = None  # JSON Schema properties（type 必填）
+    required: list[str] | None = None              # JSON Schema required
     nodes: list[Node]
 
     model_config = {"extra": "forbid"}
 
     @model_validator(mode="after")
     def _validate_pipeline(self) -> Pipeline:
-        """构造期校验（图结构 + $引用）。"""
+        """构造期校验（图结构 + $引用 + required 一致性）。"""
         errors = validate_dag(self.nodes)
         errors.extend(validate_ref(self.nodes, param_keys=set(self.params) if self.params else None))
+
+        # required 中的键必须存在于 params
+        if self.required and self.params:
+            unknown = set(self.required) - set(self.params)
+            if unknown:
+                errors.append(f"required 引用了不存在的参数: {unknown}")
+        elif self.required and not self.params:
+            errors.append("声明了 required 但没有 params")
+
         if errors:
             raise ValueError("\n".join(errors))
         return self
@@ -235,12 +278,12 @@ class Pipeline(BaseModel):
     @property
     def required_inputs(self) -> list[str]:
         """必填参数键列表。"""
-        return [k for k, v in (self.params or {}).items() if v.required]
+        return self.required or []
 
     @property
     def default_inputs(self) -> dict[str, Any]:
         """有默认值的参数键 → 默认值。"""
-        return {k: v.default for k, v in (self.params or {}).items() if v.default is not None}
+        return {k: v.default for k, v in (self.params or {}).items() if hasattr(v, "default")}
 
     async def run(
         self,

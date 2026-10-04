@@ -41,7 +41,8 @@ nodes:
     normal: $normal_flow.result
 params:
   level:
-    required: true
-    label: 用户等级
-    type: text
+    type: string
+    title: 用户等级
     description: 填 vip 走 VIP 分支，其他值走普通分支
+required:
+- level
