@@ -42,7 +42,7 @@ from app.routers import (
 )
 from app.services import orchestrator
 from app.services.mcp_client import init_mcp, shutdown_mcp
-from app.services.pipelines import sync_pipelines_from_yaml
+from app.services.pipelines import register_pipelines_from_db, sync_pipelines_from_yaml
 from app.services.project_assistant import ensure_project_assistant
 
 load_dotenv()
@@ -57,6 +57,7 @@ async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, None]:
     await init_mcp(settings.MCP_CONFIG)
     await ensure_project_assistant()
     await sync_pipelines_from_yaml()
+    await register_pipelines_from_db()
     try:
         await orchestrator.resume_stuck_runs()
         yield

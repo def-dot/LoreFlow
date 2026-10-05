@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from .condition import parse_condition
 
 if TYPE_CHECKING:
-    from .pipeline import Node
+    from .pipeline import Node, Pipeline
 
 
 # ------------------------------------------------------------------
@@ -78,24 +78,20 @@ def validate_dag(nodes: list["Node"]) -> list[str]:
 # $参数引用校验
 # ------------------------------------------------------------------
 
-def validate_ref(nodes: list["Node"], param_keys: set[str] | None = None) -> list[str]:
-    """``list[Node]`` $引用校验入口（Pipeline 构造期调用）。"""
-    from app.registry import REGISTRY
-
-    nodes_dict: dict[str, Node] = {n.name: n for n in nodes}
+def validate_ref(pipeline: "Pipeline") -> list[str]:
+    """$引用校验入口（Pipeline 构造期调用）。"""
+    nodes_dict: dict[str, Node] = {n.name: n for n in pipeline.nodes}
     errors: list[str] = []
-    for node in nodes:
+    for node in pipeline.nodes:
         upstream = _get_upstream_nodes(node, nodes_dict)
-        # inputs $引用（递归遍历 dict / list）
         for ref in _collect_refs(node.inputs):
-            for msg in _iter_ref_errors(ref, upstream, nodes_dict, param_keys):
+            for msg in _iter_ref_errors(ref, upstream, pipeline):
                 errors.append(f"节点 {node.name!r}: inputs {msg}")
-        # condition $引用
         if node.condition is not None and not isinstance(node.condition, bool):
             groups = parse_condition(node.condition)
             for and_group in groups:
                 for _, key, _, _ in and_group:
-                    for msg in _iter_ref_errors(f"${key}", upstream, nodes_dict, param_keys):
+                    for msg in _iter_ref_errors(f"${key}", upstream, pipeline):
                         errors.append(f"节点 {node.name!r}: condition {msg}")
     return errors
 
@@ -129,32 +125,56 @@ def _collect_refs(value: Any) -> Iterator[str]:
             yield from _collect_refs(v)
 
 
+def resolve_ref_schema(ref: str, pipeline: "Pipeline") -> dict[str, Any] | None:
+    """解析 $引用，返回对应字段的 JSON Schema。无输出声明或解析失败返回 None。"""
+    parts = ref.lstrip("$").split(".")
+    root = parts[0]
+    segments = parts[1:]
+
+    # 获取根 schema
+    if root == "params":
+        if not pipeline.params:
+            return None
+        root_schema = {
+            "type": "object",
+            "properties": {k: v.model_dump() for k, v in pipeline.params.items()},
+        }
+    else:
+        nodes_dict = {n.name: n for n in pipeline.nodes}
+        node = nodes_dict.get(root)
+        if not node:
+            return None
+        from app.registry import REGISTRY
+        func_def = REGISTRY.get(node.type)
+        root_schema = func_def.json_output_schema() if func_def else None
+        if not root_schema:
+            return None
+
+    # $task_a — 返回完整 schema
+    if not segments:
+        return root_schema
+
+    # 沿路径逐层取 properties
+    schema: dict[str, Any] = root_schema
+    for seg in segments:
+        props = schema.get("properties")
+        if isinstance(props, dict) and seg in props:
+            schema = props[seg]
+        else:
+            return None
+    return schema
+
+
 def _iter_ref_errors(
     ref: str,
     upstream: set[str],
-    nodes_dict: dict[str, "Node"],
-    param_keys: set[str] | None = None,
+    pipeline: "Pipeline",
 ) -> Iterator[str]:
     """校验单个 $引用，yield 错误消息。"""
-    raw_root, _, field = ref.partition(".")
-    root = raw_root.lstrip("$")
-    if root == "params":
-        if field and param_keys and field not in param_keys:
-            yield f"引用的参数 {field!r} 未在 params 中定义"
-        return
-    if root not in upstream:
+    parts = ref.lstrip("$").split(".")
+    root = parts[0]
+    if root != "params" and root not in upstream:
         yield f"引用的 {root!r} 不是上游依赖节点"
         return
-    if not field:
-        yield f"引用 {root!r} 缺少字段名"
-        return
-    from app.registry import REGISTRY
-
-    node = nodes_dict.get(root)
-    func_def = REGISTRY.get(node.type) if node else None
-    out_schema = func_def.json_output_schema() if func_def else None
-    if out_schema is not None:
-        top_field = field.split(".")[0]
-        known = set(out_schema.get("properties") or {})
-        if known and top_field not in known:
-            yield f"引用的 {root!r} 输出中没有字段 {top_field!r}"
+    if resolve_ref_schema(ref, pipeline) is None:
+        yield f"引用 {ref!r} 无效"

@@ -262,7 +262,7 @@ class Pipeline(BaseModel):
     def _validate_pipeline(self) -> Pipeline:
         """构造期校验（图结构 + $引用 + required 一致性）。"""
         errors = validate_dag(self.nodes)
-        errors.extend(validate_ref(self.nodes, param_keys=set(self.params) if self.params else None))
+        errors.extend(validate_ref(self))
 
         # required 中的键必须存在于 params
         if self.required and self.params:
