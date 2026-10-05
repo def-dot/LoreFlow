@@ -83,17 +83,18 @@ async def run_agent_chat(
     # 2. 加载历史（含刚写入的 user message）
     messages = await _load_history(conversation_id)
 
-    # 3. 插入 system prompt
-    if agent.system_prompt or agent.skills:
-        skill_prompt = build_skill_prompt(agent.skills) or ""
-        system_prompt = (agent.system_prompt or "") + "\n\n" + skill_prompt
-        messages.insert(0, {"role": "system", "content": system_prompt.strip()})
-
-    # 4. 构建工具列表
+    # 4. 构建工具列表（含 Pipeline 工具）
     tool_names: list[str] = list(agent.tools or [])
     if agent.skills and "*" not in tool_names and "load_skill" not in tool_names:
         tool_names.append("load_skill")
-    tools = await build_tools(tool_names)
+    tools, pipeline_prompt = await build_tools(tool_names)
+
+    # 3. 插入 system prompt
+    if agent.system_prompt or agent.skills or pipeline_prompt:
+        skill_prompt = build_skill_prompt(agent.skills) or ""
+        parts = [agent.system_prompt or "", skill_prompt, pipeline_prompt or ""]
+        system_prompt = "\n\n".join(p for p in parts if p).strip()
+        messages.insert(0, {"role": "system", "content": system_prompt})
 
     # 5. Agentic loop
     max_iter = settings.AGENT_MAX_ROUNDS

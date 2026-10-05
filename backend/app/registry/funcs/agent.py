@@ -53,20 +53,22 @@ async def agent(params: AgentParams) -> AgentOutput:
     parts.append(f"用户问题：{params.prompt}")
     messages.append({"role": "user", "content": "\n\n".join(parts)})
 
-    # --- 技能目录 + system prompt 注入首条 ---
-    system_content = params.system or ""
-    if params.skills:
-        skill_prompt = build_skill_prompt(params.skills) or ""
-        system_content += "\n\n" + skill_prompt
-    
-    if system_content:
-        messages.insert(0, {"role": "system", "content": system_content.strip()})
-
     # --- 构建工具列表（有 skills 时自动注入 load_skill）---
     tool_names: list[str] = list(params.tools or [])
     if params.skills and "*" not in tool_names and "load_skill" not in tool_names:
         tool_names.append("load_skill")
-    tool_defs = await build_tools(tool_names)
+    tool_defs, pipeline_prompt = await build_tools(tool_names)
+
+    # --- 技能目录 + pipeline 目录 + system prompt 注入首条 ---
+    system_content = params.system or ""
+    if params.skills:
+        skill_prompt = build_skill_prompt(params.skills) or ""
+        system_content += "\n\n" + skill_prompt
+    if pipeline_prompt:
+        system_content += "\n\n" + pipeline_prompt
+
+    if system_content:
+        messages.insert(0, {"role": "system", "content": system_content.strip()})
 
     content = ""
 
