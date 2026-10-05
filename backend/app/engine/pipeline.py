@@ -232,6 +232,11 @@ class Node(BaseModel):
         return f"Node({self.name!r}, type={self.type!r}, deps=[{deps}]{tag})"
 
 
+class PipelineMetadata(BaseModel):
+    """Pipeline 级元数据（YAML metadata 段）。"""
+    agent_tool: bool = True  # false 时不注册为 Agent 工具
+
+
 class Pipeline(BaseModel):
     """JSON dict → pydantic 对象 + 运行时执行。
 
@@ -249,6 +254,7 @@ class Pipeline(BaseModel):
     params: dict[str, ParamSchema] | None = None  # JSON Schema properties（type 必填）
     required: list[str] | None = None              # JSON Schema required
     nodes: list[Node]
+    metadata: PipelineMetadata = Field(default_factory=PipelineMetadata)
 
     model_config = {"extra": "forbid"}
 
