@@ -16,7 +16,7 @@ nodes:
   - task_a
   type: end
   inputs:
-    result: $task_a.result
+    result: $task_a
 params:
   content:
     type: string

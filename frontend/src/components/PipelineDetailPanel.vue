@@ -12,12 +12,29 @@ const paramsRows = computed(() => {
   if (!p) return []
   return Object.entries(p).map(([name, spec]: [string, any]) => ({
     name,
-    label: spec?.label ?? name,
+    title: spec?.title ?? name,
     type: spec?.type ?? 'string',
     description: spec?.description ?? '',
     default: spec?.default,
     required: spec?.required ?? true,
   }))
+})
+
+const outputRows = computed(() => {
+  const o = props.detail.output
+  if (!o?.properties) return []
+  const rows: { name: string; type: string; description: string; depth: number }[] = []
+  function walk(props: Record<string, any>, depth: number) {
+    for (const [name, spec] of Object.entries(props)) {
+      const type = spec?.type ?? 'string'
+      rows.push({ name, type, description: spec?.description ?? '', depth })
+      if (type === 'object' && spec?.properties) {
+        walk(spec.properties, depth + 1)
+      }
+    }
+  }
+  walk(o.properties, 0)
+  return rows
 })
 
 function typeTagType(type: string | null) {
@@ -128,22 +145,37 @@ async function copySource() {
       <h2 class="info-name">{{ detail.name }}</h2>
       <span v-if="detail.description" class="info-desc">{{ detail.description }}</span>
     </div>
-    <section class="panel params-panel">
-      <h2>参数</h2>
-      <el-table v-if="paramsRows.length" :data="paramsRows" size="small" max-height="200">
-        <el-table-column prop="name" label="参数名" width="120" />
-        <el-table-column prop="label" label="标签" width="120" />
-        <el-table-column prop="type" label="类型" width="80" />
-        <el-table-column prop="description" label="说明" min-width="160" />
-        <el-table-column label="默认值" width="120">
-          <template #default="{ row }">{{ row.default ?? '—' }}</template>
-        </el-table-column>
-        <el-table-column label="必填" width="60">
-          <template #default="{ row }">{{ row.required ? '✓' : '—' }}</template>
-        </el-table-column>
-      </el-table>
-      <span v-else class="muted">无输入参数</span>
-    </section>
+    <div class="io-panels">
+      <section class="panel params-panel">
+        <h2>输入参数</h2>
+        <el-table v-if="paramsRows.length" :data="paramsRows" size="small" max-height="200">
+          <el-table-column prop="name" label="参数名" width="120" />
+          <el-table-column prop="title" label="标题" width="120" />
+          <el-table-column prop="type" label="类型" width="80" />
+          <el-table-column prop="description" label="说明" min-width="160" />
+          <el-table-column label="默认值" width="120">
+            <template #default="{ row }">{{ row.default ?? '—' }}</template>
+          </el-table-column>
+          <el-table-column label="必填" width="60">
+            <template #default="{ row }">{{ row.required ? '✓' : '—' }}</template>
+          </el-table-column>
+        </el-table>
+        <span v-else class="muted">无输入参数</span>
+      </section>
+      <section class="panel output-panel">
+        <h2>输出参数</h2>
+        <el-table v-if="outputRows.length" :data="outputRows" size="small" max-height="200">
+          <el-table-column label="字段名" min-width="120">
+            <template #default="{ row }">
+              <span :style="{ paddingLeft: row.depth * 16 + 'px' }">{{ row.name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="type" label="类型" width="100" />
+          <el-table-column prop="description" label="说明" min-width="160" />
+        </el-table>
+        <span v-else class="muted">无输出定义</span>
+      </section>
+    </div>
     <div class="panels">
       <section class="panel">
         <h2>工作流</h2>
@@ -282,8 +314,15 @@ async function copySource() {
   color: var(--ink-3);
   font-size: 11px;
 }
-.params-panel {
+.io-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
   margin-bottom: 18px;
+}
+.params-panel,
+.output-panel {
+  margin-bottom: 0;
 }
 /* 工作流信息 */
 .info-header {

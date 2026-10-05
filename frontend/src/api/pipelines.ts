@@ -42,6 +42,7 @@ export interface PipelineDetail {
   name: string
   description: string
   params: Record<string, unknown> | null
+  output: Record<string, unknown> | null
   required?: string[] | null
   mermaid: string
   source: string

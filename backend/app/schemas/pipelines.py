@@ -33,6 +33,7 @@ class PipelineDetail(BaseModel):
     name: str
     description: str = ""
     params: dict[str, Any] | None = None
+    output: dict[str, Any] | None = None
     node_count: int = 0
     mermaid: str = ""
     source: str = ""

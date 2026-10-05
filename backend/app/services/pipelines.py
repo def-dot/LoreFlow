@@ -24,7 +24,8 @@ from app.engine.pipeline import Pipeline
 logger = get_logger(__name__)
 from app.models.pipeline import PipelineRecord
 from app.registry import REGISTRY
-from app.registry.pipeline_tool import register_pipeline_tool, unregister_pipeline_tool
+from app.registry.pipeline_tool import derive_output_schema, register_pipeline_tool, unregister_pipeline_tool
+from app.registry.types import TOOL_REGISTRY
 
 PIPELINES_DIR = settings.PIPELINES_DIR
 
@@ -70,9 +71,6 @@ async def sync_pipelines_from_yaml() -> None:
                             agent_tool=cfg.metadata.agent_tool,
                             definition=raw,
                         ))
-
-                    # 注册为 Agent 工具
-                    register_pipeline_tool(cfg)
                 except Exception:
                     logger.warning("跳过 %s", f.name, exc_info=True)
 
@@ -81,6 +79,26 @@ async def sync_pipelines_from_yaml() -> None:
         logger.info("Pipelines 同步完成")
     except Exception:
         logger.exception("Pipelines YAML 同步失败")
+
+
+async def register_pipelines_from_db() -> None:
+    """启动时从数据库加载所有 Pipeline 并注册为 Agent 工具（跳过已注册的）。"""
+    try:
+        async with database.AsyncSessionLocal() as session:
+            records = (await session.exec(select(PipelineRecord))).all()
+
+        for rec in records:
+            if rec.name in TOOL_REGISTRY:
+                continue
+            try:
+                cfg = Pipeline.model_validate(yaml.safe_load(rec.definition))
+                register_pipeline_tool(cfg)
+            except Exception:
+                logger.warning("注册 DB pipeline %s 失败", rec.name, exc_info=True)
+
+        logger.info("DB Pipelines 注册完成（%d 个）", len(records))
+    except Exception:
+        logger.exception("DB Pipelines 注册失败")
 
 
 async def list_pipelines(q: str | None = None) -> list[PipelineRecord]:
@@ -114,10 +132,14 @@ def detail_from_config(raw: str) -> dict[str, Any]:
         if pipeline.params else None
     )
 
+    # 从 end 节点的 inputs 推导输出 schema
+    output_schema = derive_output_schema(pipeline)
+
     return {
         "name": pipeline.name or "",
         "description": pipeline.description or "",
         "params": params_dict,
+        "output": output_schema,
         "required": pipeline.required,
         "node_count": len(pipeline.nodes),
         "mermaid": pipeline.to_mermaid(),
