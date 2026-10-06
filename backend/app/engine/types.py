@@ -2,7 +2,7 @@
 Core types for the DAG Flow orchestration engine.
 """
 
-from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any
 
@@ -41,10 +41,6 @@ class NodeResult(BaseModel):
     inputs: dict[str, Any] | None = None
 
 
-#: Signature for a node event listener: receives the finished NodeResult, returns nothing.
-NodeEventFunc = Callable[[NodeResult], Awaitable[None]]
-
-
 class SuspendExecution(BaseException):
     """内部控制流信号：人工审批节点挂起，run 干净退出等待 /approve。"""
 
@@ -52,17 +48,6 @@ class SuspendExecution(BaseException):
 # ---------------------------------------------------------------------------
 # 节点函数签名 & 工具
 # ---------------------------------------------------------------------------
-
-#: Signature for a node's async function: receives the shared context dict, returns anything.
-NodeFunc = Callable[..., Coroutine[Any, Any, Any]]
-
-#: Signature for a condition predicate: receives context, returns whether to run.
-ConditionFunc = Callable[[dict[str, Any]], bool]
-
-#: Signature for a human-review approver: receives ``(node_name, payload, labels)``
-#: and returns a decision dict: ``{"approve": bool, "reason": Optional[str]}``.
-#: ``labels`` maps payload keys to display names (e.g. ``{"title": "标题"}``).
-ApproverFunc = Callable[[str, dict[str, Any], dict[str, str]], Awaitable[dict[str, Any]]]
 
 
 def deref(ctx: Mapping[str, Any], ref: str) -> Any:

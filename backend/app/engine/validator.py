@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from .condition import parse_condition
+from .schema import resolve_ref_schema
 
 if TYPE_CHECKING:
     from .pipeline import Node, Pipeline
@@ -123,46 +124,6 @@ def _collect_refs(value: Any) -> Iterator[str]:
     elif isinstance(value, list):
         for v in value:
             yield from _collect_refs(v)
-
-
-def resolve_ref_schema(ref: str, pipeline: "Pipeline") -> dict[str, Any] | None:
-    """解析 $引用，返回对应字段的 JSON Schema。无输出声明或解析失败返回 None。"""
-    parts = ref.lstrip("$").split(".")
-    root = parts[0]
-    segments = parts[1:]
-
-    # 获取根 schema
-    if root == "params":
-        if not pipeline.params:
-            return None
-        root_schema = {
-            "type": "object",
-            "properties": {k: v.model_dump() for k, v in pipeline.params.items()},
-        }
-    else:
-        nodes_dict = {n.name: n for n in pipeline.nodes}
-        node = nodes_dict.get(root)
-        if not node:
-            return None
-        from app.registry import REGISTRY
-        func_def = REGISTRY.get(node.type)
-        root_schema = func_def.json_output_schema() if func_def else None
-        if not root_schema:
-            return None
-
-    # $task_a — 返回完整 schema
-    if not segments:
-        return root_schema
-
-    # 沿路径逐层取 properties
-    schema: dict[str, Any] = root_schema
-    for seg in segments:
-        props = schema.get("properties")
-        if isinstance(props, dict) and seg in props:
-            schema = props[seg]
-        else:
-            return None
-    return schema
 
 
 def _iter_ref_errors(

@@ -13,6 +13,7 @@ This naturally respects the DAG topology without a centralized scheduler.
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
@@ -24,7 +25,6 @@ from .condition import eval_condition
 from .types import wired_ctx, ACTIVE_STATUSES
 from .pipeline import Node, RetryPolicy
 from .types import (
-    NodeEventFunc,
     NodeResult,
     NodeStatus,
     SuspendExecution,
@@ -55,7 +55,7 @@ class PipeLineExecutor:
         nodes: list[Node],
         ctx: dict[str, Any] | None = None,
         concurrency: int | None = None,
-        on_event: NodeEventFunc | None = None,
+        on_event: Callable[[NodeResult], Awaitable[None]] | None = None,
         resume: dict[str, dict[str, Any]] | None = None,
     ):
         self.nodes: dict[str, Node] = {node.name: node for node in nodes}

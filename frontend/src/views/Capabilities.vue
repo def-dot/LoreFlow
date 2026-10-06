@@ -37,7 +37,7 @@ const roleFilter = ref<RoleFilter>('all')
 const searchQuery = ref('')
 
 /** 名录条目：节点与工具并集（双端注册的 FuncDef 只出现一次） */
-interface SourceInfo { kind: 'builtin' | 'plugin' | 'mcp'; name: string }
+interface SourceInfo { kind: 'builtin' | 'plugin' | 'mcp' | 'pipeline'; name: string }
 
 interface CatalogItem {
   name: string
@@ -64,6 +64,8 @@ const catalogItems = computed<CatalogItem[]>(() => {
     for (const n of p.tool_names) srcMap.set(n, { kind: 'plugin', name: p.filename })
   for (const s of mcpServers.value)
     for (const n of s.tool_names) srcMap.set(n, { kind: 'mcp', name: s.name })
+  for (const t of tools.value)
+    if (t.metadata?.source === 'pipeline') srcMap.set(t.name, { kind: 'pipeline', name: t.name })
 
   const toolSet = new Set(tools.value.map((t) => t.name))
   const map = new Map<string, CatalogItem>()
@@ -125,7 +127,7 @@ const catalogGroups = computed<CatalogGroup[]>(() => {
   // 内置：域分组
   const domainMap = new Map<string, CatalogItem[]>()
   for (const t of filteredItems.value) {
-    if (t.source?.kind === 'plugin' || t.source?.kind === 'mcp') continue
+    if (t.source?.kind === 'plugin' || t.source?.kind === 'mcp' || t.source?.kind === 'pipeline') continue
     const g = domainGroupOf(t)
     if (!domainMap.has(g)) domainMap.set(g, [])
     domainMap.get(g)!.push(t)
@@ -161,7 +163,15 @@ const catalogGroups = computed<CatalogGroup[]>(() => {
     server: s,
   }))
 
-  return [...domains, ...scripts, ...mcp]
+  // 工作流
+  const workflows: CatalogGroup[] = [{
+    key: 'workflow::all',
+    name: '工作流',
+    items: sortItems(filteredItems.value.filter((t) => t.source?.kind === 'pipeline')),
+    kind: 'workflow' as const,
+  }]
+
+  return [...domains, ...scripts, ...mcp, ...workflows]
 })
 
 /** MCP 组默认折叠（Notion 一来就是 24 个工具）；搜索时自动展开命中所在的组 */
@@ -198,13 +208,16 @@ function toggleSection(key: string) {
 }
 
 const builtinCount = computed(
-  () => filteredItems.value.filter((t) => t.source?.kind !== 'plugin' && t.source?.kind !== 'mcp').length,
+  () => filteredItems.value.filter((t) => !t.source?.kind || t.source.kind === 'builtin').length,
 )
 const pluginItemCount = computed(
   () => filteredItems.value.filter((t) => t.source?.kind === 'plugin').length,
 )
 const mcpItemCount = computed(
   () => filteredItems.value.filter((t) => t.source?.kind === 'mcp').length,
+)
+const workflowItemCount = computed(
+  () => filteredItems.value.filter((t) => t.source?.kind === 'pipeline').length,
 )
 
 function resetFilters() {
@@ -656,6 +669,27 @@ onMounted(fetchAll)
               </div>
             </div>
             <div v-if="!mcpServers.length" class="muted source-empty">未配置 MCP 服务器</div>
+            </template>
+          </div>
+
+          <!-- 工作流 -->
+          <div class="top-section">
+            <div class="section-head">
+              <h3 class="source-title" @click="toggleSection('workflows')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('workflows') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                工作流
+                <span class="group-count">{{ workflowItemCount }}</span>
+              </h3>
+            </div>
+            <template v-if="!isSectionCollapsed('workflows')">
+              <div v-for="g in catalogGroups.filter((x) => x.kind === 'workflow')" :key="g.key" class="group-section">
+                <div v-if="g.items.length" class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+                </div>
+                <div v-else class="group-empty muted">无工作流工具</div>
+              </div>
             </template>
           </div>
 

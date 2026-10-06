@@ -20,11 +20,12 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 from app.engine.pipeline import Pipeline
+from app.engine.schema import get_node_input_schema, get_node_output_schema
 
 logger = get_logger(__name__)
 from app.models.pipeline import PipelineRecord
 from app.registry import REGISTRY
-from app.registry.pipeline_tool import derive_output_schema, register_pipeline_tool, unregister_pipeline_tool
+from app.registry.pipeline_tool import register_pipeline_tool, unregister_pipeline_tool
 from app.registry.types import TOOL_REGISTRY
 
 PIPELINES_DIR = settings.PIPELINES_DIR
@@ -122,8 +123,8 @@ def detail_from_config(raw: str) -> dict[str, Any]:
         node_type = REGISTRY.get(node_cfg.type)
         row["type_label"] = node_type.label if node_type else None
         row["type_description"] = node_type.description if node_type else None
-        row["type_input_schema"] = node_type.json_input_schema() if node_type else None
-        row["type_output_schema"] = node_type.json_output_schema() if node_type else None
+        row["input_schema"] = get_node_input_schema(node_cfg, pipeline)
+        row["output_schema"] = get_node_output_schema(node_cfg, pipeline)
         rows.append(row)
 
     # params 需要转为 plain dict（ParamSchema 不可直接 JSON 序列化）
@@ -132,14 +133,10 @@ def detail_from_config(raw: str) -> dict[str, Any]:
         if pipeline.params else None
     )
 
-    # 从 end 节点的 inputs 推导输出 schema
-    output_schema = derive_output_schema(pipeline)
-
     return {
         "name": pipeline.name or "",
         "description": pipeline.description or "",
         "params": params_dict,
-        "output": output_schema,
         "required": pipeline.required,
         "node_count": len(pipeline.nodes),
         "mermaid": pipeline.to_mermaid(),

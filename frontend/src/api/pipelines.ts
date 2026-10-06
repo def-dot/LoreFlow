@@ -8,8 +8,8 @@ export interface PipelineNodeInfo {
   type_label: string | null
   description: string | null
   type_description: string | null
-  type_input_schema: JsonSchema | null
-  type_output_schema: JsonSchema | null
+  input_schema: JsonSchema | null
+  output_schema: JsonSchema | null
   depends_on: string[]
   inputs: Record<string, unknown> | null
   retry: string | null
@@ -42,7 +42,6 @@ export interface PipelineDetail {
   name: string
   description: string
   params: Record<string, unknown> | null
-  output: Record<string, unknown> | null
   required?: string[] | null
   mermaid: string
   source: string

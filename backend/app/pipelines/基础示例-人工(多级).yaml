@@ -6,10 +6,7 @@ nodes:
   label: 初审
   description: 请审核内容是否正确
   inputs:
-    payload:
-    - key: content
-      label: 内容
-      value: $params.content
+    content: $params.content
 - name: task_b
   type: human
   label: 终审
@@ -17,17 +14,14 @@ nodes:
   - task_a
   description: 请最终确定内容是否正确
   inputs:
-    payload:
-    - key: content
-      label: 内容
-      value: $task_a.result.content
+    content: $task_a.values.content
 - name: __end__
   label: 输出
   depends_on:
   - task_b
   type: end
   inputs:
-    result: $task_b.result
+    result: $task_b
 params:
   content:
     type: string

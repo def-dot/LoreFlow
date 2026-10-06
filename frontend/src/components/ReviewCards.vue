@@ -47,34 +47,22 @@ const cards = computed<ReviewCardModel[]>(() =>
     const payload = item.payload
     const raw = payloadText(payload)
     if (!isRecord(payload)) {
-      // human 节点：payload 直接是 [{key, label, value}, ...]
-      if (Array.isArray(payload) && payload.every((p: any) => isRecord(p) && 'key' in p)) {
-        return {
-          name: item.name, label: item.label, prompt: item.description,
-          fields: payload.map((p: any) => ({ key: p.key, label: p.label ?? p.key, value: p.value })),
-          raw, editable: false, source: payload,
-        }
-      }
       return { name: item.name, label: item.label, prompt: item.description, fields: null, raw, editable: false, source: payload }
     }
     const prompt = item.description
     let fields: FieldValue[] | null = null
     let src: Record<string, unknown> = payload
-    // human 节点：payload.payload 是 [{key, label, value}, ...]
-    if (Array.isArray(payload.payload) && payload.payload.every((p: any) => isRecord(p) && 'key' in p)) {
-      fields = payload.payload.map((p: any) => ({ key: p.key, label: p.label ?? p.key, value: p.value }))
-    } else {
-      // 其他节点：平铺字段 + 可选 _review
-      src = isRecord(payload.payload) && isRecord(payload.labels) ? payload.payload : payload
-      const labels = isRecord(payload._review) ? payload._review : isRecord(payload.labels) ? payload.labels : {}
-      fields = Object.keys(src)
-        .filter((key) => key !== '_review')
-        .map((key) => ({
-          key,
-          label: labelOf(labels, key),
-          value: src[key],
-        }))
-    }
+    // human 节点：payload 是标准 inputs 格式（key-value），直接按字段展示
+    // 其他节点：平铺字段 + 可选 _review
+    src = isRecord(payload.payload) && isRecord(payload.labels) ? payload.payload : payload
+    const labels = isRecord(payload._review) ? payload._review : isRecord(payload.labels) ? payload.labels : {}
+    fields = Object.keys(src)
+      .filter((key) => key !== '_review')
+      .map((key) => ({
+        key,
+        label: labelOf(labels, key),
+        value: src[key],
+      }))
     return {
       name: item.name,
       label: item.label,
@@ -87,7 +75,7 @@ const cards = computed<ReviewCardModel[]>(() =>
   }),
 )
 
-// 草稿初值随卡片就位：字符串字段以原文起步；payload 引用变化时重置该节点
+// 草稿初值随卡片就位：字符串字段以原文起步；inputs 引用变化时重置该节点
 watch(
   cards,
   (list) => {

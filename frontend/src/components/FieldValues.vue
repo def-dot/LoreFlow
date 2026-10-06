@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 
 // 标注键值的逐字段渲染：label + 值（文本块 / JSON / 未提供）。
-// 供审核卡片（payload 声明视图）与运行详情（inputs 快照）共用同一视觉语言。
+// 供审核卡片（inputs 声明视图）与运行详情（inputs 快照）共用同一视觉语言。
 export interface FieldValue {
   key: string
   label: string

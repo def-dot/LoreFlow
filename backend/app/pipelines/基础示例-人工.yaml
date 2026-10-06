@@ -6,10 +6,7 @@ nodes:
   label: 内容审核
   description: 请审核内容是否正确
   inputs:
-    payload:
-    - key: content
-      label: 内容
-      value: $params.content
+    content: $params.content
 - name: __end__
   label: 输出
   depends_on:

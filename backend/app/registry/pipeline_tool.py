@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.engine.pipeline import Pipeline
-from app.engine.validator import resolve_ref_schema
+from app.engine.schema import get_node_output_schema
 from app.registry.types import TOOL_REGISTRY, FuncDef
 
 logger = logging.getLogger(__name__)
@@ -51,39 +51,6 @@ def _make_pipeline_runner(pipeline: Pipeline):
     return _run
 
 
-_INFER_SCHEMA: dict[str, dict[str, str]] = {
-    "str": {"type": "string"},
-    "int": {"type": "integer"},
-    "float": {"type": "number"},
-    "bool": {"type": "boolean"},
-    "list": {"type": "array"},
-    "dict": {"type": "object"},
-}
-
-
-def derive_output_schema(pipeline: Pipeline) -> dict[str, Any]:
-    """从 end 节点的 inputs 推导输出 JSON Schema。
-
-    $引用直接用 resolve_ref_schema 返回的完整 schema；
-    字面量按 Python 类型推导 JSON Schema。
-    """
-    end = pipeline.end_node
-    if not end or not end.inputs:
-        return {"type": "object"}
-
-    properties: dict[str, Any] = {}
-
-    for key, ref in end.inputs.items():
-        if isinstance(ref, str) and ref.startswith("$"):
-            schema = resolve_ref_schema(ref, pipeline)
-            if not schema:
-                continue
-            properties[key] = schema
-        else:
-            properties[key] = _INFER_SCHEMA.get(type(ref).__name__, {"type": "string"})
-
-    return {"type": "object", "properties": properties}
-
 
 def register_pipeline_tool(pipeline: Pipeline) -> None:
     """将一个 Pipeline 注册为 TOOL_REGISTRY 中的工具。metadata.agent_tool = false 时跳过。"""
@@ -102,9 +69,9 @@ def register_pipeline_tool(pipeline: Pipeline) -> None:
             func=runner,
             label=pipeline.name,
             description=pipeline.description or "",
-            metadata={"group": "工作流"},
+            metadata={"group": "工作流", "source": "pipeline"},
             input_schema=input_schema,
-            output_schema=derive_output_schema(pipeline),
+            output_schema=get_node_output_schema(pipeline.end_node, pipeline) or {"type": "object"},
         )
 
         TOOL_REGISTRY[pipeline.name] = fd

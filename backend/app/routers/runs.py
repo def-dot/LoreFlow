@@ -139,12 +139,9 @@ async def approve_node(run_id: int, node_name: str, body: ApproveRequest) -> App
 
     # 写入决策：通过 → completed（下游继续），拒绝 → failed（workflow 停止）
     entry = record.nodes.setdefault(node_name, {})
+    entry["output"] = body.model_dump()
     if body.approve:
         entry["status"] = "completed"
-        entry["output"] = {
-            "approve": True,
-            "result": body.values or {},
-        }
     else:
         entry["status"] = "failed"
         entry["error"] = f"审核拒绝：{body.reason}" if body.reason else "审核拒绝"

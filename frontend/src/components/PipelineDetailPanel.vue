@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { PipelineDetail } from '@/api/pipelines'
 import type { JsonSchema } from '@/api/nodeTypes'
 import MermaidDiagram from './MermaidDiagram.vue'
+import SchemaFields from './SchemaFields.vue'
 
 const props = defineProps<{ detail: PipelineDetail; mermaidScale?: number }>()
+
+const tableRef = ref<any>(null)
+function handleRowClick(row: any) {
+  tableRef.value?.toggleRowExpansion(row)
+}
 
 const paramsRows = computed(() => {
   const p = props.detail.params
@@ -21,7 +27,8 @@ const paramsRows = computed(() => {
 })
 
 const outputRows = computed(() => {
-  const o = props.detail.output
+  const endNode = props.detail.nodes?.find((n: any) => n.type === 'end')
+  const o = endNode?.output_schema
   if (!o?.properties) return []
   const rows: { name: string; type: string; description: string; depth: number }[] = []
   function walk(props: Record<string, any>, depth: number) {
@@ -38,10 +45,10 @@ const outputRows = computed(() => {
 })
 
 function typeTagType(type: string | null) {
-  return type === 'human' ? 'warning' : type === 'loop' ? 'info' : 'primary'
+  return type === 'human' ? 'warning' : type === 'loop' ? 'info' : type === 'end' ? 'success' : 'primary'
 }
 
-// 节点 name → label 映射（依赖列显示 label 用）
+// 节点 name → label 映射
 const nodeLabelMap = computed(() =>
   Object.fromEntries(props.detail.nodes.map((n) => [n.name, n.label ?? n.name])),
 )
@@ -79,13 +86,6 @@ function schemaTypeLabel(field: JsonSchema, root?: JsonSchema): string {
   return f.type ?? '?'
 }
 
-function inputsSummary(inputs: Record<string, unknown> | null): string {
-  if (!inputs || !Object.keys(inputs).length) return '—'
-  return Object.entries(inputs)
-    .map(([k, v]) => (typeof v === 'string' && v.startsWith('$') ? `${k}: ${v}` : k))
-    .join(', ')
-}
-
 interface RetryInfo {
   max: number
   base?: number
@@ -114,22 +114,21 @@ function parseRetry(retry: unknown): RetryInfo | null {
   return null
 }
 
-function retryTooltip(retry: unknown): string {
-  if (retry == null || typeof retry !== 'object') return ''
-  return JSON.stringify(retry, null, 2)
+function retrySummary(retry: unknown): string {
+  const info = parseRetry(retry)
+  if (!info) return '—'
+  let s = `${info.max}次`
+  if (info.base || info.factor || info.backoffMax) {
+    s += ` ${info.base ?? 1}s×${info.factor ?? 2}^n≤${info.backoffMax ?? 60}s`
+  }
+  return s
 }
 
-function inputSchemaTooltip(schema: JsonSchema | null): string {
-  if (!schema?.properties) return ''
-  const reqSet = new Set(schema.required ?? [])
-  return Object.entries(schema.properties)
-    .map(([k, v]) => {
-      const f = effective(v, schema)
-      const req = reqSet.has(k) ? ' (必填)' : ''
-      const desc = f.description ? ` — ${f.description}` : ''
-      return `${k}: ${schemaTypeLabel(f, schema)}${req}${desc}`
-    })
-    .join('\n')
+function wiringLines(inputs: Record<string, unknown> | null): string[] {
+  if (!inputs || !Object.keys(inputs).length) return []
+  return Object.entries(inputs)
+    .filter(([, v]) => typeof v === 'string' && v.startsWith('$'))
+    .map(([k, v]) => `${k}: ${v}`)
 }
 
 async function copySource() {
@@ -183,65 +182,68 @@ async function copySource() {
       </section>
       <section class="panel">
         <h2>节点</h2>
-        <el-table :data="detail.nodes" size="small">
+        <el-table ref="tableRef" :data="detail.nodes" size="small" row-key="name" @row-click="handleRowClick">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div class="schema-expand">
+                <div class="schema-col">
+                  <h4>输入 Schema</h4>
+                  <SchemaFields v-if="row.input_schema?.properties && Object.keys(row.input_schema.properties).length" :schema="row.input_schema" />
+                  <span v-else class="schema-empty">无</span>
+                </div>
+                <div class="schema-col">
+                  <h4>输出 Schema</h4>
+                  <SchemaFields v-if="row.output_schema?.properties && Object.keys(row.output_schema.properties).length" :schema="row.output_schema" />
+                  <span v-else class="schema-empty">无</span>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="节点" width="90">
             <template #default="{ row }">{{ row.label ?? row.name }}</template>
           </el-table-column>
-          <el-table-column label="类型" min-width="130">
+          <el-table-column label="类型" width="100">
             <template #default="{ row }">
-              <template v-if="row.type">
-                <span class="type-label" :class="`type-${typeTagType(row.type)}`">
-                  {{ row.type_label ?? row.type }}
-                </span>
-                <el-tooltip v-if="row.type_description" :content="row.type_description" placement="top">
-                  <span class="type-help">?</span>
-                </el-tooltip>
-              </template>
+              <el-tag v-if="row.type" :type="typeTagType(row.type)" size="small" disable-transitions>
+                {{ row.type_label ?? row.type }}
+              </el-tag>
               <span v-else>—</span>
             </template>
           </el-table-column>
-          <el-table-column label="输入" min-width="160">
+          <el-table-column label="输入" min-width="180">
             <template #default="{ row }">
-              <el-tooltip
-                v-if="row.type_input_schema?.properties && Object.keys(row.type_input_schema.properties).length"
-                :content="inputSchemaTooltip(row.type_input_schema)"
-                placement="top"
-                :show-after="300"
-              >
-                <span class="wiring-text">{{ inputsSummary(row.inputs) }}</span>
+              <div v-if="wiringLines(row.inputs).length" class="wiring-lines">
+                <div v-for="line in wiringLines(row.inputs)" :key="line" class="wiring-line">{{ line }}</div>
+              </div>
+              <span v-else class="wiring-text">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="依赖" width="100">
+            <template #default="{ row }">
+              <span class="wiring-text">{{ row.depends_on.length ? dependLabels(row.depends_on) : '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="重试" width="140">
+            <template #default="{ row }">
+              <el-tooltip v-if="parseRetry(row.retry)" :content="JSON.stringify(row.retry, null, 2)" placement="top">
+                <span class="wiring-text">{{ retrySummary(row.retry) }}</span>
               </el-tooltip>
-              <span v-else class="wiring-text">{{ inputsSummary(row.inputs) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="输出" min-width="120">
-            <template #default="{ row }">
-              <span v-if="row.type_output_schema" class="wiring-text">
-                {{ schemaTypeLabel(row.type_output_schema, row.type_output_schema) }}
-              </span>
               <span v-else class="wiring-text">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="依赖" min-width="90">
+          <el-table-column label="条件" min-width="120">
             <template #default="{ row }">
-              {{ row.depends_on.length ? dependLabels(row.depends_on) : '—' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="重试" min-width="200">
-            <template #default="{ row }">
-              <template v-if="parseRetry(row.retry)">
-                <div class="retry-row"><span class="retry-label">次数</span> {{ parseRetry(row.retry)!.max }}</div>
-                <div class="retry-row"><span class="retry-label">退避</span> {{ parseRetry(row.retry)!.base ?? 1 }}s × {{ parseRetry(row.retry)!.factor ?? 2 }}<sup>n</sup> ≤ {{ parseRetry(row.retry)!.backoffMax ?? 60 }}s</div>
-                <div v-if="parseRetry(row.retry)!.jitter === false" class="retry-row"><span class="retry-label">抖动</span> 关</div>
-                <div v-if="parseRetry(row.retry)!.on?.length" class="retry-row"><span class="retry-label">触发</span> {{ parseRetry(row.retry)!.on!.join(', ') }}</div>
-              </template>
+              <span v-if="row.condition" class="wiring-text">{{ row.condition }}</span>
               <span v-else class="wiring-text">—</span>
             </template>
-          </el-table-column>
-          <el-table-column label="条件" min-width="100">
-            <template #default="{ row }">{{ row.condition ?? '—' }}</template>
           </el-table-column>
           <el-table-column label="说明" min-width="130">
-            <template #default="{ row }">{{ row.description ?? '—' }}</template>
+            <template #default="{ row }">
+              <el-tooltip v-if="row.description" :content="row.description" placement="top" :show-after="300">
+                <span class="desc-text">{{ row.description }}</span>
+              </el-tooltip>
+              <span v-else class="desc-text">—</span>
+            </template>
           </el-table-column>
         </el-table>
       </section>
@@ -269,50 +271,26 @@ async function copySource() {
   border-radius: 12px;
   padding: 16px;
 }
-/* 导语：正文字号 + 舒展行高，读起来是「说明文」而非界面杂讯 */
-.desc {
-  margin: 0 0 18px;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--ink-2);
+/* 表格滚动条始终可见 */
+.panel :deep(.el-table__body-wrapper) {
+  scrollbar-color: var(--line-strong) var(--line) !important;
 }
-/* 节点类型描述问号图标 */
-/* 节点类型标签：无背景，纯文字 */
-.type-label {
-  font-size: 12px;
-  font-weight: 500;
+.panel :deep(.el-table__body-wrapper)::-webkit-scrollbar-track {
+  background: var(--line) !important;
 }
-/* 接线/输出文本 */
-.wiring-text {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--ink-2);
+.panel :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb {
+  background: var(--line-strong) !important;
 }
-/* 节点类型描述问号图标 */
-.type-help {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-left: 4px;
-  font-size: 11px;
-  color: var(--ink-3);
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  cursor: help;
-  vertical-align: middle;
+/* 行可点击 */
+.panel :deep(.el-table__row) {
+  cursor: pointer;
 }
-.retry-row {
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--ink-2);
-}
-.retry-label {
-  display: inline-block;
-  width: 28px;
-  color: var(--ink-3);
-  font-size: 11px;
+/* 说明列不换行 */
+.desc-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .io-panels {
   display: grid;
@@ -346,6 +324,45 @@ async function copySource() {
   font-size: 13px;
   color: var(--ink-3);
   line-height: 1.6;
+}
+/* 接线/输出文本 */
+.wiring-text {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.wiring-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wiring-line {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+/* 展开行：输入输出 Schema */
+.schema-expand {
+  display: flex;
+  gap: 32px;
+  padding: 12px 16px;
+  background: rgba(12, 17, 32, 0.4);
+}
+.schema-col {
+  flex: 1;
+  min-width: 0;
+}
+.schema-col h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.5px;
+}
+.schema-empty {
+  font-size: 11px;
+  color: var(--ink-3);
 }
 .source-panel {
   margin-top: 18px;

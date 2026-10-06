@@ -1,27 +1,23 @@
 import logging
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.engine.types import SuspendExecution
 from app.registry.types import func
 
 
-class PayloadItem(BaseModel):
-    key: str = Field(description="字段标识（英文）")
-    label: str | None = Field(default=None, description="显示名称（中文）")
-    value: Any = Field(description="字段值")
+class HumanInput(BaseModel):
+    """审核节点输入：字段由 pipeline YAML 动态声明，允许任意键。"""
+    model_config = ConfigDict(extra="allow")
 
-
-class HumanParams(BaseModel):
-    payload: list[PayloadItem] = Field(default_factory=list, description="审核参数")
 
 class HumanOutput(BaseModel):
     """审核节点输出：决策 + 审核参数最终值。"""
 
     approve: bool = Field(description="是否通过")
     reason: str = Field(default="", description="拒绝原因")
-    result: dict[str, Any] = Field(default_factory=dict, description="审核结果")
+    values: dict[str, Any] = Field(default_factory=dict, description="审核结果")
 
 
 logger = logging.getLogger(__name__)
@@ -33,6 +29,6 @@ logger = logging.getLogger(__name__)
     description="人工审核节点，暂停等待审批",
     metadata={"group": "基础", "order": 10},
 )
-async def human(params: HumanParams) -> HumanOutput:
+async def human(params: HumanInput) -> HumanOutput:
     """挂起等待人工审批。决策由 approve 端点直接写入节点快照。"""
     raise SuspendExecution("等待人工审批")

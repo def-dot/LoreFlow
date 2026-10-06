@@ -16,7 +16,7 @@ Quick start::
     results, _ = await pipeline.run()
 """
 
-from .pipeline import Node, Pipeline, RetryPolicy, terminal_approver
+from .pipeline import Node, Pipeline, RetryPolicy
 from .validator import validate_dag, validate_ref
 from .types import (
     NodeResult,
@@ -32,7 +32,6 @@ __all__ = [
     "Pipeline",
     "RetryPolicy",
     "SuspendExecution",
-    "terminal_approver",
     "validate_dag",
     "validate_ref",
     "wired_ctx",

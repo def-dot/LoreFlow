@@ -34,7 +34,6 @@ _TYPE_UI_COMPAT: dict[str, frozenset[str | None]] = {
 }
 
 from app.registry import REGISTRY
-from .types import ApproverFunc
 from .types import NodeResult
 from .validator import validate_dag, validate_ref
 
@@ -355,7 +354,3 @@ class Pipeline(BaseModel):
                     did = f"_{did}"
                 lines.append(f"    {did} --> {nid}")
         return "\n".join(lines)
-
-
-def terminal_approver(node_name: str, payload: dict[str, Any], labels: dict[str, str] | None = None) -> dict[str, Any]:
-    return {"approve": True}
