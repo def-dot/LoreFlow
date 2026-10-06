@@ -12,8 +12,8 @@ class NodeDetail(BaseModel):
     type_label: str | None = None
     description: str | None = None
     type_description: str | None = None
-    type_input_schema: dict[str, Any] | None = None
-    type_output_schema: dict[str, Any] | None = None
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
     depends_on: list[str] = Field(default_factory=list)
     inputs: Any = None
     retry: Any = None
@@ -33,7 +33,6 @@ class PipelineDetail(BaseModel):
     name: str
     description: str = ""
     params: dict[str, Any] | None = None
-    output: dict[str, Any] | None = None
     node_count: int = 0
     mermaid: str = ""
     source: str = ""
