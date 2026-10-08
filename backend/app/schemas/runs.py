@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.models.run import RunStatus
 
@@ -48,9 +48,10 @@ class RunDetail(BaseModel):
 
 
 class ApproveRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     approve: bool
     reason: str | None = ""
-    values: dict[str, Any] | None = None
 
 
 class ApproveResponse(BaseModel):

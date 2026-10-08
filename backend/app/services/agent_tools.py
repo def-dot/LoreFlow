@@ -57,7 +57,7 @@ async def build_tools(tools_input: list[str]) -> tuple[list[dict[str, Any]] | No
 
 def _tooldef_to_openai(td: FuncDef) -> dict[str, Any]:
     """FuncDef → OpenAI function calling 格式。"""
-    schema = td.json_input_schema() or {"type": "object", "properties": {}}
+    schema = td.input_schema or {"type": "object", "properties": {}}
     return {
         "type": "function",
         "function": {"name": td.name, "description": td.description, "parameters": schema},
@@ -73,7 +73,7 @@ async def build_pipeline_prompt(select_all: bool, refs: list[str]) -> str | None
             continue
 
         # 从 JSON Schema 提取参数信息
-        schema = td.json_input_schema() or {}
+        schema = td.input_schema or {}
         props = schema.get("properties", {})
         required_set = set(schema.get("required", []))
         params_info: list[str] = []

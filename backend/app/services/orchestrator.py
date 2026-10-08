@@ -20,7 +20,6 @@ from app.engine import (
     NodeResult,
     NodeStatus,
 )
-from app.engine.pipeline import validate_inputs
 from app.models.run import RunRecord, RunStatus
 from app.services import pipelines as pipelines_service
 from app.services import runs
@@ -118,7 +117,7 @@ async def create_run(
     raw = pipeline_rec.definition
     config = yaml.safe_load(raw)
     pipeline = Pipeline.model_validate(config)
-    validate_inputs(pipeline.params or {}, pipeline.required, inputs)
+    pipeline.validate_inputs(inputs)
 
     record = RunRecord(
         name=name or pipeline.name,

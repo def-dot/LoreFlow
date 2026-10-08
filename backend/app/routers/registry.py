@@ -17,8 +17,8 @@ def _to_func_out(t) -> FuncOut:
         label=t.label or t.name,
         description=t.description,
         metadata=t.metadata,
-        input_schema=t.json_input_schema(),
-        output_schema=t.json_output_schema(),
+        input_schema=t.input_schema,
+        output_schema=t.output_schema,
     )
 
 

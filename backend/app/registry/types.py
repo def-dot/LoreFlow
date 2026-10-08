@@ -29,9 +29,8 @@ logger = logging.getLogger(__name__)
 class FuncDef:
     """一个可被 YAML 引用或 LLM 调用的函数定义。
 
-    ``input_schema`` / ``output_schema`` 二选一（一份签名，只取一种形态）：
-    - ``type[BaseModel]`` — 本地 ``@func`` 从签名推导的模型
-    - ``dict[str, Any]`` — JSON Schema 原文（如 MCP ``inputSchema`` / ``outputSchema``），无损透传
+    ``input_schema`` / ``output_schema`` 统一为 JSON Schema dict（无损透传）。
+    注册时 BaseModel 自动转为 ``model_json_schema()``；MCP / Pipeline 已是 dict。
     """
 
     name: str
@@ -39,34 +38,25 @@ class FuncDef:
     label: str = ""
     description: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
-    input_schema: type[BaseModel] | dict[str, Any] | None = None
-    output_schema: type[BaseModel] | dict[str, Any] | None = None
-
-    def json_input_schema(self) -> dict[str, Any] | None:
-        """对外 JSON Schema（LLM tools / 前端表单）。无输入声明时返回 ``None``。
-
-        dict 形态原样透传（无损）；模型形态由 pydantic 导出。
-        """
-        s = self.input_schema
-        if isinstance(s, dict):
-            return s
-        return s.model_json_schema() if s is not None else None
-
-    def json_output_schema(self) -> dict[str, Any] | None:
-        """对外输出 JSON Schema。无输出声明时返回 ``None``。"""
-        s = self.output_schema
-        if isinstance(s, dict):
-            return s
-        return s.model_json_schema() if s is not None else None
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
 
     async def invoke(self, args: dict[str, Any]) -> Any:
-        """统一调用入口：模型形态传实例，dict 形态拆 kwargs，无声明则无参调用。"""
-        s = self.input_schema
-        if isinstance(s, dict):
-            return await self.func(**args)
-        if s is not None:
-            return await self.func(s(**args))
-        return await self.func()
+        """统一调用入口：自动构造 BaseModel 参数，否则拆 kwargs，无声明则无参调用。"""
+        if not args and self.input_schema is None:
+            return await self.func()
+
+        # 找第一个 BaseModel 参数，自动构造；否则直接拆 kwargs
+        try:
+            hints = typing.get_type_hints(self.func)
+        except Exception:
+            hints = {}
+        for pname in inspect.signature(self.func).parameters:
+            ann = hints.get(pname)
+            if ann is not None and isinstance(ann, type) and issubclass(ann, BaseModel):
+                return await self.func(**{pname: ann(**args)})
+
+        return await self.func(**args)
 
 
 # ---------------------------------------------------------------------------
@@ -80,31 +70,6 @@ REGISTRY: dict[str, FuncDef] = {}
 TOOL_REGISTRY: dict[str, FuncDef] = {}
 
 
-# ---------------------------------------------------------------------------
-# 参数推导
-# ---------------------------------------------------------------------------
-
-def _infer_func_schema(func: Callable[..., Any]) -> tuple[type[BaseModel] | None, type[BaseModel] | None]:
-    """从函数签名推导 (input_schema, output_schema)。"""
-    _is_model = lambda ann: isinstance(ann, type) and issubclass(ann, BaseModel)
-    try:
-        hints = typing.get_type_hints(func)
-    except Exception:
-        hints = {}
-
-    sig = inspect.signature(func)
-    input_schema = None
-    for pname in sig.parameters:
-        ann = hints.get(pname)
-        if ann is not None and _is_model(ann):
-            input_schema = ann
-            break
-
-    ret = hints.get("return")
-    output_schema = ret if ret is not None and _is_model(ret) else None
-    return input_schema, output_schema
-
-
 def func(
     label: str = "",
     description: str = "",
@@ -116,7 +81,21 @@ def func(
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        input_schema, output_schema = _infer_func_schema(fn)
+        try:
+            hints = typing.get_type_hints(fn)
+        except Exception:
+            hints = {}
+
+        input_schema = None
+        for pname in inspect.signature(fn).parameters:
+            ann = hints.get(pname)
+            if ann is not None and isinstance(ann, type) and issubclass(ann, BaseModel):
+                input_schema = ann.model_json_schema()
+                break
+
+        ret = hints.get("return")
+        output_schema = ret.model_json_schema() if isinstance(ret, type) and issubclass(ret, BaseModel) else None
+
         fd = FuncDef(
             name=fn.__name__,
             func=fn,

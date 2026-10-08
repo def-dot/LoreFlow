@@ -8,8 +8,7 @@ nodes:
     code: |
       def main(level: str):
           return level
-    params:
-      level: $params.level
+    level: $params.level
 - name: vip_flow
   type: code
   label: VIP分支

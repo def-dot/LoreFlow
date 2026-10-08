@@ -1,38 +1,15 @@
-"""
-DAG Flow engine — async DAG-based workflow orchestration.
-
-Quick start::
-
-    from app.engine import Pipeline, RetryPolicy
-
-    pipeline = Pipeline.model_validate({
-        "name": "pipeline",
-        "nodes": [
-            {"name": "fetch", "type": "my_fetch", "retry": 3},
-            {"name": "process", "type": "my_process", "depends_on": ["fetch"]},
-        ],
-    })
-
-    results, _ = await pipeline.run()
-"""
+"""Engine 包 — Pipeline 构造期校验和运行时执行。"""
 
 from .pipeline import Node, Pipeline, RetryPolicy
-from .validator import validate_dag, validate_ref
-from .types import (
-    NodeResult,
-    NodeStatus,
-    SuspendExecution,
-    wired_ctx,
-)
+from .types import NodeResult, NodeSchema, NodeStatus
+from .validator import PipelineValidator
 
 __all__ = [
     "Node",
-    "NodeResult",
-    "NodeStatus",
     "Pipeline",
     "RetryPolicy",
-    "SuspendExecution",
-    "validate_dag",
-    "validate_ref",
-    "wired_ctx",
+    "NodeResult",
+    "NodeSchema",
+    "NodeStatus",
+    "PipelineValidator",
 ]

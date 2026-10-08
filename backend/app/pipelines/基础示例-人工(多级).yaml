@@ -14,7 +14,7 @@ nodes:
   - task_a
   description: 请最终确定内容是否正确
   inputs:
-    content: $task_a.values.content
+    content: $task_a.content
 - name: __end__
   label: 输出
   depends_on:

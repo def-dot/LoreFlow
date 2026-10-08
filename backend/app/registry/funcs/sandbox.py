@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.core.config import settings
 from app.registry.types import func
@@ -18,8 +18,14 @@ class CodeOutput(BaseModel):
 
 
 class CodeParams(BaseModel):
+    """code 节点参数。
+
+    code 和 timeout 是节点配置；其余字段作为 main 函数的参数传入沙箱。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     code: str = Field(description="定义 main 函数的 Python 代码", min_length=1)
-    params: dict[str, Any] | None = Field(default=None, description="传给 main 的参数")
     timeout: int = Field(default=60, description="超时秒数")
 
 
@@ -31,9 +37,10 @@ class CodeParams(BaseModel):
 )
 async def code(params: CodeParams) -> CodeOutput:
     client = http_client()
+    func_params = params.model_extra or {}
     resp = await client.post(
         f"{settings.SANDBOX_URL}/exec",
-        json={"code": params.code, "params": params.params, "timeout": params.timeout},
+        json={"code": params.code, "params": func_params, "timeout": params.timeout},
         timeout=params.timeout + 5,
     )
     result = resp.json()

@@ -14,10 +14,10 @@ class HumanInput(BaseModel):
 
 class HumanOutput(BaseModel):
     """审核节点输出：决策 + 审核参数最终值。"""
+    model_config = ConfigDict(extra="allow")
 
     approve: bool = Field(description="是否通过")
     reason: str = Field(default="", description="拒绝原因")
-    values: dict[str, Any] = Field(default_factory=dict, description="审核结果")
 
 
 logger = logging.getLogger(__name__)

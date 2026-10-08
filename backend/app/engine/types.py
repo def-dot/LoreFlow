@@ -41,6 +41,13 @@ class NodeResult(BaseModel):
     inputs: dict[str, Any] | None = None
 
 
+class NodeSchema(BaseModel):
+    """节点实例的 input/output schema。"""
+
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+
+
 class SuspendExecution(BaseException):
     """内部控制流信号：人工审批节点挂起，run 干净退出等待 /approve。"""
 

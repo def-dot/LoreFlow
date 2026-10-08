@@ -20,7 +20,6 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 from app.engine.pipeline import Pipeline
-from app.engine.schema import get_node_input_schema, get_node_output_schema
 
 logger = get_logger(__name__)
 from app.models.pipeline import PipelineRecord
@@ -123,8 +122,9 @@ def detail_from_config(raw: str) -> dict[str, Any]:
         node_type = REGISTRY.get(node_cfg.type)
         row["type_label"] = node_type.label if node_type else None
         row["type_description"] = node_type.description if node_type else None
-        row["input_schema"] = get_node_input_schema(node_cfg, pipeline)
-        row["output_schema"] = get_node_output_schema(node_cfg, pipeline)
+        schema = pipeline.get_node_schema(node_cfg)
+        row["input_schema"] = schema.input_schema
+        row["output_schema"] = schema.output_schema
         rows.append(row)
 
     # params 需要转为 plain dict（ParamSchema 不可直接 JSON 序列化）

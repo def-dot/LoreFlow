@@ -11,7 +11,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.engine.pipeline import Pipeline
-from app.engine.schema import get_node_output_schema
 from app.registry.types import TOOL_REGISTRY, FuncDef
 
 logger = logging.getLogger(__name__)
@@ -32,10 +31,7 @@ def _make_pipeline_runner(pipeline: Pipeline):
     """创建 Pipeline 执行闭包。"""
 
     async def _run(inputs: dict[str, Any] | None = None) -> PipelineOutput:
-        from app.engine.pipeline import validate_inputs
-
-        if pipeline.params:
-            validate_inputs(pipeline.params, pipeline.required, inputs)
+        pipeline.validate_inputs(inputs)
 
         try:
             _, output = await pipeline.run(inputs=inputs or {})
@@ -71,7 +67,7 @@ def register_pipeline_tool(pipeline: Pipeline) -> None:
             description=pipeline.description or "",
             metadata={"group": "工作流", "source": "pipeline"},
             input_schema=input_schema,
-            output_schema=get_node_output_schema(pipeline.end_node, pipeline) or {"type": "object"},
+            output_schema=pipeline.get_node_schema(pipeline.end_node).output_schema or {"type": "object"},
         )
 
         TOOL_REGISTRY[pipeline.name] = fd

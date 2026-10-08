@@ -34,10 +34,20 @@ _TYPE_UI_COMPAT: dict[str, frozenset[str | None]] = {
 }
 
 from app.registry import REGISTRY
-from .types import NodeResult
-from .validator import validate_dag, validate_ref
+from .types import NodeResult, NodeSchema
+from .validator import PipelineValidator
 
 logger = logging.getLogger(__name__)
+
+# Python 类型名 → JSON Schema type
+_INFER_SCHEMA: dict[str, dict[str, str]] = {
+    "str": {"type": "string"},
+    "int": {"type": "integer"},
+    "float": {"type": "number"},
+    "bool": {"type": "boolean"},
+    "list": {"type": "array"},
+    "dict": {"type": "object"},
+}
 
 
 class ParamSchema(BaseModel):
@@ -46,7 +56,7 @@ class ParamSchema(BaseModel):
     type 必填；常用字段显式声明；其余字段（如 ui等）自由扩展。
     """
 
-    model_config = {"extra": "allow"}
+    model_config = ConfigDict(extra="allow")
 
     type: str | list[str]
     title: str | None = None
@@ -80,20 +90,6 @@ class ParamSchema(BaseModel):
         if allowed is not None and self.ui not in allowed:
             raise ValueError(f"type={t!r} 不支持 ui={self.ui!r}，可选: {sorted(allowed - {None}) or '不写 ui'}")
         return self
-
-
-def validate_inputs(
-    params: dict[str, ParamSchema],
-    required: list[str] | None,
-    inputs: dict[str, Any] | None,
-) -> None:
-    """校验必填 / 多余参数，不合并默认值。"""
-    inputs = inputs or {}
-    required = required or []
-    if missing := set(required) - set(inputs):
-        raise ValueError(f"必填参数缺失: {missing}")
-    if extra := set(inputs) - set(params):
-        raise ValueError(f"多余的参数: {extra}")
 
 
 class RetryPolicy(BaseModel):
@@ -196,7 +192,7 @@ class Node(BaseModel):
         if func_def is None:
             return self
 
-        schema = func_def.json_input_schema()
+        schema = func_def.input_schema
         if schema is None:
             return self
 
@@ -255,40 +251,29 @@ class Pipeline(BaseModel):
     nodes: list[Node]
     metadata: PipelineMetadata = Field(default_factory=PipelineMetadata)
 
-    model_config = {"extra": "forbid"}
+    model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def _validate_pipeline(self) -> Pipeline:
         """构造期校验（图结构 + $引用 + required 一致性）。"""
-        errors = validate_dag(self.nodes)
-        errors.extend(validate_ref(self))
-
-        # required 中的键必须存在于 params
-        if self.required and self.params:
-            unknown = set(self.required) - set(self.params)
-            if unknown:
-                errors.append(f"required 引用了不存在的参数: {unknown}")
-        elif self.required and not self.params:
-            errors.append("声明了 required 但没有 params")
-
+        errors = PipelineValidator(self).validate()
         if errors:
             raise ValueError("\n".join(errors))
         return self
+
+    def validate_inputs(self, inputs: dict[str, Any] | None) -> None:
+        """运行时校验用户输入：必填 / 多余参数。"""
+        inputs = inputs or {}
+        required = self.required or []
+        if missing := set(required) - set(inputs):
+            raise ValueError(f"必填参数缺失: {missing}")
+        if extra := set(inputs) - set(self.params or {}):
+            raise ValueError(f"多余的参数: {extra}")
 
     @property
     def end_node(self) -> Node:
         """end 节点"""
         return next((n for n in self.nodes if n.type == "end"), None)
-
-    @property
-    def required_inputs(self) -> list[str]:
-        """必填参数键列表。"""
-        return self.required or []
-
-    @property
-    def default_inputs(self) -> dict[str, Any]:
-        """有默认值的参数键 → 默认值。"""
-        return {k: v.default for k, v in (self.params or {}).items() if hasattr(v, "default")}
 
     async def run(
         self,
@@ -319,6 +304,61 @@ class Pipeline(BaseModel):
         )
 
         return results, output
+
+    # ---- Schema 推导 ----
+
+    def get_value_schema(self, value: Any) -> dict[str, Any] | None:
+        """返回值的 JSON Schema（$引用解析路径，字面量推断类型）。"""
+        if not isinstance(value, str) or not value.startswith("$"):
+            return _INFER_SCHEMA.get(type(value).__name__, {"type": "string"})
+        parts = value.lstrip("$").split(".")
+        root, segments = parts[0], parts[1:]
+
+        if root == "params":
+            if not self.params:
+                return None
+            root_schema: dict[str, Any] | None = {
+                "type": "object",
+                "properties": {k: v.model_dump() for k, v in self.params.items()},
+            }
+        else:
+            nodes_dict = {n.name: n for n in self.nodes}
+            node = nodes_dict.get(root)
+            if not node:
+                return None
+            root_schema = self.get_node_schema(node).output_schema
+            if not root_schema:
+                return None
+
+        if not segments:
+            return root_schema
+
+        schema: dict[str, Any] = root_schema
+        for seg in segments:
+            props = schema.get("properties")
+            if isinstance(props, dict) and seg in props:
+                schema = props[seg]
+            else:
+                return None
+        return schema
+
+    def get_node_schema(self, node: Node) -> NodeSchema:
+        """获取节点实例的 input/output schema（per-instance，处理动态类型）。"""
+        func_def = REGISTRY.get(node.type)
+        inp = func_def.input_schema if func_def else None
+        out = func_def.output_schema if func_def else None
+
+        # additionalProperties=true 的节点（end / human / code 等）：合并动态参数
+        need_dynamic = (inp and inp.get("additionalProperties")) or (out and out.get("additionalProperties"))
+        if node.inputs and need_dynamic:
+            dynamic = {k: s for k, ref in node.inputs.items() if (s := self.get_value_schema(ref))}
+            if dynamic:
+                if inp and inp.get("additionalProperties"):
+                    inp = {**inp, "properties": {**dynamic, **(inp.get("properties") or {})}}
+                if out and out.get("additionalProperties"):
+                    out = {**out, "properties": {**dynamic, **(out.get("properties") or {})}}
+
+        return NodeSchema(input_schema=inp, output_schema=out)
 
     # ---- Mermaid 可视化 ----
 

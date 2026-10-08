@@ -22,15 +22,14 @@ nodes:
               f"file_list（多文件）: {', '.join(files) if files else '（未上传）'}",
           ]
           return "\n".join(lines)
-    params:
-      text: $params.text
-      paragraph: $params.paragraph
-      number: $params.number
-      lang: $params.lang
-      langs: $params.langs
-      tags: $params.tags
-      file: $params.file
-      file_list: $params.file_list
+    text: $params.text
+    paragraph: $params.paragraph
+    number: $params.number
+    lang: $params.lang
+    langs: $params.langs
+    tags: $params.tags
+    file: $params.file
+    file_list: $params.file_list
 - name: __end__
   label: 输出
   depends_on:
@@ -41,33 +40,29 @@ nodes:
 params:
   text:
     type: string
-    title: 单行文本
-    description: type=string，提交字符串
+    description: 单行文本
     default: 你好
   paragraph:
     type: string
     title: 多行文本
-    description: type=string + ui:widget=textarea，提交字符串
+    description: 多行文本
     default: |-
       第一行
       第二行
     ui: textarea
   number:
     type: number
-    title: 数字
-    description: type=number，提交数字
+    description: 数字
     default: 3
   lang:
     type: string
-    title: 单选
-    description: type=string + enum，提交标量字符串
+    description: 单选
     enum: [中文, English, 日本語]
     default: 中文
     ui: select
   langs:
     type: array
-    title: 下拉多选
-    description: type=array + ui:select，提交字符串列表
+    description: 下拉多选
     items:
       type: string
       enum: [问候, 正式, 随意, 紧急]
@@ -75,8 +70,7 @@ params:
     ui: select
   tags:
     type: array
-    title: 多选
-    description: type=array + items.enum，提交字符串列表
+    description: 多选
     items:
       type: string
       enum: [问候, 正式, 随意, 紧急]
@@ -84,16 +78,14 @@ params:
     ui: checkbox
   file:
     type: object
-    title: 单文件
-    description: type=object + ui:file，提交 {stored_name, filename}
+    description: 单文件
     properties:
       stored_name: {type: string}
       filename: {type: string}
     ui: file
   file_list:
     type: array
-    title: 多文件
-    description: type=array + ui:file_list，提交 {stored_name, filename} 列表
+    description: 多文件
     items:
       type: object
       properties:
