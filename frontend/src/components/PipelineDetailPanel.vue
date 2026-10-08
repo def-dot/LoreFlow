@@ -126,9 +126,10 @@ function retrySummary(retry: unknown): string {
 
 function wiringLines(inputs: Record<string, unknown> | null): string[] {
   if (!inputs || !Object.keys(inputs).length) return []
-  return Object.entries(inputs)
-    .filter(([, v]) => typeof v === 'string' && v.startsWith('$'))
-    .map(([k, v]) => `${k}: ${v}`)
+  return Object.entries(inputs).map(([k, v]) => {
+    if (typeof v === 'object' && v !== null) return `${k}: ${JSON.stringify(v)}`
+    return `${k}: ${v}`
+  })
 }
 
 async function copySource() {
