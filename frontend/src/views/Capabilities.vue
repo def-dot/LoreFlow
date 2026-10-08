@@ -193,8 +193,8 @@ function toggleGroup(g: CatalogGroup) {
 
 const filtersActive = computed(() => roleFilter.value !== 'all' || searchQuery.value.trim() !== '')
 
-/** 三个区默认展开，收起只影响显示不改数据 */
-const collapsedSections = ref<Set<string>>(new Set())
+/** 四个区默认折叠，展开只影响显示不改数据 */
+const collapsedSections = ref<Set<string>>(new Set(['builtin', 'workflows', 'scripts', 'mcp']))
 
 function isSectionCollapsed(key: string): boolean {
   return collapsedSections.value.has(key)
