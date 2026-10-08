@@ -72,7 +72,12 @@ def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[
 
     def _resolve(obj: Any) -> Any:
         if isinstance(obj, str) and obj.startswith("$"):
-            return deref(ctx, obj)
+            val: Any = ctx
+            for part in obj.lstrip("$").split("."):
+                if not isinstance(val, Mapping) or part not in val:
+                    raise KeyError(f"$ 引用解析失败：{obj}，无法取 {part}）")
+                val = val[part]
+            return val
         if isinstance(obj, dict):
             return {k: _resolve(v) for k, v in obj.items()}
         if isinstance(obj, list):

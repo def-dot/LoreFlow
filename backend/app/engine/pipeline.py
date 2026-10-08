@@ -307,8 +307,28 @@ class Pipeline(BaseModel):
 
     # ---- Schema 推导 ----
 
-    def get_value_schema(self, value: Any) -> dict[str, Any] | None:
+    def get_value_schema(self, value: Any, errors: list[str] | None = None, upstream: set[str] | None = None) -> dict[str, Any] | None:
         """返回值的 JSON Schema（$引用解析路径，字面量推断类型）。"""
+        # 嵌套 dict：递归推断每个属性的 schema
+        if isinstance(value, dict):
+            props: dict[str, Any] = {}
+            for k, v in value.items():
+                s = self.get_value_schema(v, errors, upstream)
+                if s is None:
+                    return None
+                props[k] = s
+            return {"type": "object", "properties": props}
+        # 嵌套 list：递归推断元素 schema（统一取第一个，否则退回 array）
+        if isinstance(value, list):
+            if not value:
+                return {"type": "array"}
+            schemas = [self.get_value_schema(v, errors, upstream) for v in value]
+            if any(s is None for s in schemas):
+                return None
+            first = schemas[0]
+            if all(s == first for s in schemas):
+                return {"type": "array", "items": first}
+            return {"type": "array"}
         if not isinstance(value, str) or not value.startswith("$"):
             return _INFER_SCHEMA.get(type(value).__name__, {"type": "string"})
         parts = value.lstrip("$").split(".")
@@ -316,18 +336,28 @@ class Pipeline(BaseModel):
 
         if root == "params":
             if not self.params:
+                if errors is not None:
+                    errors.append(f"引用 {value!r}: params 未定义")
                 return None
             root_schema: dict[str, Any] | None = {
                 "type": "object",
                 "properties": {k: v.model_dump() for k, v in self.params.items()},
             }
         else:
+            if upstream is not None and root not in upstream:
+                if errors is not None:
+                    errors.append(f"引用 {value!r}: 节点 {root!r} 不是上游依赖")
+                return None
             nodes_dict = {n.name: n for n in self.nodes}
             node = nodes_dict.get(root)
             if not node:
+                if errors is not None:
+                    errors.append(f"引用 {value!r}: 节点 {root!r} 不存在")
                 return None
             root_schema = self.get_node_schema(node).output_schema
             if not root_schema:
+                if errors is not None:
+                    errors.append(f"引用 {value!r}: 节点 {root!r} 无 output schema")
                 return None
 
         if not segments:
@@ -339,6 +369,8 @@ class Pipeline(BaseModel):
             if isinstance(props, dict) and seg in props:
                 schema = props[seg]
             else:
+                if errors is not None:
+                    errors.append(f"引用 {value!r}: 路径段 {seg!r} 不存在")
                 return None
         return schema
 

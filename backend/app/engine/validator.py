@@ -16,6 +16,7 @@ from .condition import parse_condition
 if TYPE_CHECKING:
     from .pipeline import Pipeline
 
+
 class PipelineValidator:
     """Pipeline 构造期校验：图结构 + 引用合法性。"""
 
@@ -114,21 +115,10 @@ class PipelineValidator:
                 continue
             upstream = self._upstreams(node.name)
             for key, value in node.inputs.items():
-                is_ref = isinstance(value, str) and value.startswith("$")
-                if is_ref:
-                    # 上游检查
-                    root = value.lstrip("$").split(".")[0]
-                    if root != "params" and root not in upstream:
-                        self.errors.append(
-                            f"节点 {node.name!r}: inputs 引用的 {root!r} 不是上游依赖节点"
-                        )
-                        continue
-
-                # 路径 / 类型有效性
-                if self.pipeline.get_value_schema(value) is None:
-                    self.errors.append(
-                        f"节点 {node.name!r}: 参数 {key!r} 引用 {value!r} 解析失败"
-                    )
+                errs: list[str] = []
+                if self.pipeline.get_value_schema(value, errs, upstream) is None:
+                    for e in errs:
+                        self.errors.append(f"节点 {node.name!r}: 参数 {key!r} {e}")
 
     # ---- condition 校验 ----
 
@@ -143,16 +133,8 @@ class PipelineValidator:
                 for _, key, _, _ in and_group:
                     ref = f"${key}"
 
-                    # 上游检查
-                    root = key.split(".")[0]
-                    if root != "params" and root not in upstream:
-                        self.errors.append(
-                            f"节点 {node.name!r}: condition 引用的 {root!r} 不是上游依赖节点"
-                        )
-                        continue
-
-                    # 路径有效性
-                    if self.pipeline.get_value_schema(ref) is None:
-                        self.errors.append(
-                            f"节点 {node.name!r}: condition 引用 {ref!r} 无效"
-                        )
+                    # 上游 + 路径有效性
+                    errs: list[str] = []
+                    if self.pipeline.get_value_schema(ref, errs, upstream) is None:
+                        for e in errs:
+                            self.errors.append(f"节点 {node.name!r}: condition {e}")
