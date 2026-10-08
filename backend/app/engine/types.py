@@ -2,6 +2,7 @@
 Core types for the DAG Flow orchestration engine.
 """
 
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
