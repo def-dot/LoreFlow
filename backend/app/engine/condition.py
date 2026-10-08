@@ -150,9 +150,9 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
 
 def _eval_atom(ctx: dict[str, Any], atom: Atom) -> bool:
     """单条原子条件在视图上求值。"""
-    from .types import deref
+    from .types import resolve_ref
 
-    actual = deref(ctx, f"${atom.key}")
+    actual = resolve_ref(ctx, f"${atom.key}")
     result = _compare(actual, atom.op, atom.expected) if atom.op else bool(actual)
     return not result if atom.neg else result
 

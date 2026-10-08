@@ -2,8 +2,6 @@
 Core types for the DAG Flow orchestration engine.
 """
 
-from collections.abc import Mapping
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
@@ -57,33 +55,18 @@ class SuspendExecution(BaseException):
 # ---------------------------------------------------------------------------
 
 
-def deref(ctx: Mapping[str, Any], ref: str) -> Any:
-    """按点路径从 ctx 取值（``$a.b.c`` → ``ctx["a"]["b"]["c"]``）。缺键抛 ``KeyError``。"""
+def resolve_ref(ctx: dict[str, Any], value: Any) -> Any:
+    """递归解析 value 中的 $ 引用（$a.b.c → ctx["a"]["b"]["c"]）。"""
+    if isinstance(value, dict):
+        return {k: resolve_ref(ctx, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [resolve_ref(ctx, v) for v in value]
+    if not isinstance(value, str) or not value.startswith("$"):
+        return value
+    parts = value.lstrip("$").split(".")
     val: Any = ctx
-    for part in ref.lstrip("$").split("."):
-        if not isinstance(val, Mapping) or part not in val:
-            raise KeyError(f"$ 引用解析失败：{ref}，无法取 {part}）")
+    for part in parts:
+        if not isinstance(val, dict) or part not in val:
+            raise KeyError(f"$ 引用解析失败：{value!r}，无法取 {part!r}")
         val = val[part]
     return val
-
-
-def wired_ctx(ctx: Mapping[str, Any], wiring: Mapping[str, Any] | None) -> dict[str, Any]:
-    """接线 → 解析后的 inputs：递归解析 wiring 中的 $ 引用，仅返回 wiring 本身。"""
-
-    def _resolve(obj: Any) -> Any:
-        if isinstance(obj, str) and obj.startswith("$"):
-            val: Any = ctx
-            for part in obj.lstrip("$").split("."):
-                if not isinstance(val, Mapping) or part not in val:
-                    raise KeyError(f"$ 引用解析失败：{obj}，无法取 {part}）")
-                val = val[part]
-            return val
-        if isinstance(obj, dict):
-            return {k: _resolve(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_resolve(v) for v in obj]
-        return obj
-
-    if not wiring:
-        return {}
-    return {k: _resolve(v) for k, v in wiring.items()}

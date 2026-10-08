@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from app.registry import REGISTRY
 from .condition import eval_condition
-from .types import wired_ctx, ACTIVE_STATUSES
+from .types import resolve_ref, ACTIVE_STATUSES
 from .pipeline import Node, RetryPolicy
 from .types import (
     NodeResult,
@@ -129,7 +129,7 @@ class PipeLineExecutor:
             # ---- 4. Execute with concurrency gate + retry ----
             # 过滤掉引用了跳过上游节点的输入
             filtered_inputs = _filter_skipped(node.inputs or {}, results)
-            resolved_inputs = wired_ctx(self.ctx, filtered_inputs)
+            resolved_inputs = {k: resolve_ref(self.ctx, v) for k, v in filtered_inputs.items()}
             if self.on_event is not None:
                 await self.on_event(NodeResult(node_name=node.name, status=NodeStatus.RUNNING, inputs=resolved_inputs))
 
