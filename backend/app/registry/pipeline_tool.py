@@ -60,6 +60,11 @@ def register_pipeline_tool(pipeline: Pipeline) -> None:
 
         runner = _make_pipeline_runner(pipeline)
 
+        output_schema = PipelineOutput.model_json_schema()
+        output_schema["properties"]["output"] = (
+            pipeline.get_node_schema(pipeline.end_node).output_schema or {"type": "object"}
+        )
+
         fd = FuncDef(
             name=pipeline.name,
             func=runner,
@@ -67,7 +72,7 @@ def register_pipeline_tool(pipeline: Pipeline) -> None:
             description=pipeline.description or "",
             metadata={"group": "工作流", "source": "pipeline"},
             input_schema=input_schema,
-            output_schema=pipeline.get_node_schema(pipeline.end_node).output_schema or {"type": "object"},
+            output_schema=output_schema,
         )
 
         TOOL_REGISTRY[pipeline.name] = fd
