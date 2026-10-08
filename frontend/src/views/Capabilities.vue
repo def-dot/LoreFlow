@@ -584,6 +584,27 @@ onMounted(fetchAll)
             </template>
           </div>
 
+          <!-- 工作流 -->
+          <div class="top-section">
+            <div class="section-head">
+              <h3 class="source-title" @click="toggleSection('workflows')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('workflows') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                工作流
+                <span class="group-count">{{ workflowItemCount }}</span>
+              </h3>
+            </div>
+            <template v-if="!isSectionCollapsed('workflows')">
+              <div v-for="g in catalogGroups.filter((x) => x.kind === 'workflow')" :key="g.key" class="group-section">
+                <div v-if="g.items.length" class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+                </div>
+                <div v-else class="group-empty muted">无工作流工具</div>
+              </div>
+            </template>
+          </div>
+
           <!-- 自定义脚本：按文件一组，管理挂在组头 -->
           <div class="top-section">
             <div class="source-head">
@@ -669,27 +690,6 @@ onMounted(fetchAll)
               </div>
             </div>
             <div v-if="!mcpServers.length" class="muted source-empty">未配置 MCP 服务器</div>
-            </template>
-          </div>
-
-          <!-- 工作流 -->
-          <div class="top-section">
-            <div class="section-head">
-              <h3 class="source-title" @click="toggleSection('workflows')">
-                <svg class="chev" :class="{ open: !isSectionCollapsed('workflows') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                工作流
-                <span class="group-count">{{ workflowItemCount }}</span>
-              </h3>
-            </div>
-            <template v-if="!isSectionCollapsed('workflows')">
-              <div v-for="g in catalogGroups.filter((x) => x.kind === 'workflow')" :key="g.key" class="group-section">
-                <div v-if="g.items.length" class="node-grid">
-                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
-                </div>
-                <div v-else class="group-empty muted">无工作流工具</div>
-              </div>
             </template>
           </div>
 
