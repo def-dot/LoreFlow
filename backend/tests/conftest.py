@@ -24,10 +24,10 @@ from app.registry.plugins import load_plugins
 load_plugins()  # 模拟 lifespan 的插件加载（ASGITransport 不运行 lifespan）
 
 # 测试专用节点：返回固定值（替代已删除的 cfg_fetch）
-from app.registry.types import func
+from app.registry.types import node
 
 
-@func(label="测试数据源", description="返回固定的测试数据", tool=False)
+@node(label="测试数据源", description="返回固定的测试数据")
 async def test_fetch(ctx: dict) -> dict[str, str]:
     return {"title": "test title", "body": "test body"}
 

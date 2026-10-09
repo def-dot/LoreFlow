@@ -10,7 +10,6 @@ interface CardNode {
   description: string
   input_schema?: JsonSchema | null
   output_schema?: JsonSchema | null
-  roles?: string[]
 }
 
 const props = defineProps<{
@@ -26,18 +25,6 @@ function outputType(schema: JsonSchema): string {
   return schema.type ?? '?'
 }
 
-const roles = computed(() => props.node.roles ?? ['node'])
-
-/** 徽章只标例外：双端注册是常态，不标；单端才提示 */
-const roleNote = computed(() => {
-  const isNode = roles.value.includes('node')
-  const isTool = roles.value.includes('tool')
-  if (isNode && isTool) return ''
-  if (isNode) return '仅节点'
-  if (isTool) return '仅工具'
-  return ''
-})
-
 /** label 与 name 相同就不重复渲染（MCP 工具的 label 就是 name） */
 const showLabel = computed(() => props.node.label && props.node.label !== props.node.name)
 </script>
@@ -50,7 +37,6 @@ const showLabel = computed(() => props.node.label && props.node.label !== props.
       </svg>
       <el-tag :class="`node-tag node-tag--${variant ?? 'func'}`" disable-transitions>{{ node.name }}</el-tag>
       <span v-if="showLabel" class="node-label">{{ node.label }}</span>
-      <span v-if="roleNote" class="role-note">{{ roleNote }}</span>
     </div>
     <p class="node-desc">{{ node.description }}</p>
 
@@ -121,13 +107,6 @@ const showLabel = computed(() => props.node.label && props.node.label !== props.
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
-}
-.role-note {
-  margin-left: auto;
-  font-size: 10.5px;
-  color: var(--ink-3);
-  letter-spacing: 0.5px;
-  flex-shrink: 0;
 }
 .node-desc {
   margin: 4px 0 0 18px;

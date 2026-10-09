@@ -10,14 +10,14 @@ import pytest
 
 from app.engine import PipeLine, load_config
 from helpers import validate_config
-from app.registry.types import func, REGISTRY
+from app.registry.types import node, REGISTRY
 
 
 @pytest.fixture(autouse=True)
 def probe():
     """临时注册探针节点：回显 ctx['document']。"""
 
-    @func(label="接线探针", description="回显 ctx['document']", name="wire_probe", tool=False)
+    @node(label="接线探针", description="回显 ctx['document']")
     async def wire_probe(ctx: dict[str, Any]) -> dict[str, Any]:
         return {"seen_document": ctx.get("document")}
 

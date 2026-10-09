@@ -50,6 +50,46 @@ services:
     environment:
       PYTHONPATH: /opt/packages
 
+  # tei-embed:
+  #   # 无 GPU 用 cpu 镜像；有卡再换回 86-1.6 + 下方 device 预留
+  #   image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+  #   container_name: bge-m3-embed
+  #   command: >
+  #     --model-id /data
+  #     --max-client-batch-size ${TEI_BATCH_SIZE:-16}
+  #   volumes:
+  #     - ../hub/bge-m3:/data
+  #   ports:
+  #     - "8081:80"
+  #   environment:
+  #     - HF_HUB_OFFLINE=1
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # tei-rerank:
+  #   image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+  #   container_name: bge-reranker
+  #   command: >
+  #     --model-id /data
+  #     --max-client-batch-size ${TEI_BATCH_SIZE:-16}
+  #   volumes:
+  #     - ../hub/bge-reranker-v2-m3:/data
+  #   ports:
+  #     - "8082:80"
+  #   environment:
+  #     - HF_HUB_OFFLINE=1
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+
 volumes:
   pgdata:
   redisdata:

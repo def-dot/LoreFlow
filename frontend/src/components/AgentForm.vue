@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { listModels, listTools, listSkills, type ToolOut } from '@/api/registry'
+import { listModels, listTools, listSkills, listBuiltinTools, type ToolOut } from '@/api/registry'
 import { listPlugins, type PluginInfo } from '@/api/plugins'
 import { listMcpServers, reconnectMcpServer, type McpServer } from '@/api/mcp'
+import { listTags, type TagInfo } from '@/api/knowledge'
 import { ElMessage } from 'element-plus'
 import type { AgentListItem } from '@/api/agents'
 
@@ -24,17 +25,22 @@ const form = ref({
   model: '',
   tools: [] as string[],
   skills: [] as string[],
+  tags: [] as string[],
 })
 
 const saving = ref(false)
 const models = ref<Record<string, string[]>>({})
 const allTools = ref<ToolOut[]>([])
+const builtinToolNames = ref<Set<string>>(new Set())
 const allSkills = ref<{ name: string; description: string }[]>([])
+const allTags = ref<TagInfo[]>([])
 const plugins = ref<PluginInfo[]>([])
 const mcpServers = ref<McpServer[]>([])
 const mcpBusy = ref('')
 const searchQuery = ref('')
 const toolDialogVisible = ref(false)
+const skillDialogVisible = ref(false)
+const skillSearchQuery = ref('')
 
 /** name → label 映射，用于 tag 显示 */
 const toolNameMap = computed(() => {
@@ -83,6 +89,7 @@ const activeToolTab = ref('builtin')
 const toolTabs = computed<ToolTab[]>(() => {
   const srcMap = buildSourceMap()
   const q = searchQuery.value.trim().toLowerCase()
+  const isBuiltin = (name: string) => builtinToolNames.value.has(name)
 
   const matchTool = (t: ToolOut | ToolItem) => {
     if (!q) return true
@@ -90,35 +97,28 @@ const toolTabs = computed<ToolTab[]>(() => {
     return hay.includes(q)
   }
 
-  // ---- 内置 ----
-  const builtinGroups = new Map<string, ToolItem[]>()
-  for (const t of allTools.value) {
-    const src = srcMap.get(t.name)
-    if (src && src.kind !== 'builtin') continue
-    if (!src && t.metadata?.source === 'pipeline') continue
-    if (!matchTool(t)) continue
-    const g = t.metadata?.group || '其他'
-    if (!builtinGroups.has(g)) builtinGroups.set(g, [])
-    builtinGroups.get(g)!.push({
+  // ---- 内置（始终可用，不可取消）----
+  const builtinItems: ToolItem[] = allTools.value
+    .filter((t) => isBuiltin(t.name) && matchTool(t))
+    .map((t) => ({
       name: t.name,
       label: t.label || t.name,
       description: t.description || '',
-      source: { kind: 'builtin', name: 'builtin' },
-    })
-  }
+      source: { kind: 'builtin' as const, name: 'builtin' },
+    }))
   const builtinTab: ToolTab = {
     key: 'builtin',
     label: '内置',
     sections: [{
       key: 'builtin',
-      title: '内置',
-      groups: [...builtinGroups.entries()].sort().map(([groupName, items]) => ({ groupName, items })),
+      title: '内置（始终可用）',
+      groups: builtinItems.length ? [{ groupName: '内置', items: builtinItems }] : [],
     }],
   }
 
-  // ---- 工作流 ----
+  // ---- 普通工具（排除内置）----
   const workflowItems = allTools.value
-    .filter((t) => t.metadata?.source === 'pipeline' && matchTool(t))
+    .filter((t) => t.metadata?.source === 'pipeline' && !isBuiltin(t.name) && matchTool(t))
     .map((t) => ({
       name: t.name,
       label: t.label || t.name,
@@ -138,7 +138,7 @@ const toolTabs = computed<ToolTab[]>(() => {
   // ---- 自定义脚本 ----
   const scriptSections: ToolSection[] = plugins.value.map((p) => {
     const items = allTools.value
-      .filter((t) => srcMap.get(t.name)?.kind === 'plugin' && srcMap.get(t.name)?.name === p.filename && matchTool(t))
+      .filter((t) => srcMap.get(t.name)?.kind === 'plugin' && srcMap.get(t.name)?.name === p.filename && !isBuiltin(t.name) && matchTool(t))
       .map((t) => ({
         name: t.name,
         label: t.label || t.name,
@@ -156,7 +156,7 @@ const toolTabs = computed<ToolTab[]>(() => {
   // ---- MCP 服务器 ----
   const mcpSections: ToolSection[] = mcpServers.value.map((s) => {
     const items = allTools.value
-      .filter((t) => srcMap.get(t.name)?.kind === 'mcp' && srcMap.get(t.name)?.name === s.name && matchTool(t))
+      .filter((t) => srcMap.get(t.name)?.kind === 'mcp' && srcMap.get(t.name)?.name === s.name && !isBuiltin(t.name) && matchTool(t))
       .map((t) => ({
         name: t.name,
         label: t.label || t.name,
@@ -262,6 +262,40 @@ const totalFilteredTools = computed(() => {
   return seen.size
 })
 
+// ---- 技能选择 ----
+
+const skillSet = computed(() => new Set(form.value.skills))
+const selectAllSkills = computed({
+  get: () => form.value.skills.includes('*'),
+  set: (v: boolean) => {
+    if (v) form.value.skills = ['*']
+    else form.value.skills = []
+  },
+})
+
+const filteredSkills = computed(() => {
+  const q = skillSearchQuery.value.trim().toLowerCase()
+  if (!q) return allSkills.value
+  return allSkills.value.filter((s) =>
+    `${s.name} ${s.description}`.toLowerCase().includes(q),
+  )
+})
+
+function isSkillSelected(name: string) {
+  return skillSet.value.has('*') || skillSet.value.has(name)
+}
+
+function toggleSkill(name: string) {
+  if (skillSet.value.has('*')) return // 全选模式下不可单独取消
+  const idx = form.value.skills.indexOf(name)
+  if (idx >= 0) form.value.skills.splice(idx, 1)
+  else form.value.skills.push(name)
+}
+
+watch(skillDialogVisible, (open) => {
+  if (open) skillSearchQuery.value = ''
+})
+
 // ---- 编辑模式：回填 ----
 
 watch(
@@ -275,6 +309,7 @@ watch(
         model: a.model,
         tools: [...a.tools],
         skills: [...a.skills],
+        tags: [...(a.tags || [])],
       }
     } else {
       form.value = {
@@ -284,6 +319,7 @@ watch(
         model: '',
         tools: [],
         skills: [],
+        tags: [],
       }
     }
   },
@@ -296,19 +332,23 @@ const isEdit = computed(() => !!props.agent?.id)
 
 async function loadOptions() {
   try {
-    const [m, toolsResp, skillsResp, pluginsResp, mcpResp] = await Promise.all([
+    const [m, toolsResp, skillsResp, pluginsResp, mcpResp, builtinResp, tagsResp] = await Promise.all([
       listModels(),
       listTools(),
       listSkills(),
       listPlugins(),
       listMcpServers(),
+      listBuiltinTools(),
+      listTags(),
     ])
     models.value = m
     allTools.value = toolsResp || []
+    builtinToolNames.value = new Set(builtinResp || [])
     allSkills.value = (skillsResp || []).map((s) => ({
       name: s.name,
       description: s.description || '',
     }))
+    allTags.value = tagsResp || []
     plugins.value = pluginsResp?.plugins || []
     mcpServers.value = mcpResp || []
   } catch {
@@ -425,25 +465,39 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
 
       <!-- ===== 技能选择 ===== -->
       <el-form-item label="技能">
+        <div class="tool-field">
+          <div class="tool-tags" v-if="form.skills.length">
+            <el-tag
+              v-for="name in form.skills"
+              :key="name"
+              size="small"
+              closable
+              disable-transitions
+              @close="form.skills.splice(form.skills.indexOf(name), 1)"
+            >{{ name === '*' ? '全部技能' : name }}</el-tag>
+          </div>
+          <el-button size="small" @click="skillDialogVisible = true">
+            选择技能
+            <template v-if="form.skills.length">（{{ form.skills.includes('*') ? '全部' : form.skills.length }}）</template>
+          </el-button>
+        </div>
+      </el-form-item>
+
+      <!-- ===== 知识库标签 ===== -->
+      <el-form-item label="知识库范围">
         <el-select
-          v-model="form.skills"
+          v-model="form.tags"
           multiple
           filterable
-          allow-create
-          default-first-option
-          placeholder="选择技能"
+          placeholder="选择标签以启用知识库检索"
           style="width: 100%"
         >
-          <el-option label="* 全部技能" value="*" />
           <el-option
-            v-for="s in allSkills"
-            :key="s.name"
-            :label="s.name"
-            :value="s.name"
-          >
-            <span>{{ s.name }}</span>
-            <span v-if="s.description" class="opt-desc">{{ s.description }}</span>
-          </el-option>
+            v-for="t in allTags"
+            :key="t.id"
+            :label="t.name"
+            :value="t.name"
+          />
         </el-select>
       </el-form-item>
 
@@ -531,8 +585,8 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
                 </div>
                 <div v-if="sec.server?.error" class="section-error">{{ sec.server.error }}</div>
 
-                <!-- 非 MCP 段：段头含全选 -->
-                <div v-if="!sec.server && sectionItems(sec).length" class="section-head-inline">
+                <!-- 非 MCP 段：段头含全选（内置段不显示）-->
+                <div v-if="!sec.server && sec.key !== 'builtin' && sectionItems(sec).length" class="section-head-inline">
                   <span class="section-count">
                     {{ sectionSelectedCount(sec) }}/{{ sectionItems(sec).length }}
                   </span>
@@ -549,14 +603,18 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
                       v-for="t in group.items"
                       :key="t.name"
                       class="tool-row"
-                      :class="{ on: isToolSelected(t.name) }"
+                      :class="{ on: isToolSelected(t.name) || builtinToolNames.has(t.name), builtin: builtinToolNames.has(t.name) }"
                     >
                       <input
                         type="checkbox"
-                        :checked="isToolSelected(t.name)"
+                        :checked="isToolSelected(t.name) || builtinToolNames.has(t.name)"
+                        :disabled="builtinToolNames.has(t.name)"
                         @change="toggleTool(t.name)"
                       />
-                      <span class="tool-name">{{ t.label }}</span>
+                      <span class="tool-name">
+                        {{ t.label }}
+                        <el-tag v-if="builtinToolNames.has(t.name)" size="small" type="success" disable-transitions>内置</el-tag>
+                      </span>
                       <span v-if="t.description" class="tool-desc">{{ t.description }}</span>
                     </label>
                   </div>
@@ -575,6 +633,67 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
         <el-button @click="toolDialogVisible = false">完成</el-button>
       </template>
     </el-dialog>
+
+    <!-- ===== 技能选择弹窗 ===== -->
+    <el-dialog
+      v-model="skillDialogVisible"
+      title="选择技能"
+      width="min(560px, 92vw)"
+      :close-on-click-modal="false"
+      destroy-on-close
+      top="10vh"
+    >
+      <div class="skill-picker">
+        <div class="tool-top-bar">
+          <el-input
+            v-model="skillSearchQuery"
+            placeholder="搜索技能名 / 描述"
+            clearable
+            size="small"
+            class="tool-search-input"
+          />
+          <span class="tool-summary">
+            已选 {{ form.skills.includes('*') ? '全部' : form.skills.length }}
+          </span>
+        </div>
+
+        <!-- 全部技能开关 -->
+        <label class="skill-row skill-row-all" :class="{ on: selectAllSkills }">
+          <input type="checkbox" v-model="selectAllSkills" />
+          <span class="tool-name">全部技能</span>
+          <span class="tool-desc">加载所有可用技能的目录</span>
+        </label>
+
+        <div class="skill-divider" />
+
+        <!-- 技能列表 -->
+        <div class="skill-list">
+          <label
+            v-for="s in filteredSkills"
+            :key="s.name"
+            class="tool-row"
+            :class="{ on: isSkillSelected(s.name), disabled: selectAllSkills }"
+          >
+            <input
+              type="checkbox"
+              :checked="isSkillSelected(s.name)"
+              :disabled="selectAllSkills"
+              @change="toggleSkill(s.name)"
+            />
+            <span class="tool-name">{{ s.name }}</span>
+            <span v-if="s.description" class="tool-desc">{{ s.description }}</span>
+          </label>
+          <div v-if="!filteredSkills.length" class="section-empty muted">
+            {{ skillSearchQuery.trim() ? '无匹配技能' : '无可用技能' }}
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="skillDialogVisible = false">完成</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -757,6 +876,10 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
 .tool-row.on {
   background: rgba(77, 196, 178, 0.06);
 }
+.tool-row.builtin {
+  opacity: 0.85;
+  cursor: default;
+}
 
 .tool-row input[type="checkbox"] {
   flex-shrink: 0;
@@ -795,6 +918,34 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
 
 .muted {
   color: var(--el-text-color-placeholder);
+}
+
+/* ---- 技能选择器 ---- */
+
+.skill-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.skill-row-all {
+  padding: 6px 12px;
+}
+
+.skill-divider {
+  height: 1px;
+  background: var(--el-border-color-lighter);
+  margin: 4px 0;
+}
+
+.skill-list {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.tool-row.disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>
 

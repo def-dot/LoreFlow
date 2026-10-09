@@ -28,7 +28,7 @@ def isolated_registry():
 
 
 def _write(path: Path, body: str) -> None:
-    path.write_text("from app.registry import func\n\n" + body, encoding="utf-8")
+    path.write_text("from app.registry import node, tool\n\n" + body, encoding="utf-8")
 
 
 def _rewrite(path: Path, body: str) -> None:
@@ -39,7 +39,7 @@ def _rewrite(path: Path, body: str) -> None:
 def test_load_plugins_scans_directory(monkeypatch, tmp_path, isolated_registry) -> None:
     _write(
         tmp_path / "notify.py",
-        '@func(label="插件节点", description="目录扫描加载")\n'
+        '@node(label="插件节点", description="目录扫描加载")\n'
         "async def dir_probe(ctx: dict) -> str:\n"
         '    return "ok"\n',
     )
@@ -62,11 +62,11 @@ def test_load_plugins_missing_dir(monkeypatch, tmp_path, isolated_registry) -> N
 
 
 def test_sync_adds_new_file(monkeypatch, tmp_path, isolated_registry) -> None:
-    _write(tmp_path / "a.py", '@func(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
+    _write(tmp_path / "a.py", '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
-    _write(tmp_path / "b.py", '@func(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
+    _write(tmp_path / "b.py", '@node(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
     plugin_loader.load_plugins()
 
     assert "a_probe" in REGISTRY and "b_probe" in REGISTRY
@@ -75,7 +75,7 @@ def test_sync_adds_new_file(monkeypatch, tmp_path, isolated_registry) -> None:
 
 def test_sync_removes_deleted_file(monkeypatch, tmp_path, isolated_registry) -> None:
     path = tmp_path / "a.py"
-    _write(path, '@func(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
+    _write(path, '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
@@ -88,13 +88,13 @@ def test_sync_removes_deleted_file(monkeypatch, tmp_path, isolated_registry) -> 
 
 def test_sync_broken_new_file_registers_nothing(monkeypatch, tmp_path, isolated_registry) -> None:
     """新文件注册一半后抛错：已注册的部分被清除，其余插件不受影响。"""
-    _write(tmp_path / "a.py", '@func(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
+    _write(tmp_path / "a.py", '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
 
     _write(
         tmp_path / "broken.py",
-        '@func(label="半成品", description="")\nasync def broken_probe(ctx: dict) -> str:\n    return "b"\n'
+        '@node(label="半成品", description="")\nasync def broken_probe(ctx: dict) -> str:\n    return "b"\n'
         'raise RuntimeError("boom")\n',
     )
     plugin_loader.load_plugins()
@@ -108,13 +108,13 @@ def test_sync_broken_new_file_registers_nothing(monkeypatch, tmp_path, isolated_
 def test_sync_updates_existing_file(monkeypatch, tmp_path, isolated_registry) -> None:
     """同一文件内容变化：新增节点注册进来，删除节点消失。"""
     path = tmp_path / "a.py"
-    _write(path, '@func(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
+    _write(path, '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n')
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
     assert "a_probe" in REGISTRY
 
     # 更新：删除 a_probe，新增 b_probe
-    _rewrite(path, '@func(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
+    _rewrite(path, '@node(label="B", description="")\nasync def b_probe(ctx: dict) -> str:\n    return "b"\n')
     plugin_loader.load_plugins()
 
     assert "a_probe" not in REGISTRY
@@ -126,7 +126,7 @@ def test_sync_updates_existing_file(monkeypatch, tmp_path, isolated_registry) ->
 def test_sync_broken_update_clears_nodes(monkeypatch, tmp_path, isolated_registry) -> None:
     """已加载文件被坏版本覆盖：本文件节点全部消失并记录 error，修复后重载恢复。"""
     path = tmp_path / "a.py"
-    good = '@func(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n'
+    good = '@node(label="A", description="")\nasync def a_probe(ctx: dict) -> str:\n    return "a"\n'
     _write(path, good)
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)  # 模块级路径在 import 时固化，直接 patch
     plugin_loader.load_plugins()
@@ -151,7 +151,7 @@ def test_tracks_tool_only_and_cleans_both_registries(monkeypatch, tmp_path, isol
     path = tmp_path / "toolish.py"
     _write(
         path,
-        '@func(node=False, tool=True, label="仅工具", description="")\n'
+        '@tool(label="仅工具", description="")\n'
         "async def tool_probe(ctx: dict) -> str:\n    return \"t\"\n",
     )
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)
@@ -176,7 +176,7 @@ def test_cross_registry_name_conflict(monkeypatch, tmp_path, isolated_registry) 
     monkeypatch.setattr(plugin_loader, "plugins_dir", tmp_path)
     _write(
         tmp_path / "clash.py",
-        '@func(label="撞名", description="")\n'
+        '@node(label="撞名", description="")\n'
         "async def shared_probe(ctx: dict) -> str:\n    return \"x\"\n",
     )
     plugin_loader.load_plugins()

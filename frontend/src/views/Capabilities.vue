@@ -17,10 +17,9 @@ import NodeTypeCard from '@/components/NodeTypeCard.vue'
 import McpServerForm from '@/components/McpServerForm.vue'
 import SkillForm from '@/components/SkillForm.vue'
 
-type TabName = 'catalog' | 'skills'
-type RoleFilter = 'all' | 'node' | 'tool'
+type TabName = 'nodes' | 'tools' | 'skills'
 
-const activeTab = ref<TabName>('catalog')
+const activeTab = ref<TabName>('nodes')
 const nodeTypes = ref<NodeTypeInfo[]>([])
 const tools = ref<ToolOut[]>([])
 const skills = ref<SkillDef[]>([])
@@ -33,10 +32,10 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const guideOpen = ref(false)
 const mcpBusy = ref('')
 
-const roleFilter = ref<RoleFilter>('all')
-const searchQuery = ref('')
+const nodeSearch = ref('')
+const toolSearch = ref('')
 
-/** 名录条目：节点与工具并集（双端注册的 FuncDef 只出现一次） */
+/** 名录条目 */
 interface SourceInfo { kind: 'builtin' | 'plugin' | 'mcp' | 'pipeline'; name: string }
 
 interface CatalogItem {
@@ -46,7 +45,6 @@ interface CatalogItem {
   metadata?: Record<string, any>
   input_schema?: NodeTypeInfo['input_schema']
   output_schema?: NodeTypeInfo['output_schema']
-  roles?: string[]
   source?: SourceInfo
 }
 
@@ -54,64 +52,46 @@ function catalogKey(t: { name: string; source?: SourceInfo }): string {
   return `${t.name}::${t.source?.kind ?? 'builtin'}::${t.source?.name ?? ''}`
 }
 
-/** 一张名录：REGISTRY 与 TOOL_REGISTRY 的并集，source / roles 由前端推算 */
-const catalogItems = computed<CatalogItem[]>(() => {
-  // 从 plugins / mcpServers 构建 name → source 索引
-  const srcMap = new Map<string, SourceInfo>()
+/** 构建 source 索引 */
+function buildSrcMap(): Map<string, SourceInfo> {
+  const m = new Map<string, SourceInfo>()
   for (const p of plugins.value)
-    for (const n of p.node_names) srcMap.set(n, { kind: 'plugin', name: p.filename })
+    for (const n of p.node_names) m.set(n, { kind: 'plugin', name: p.filename })
   for (const p of plugins.value)
-    for (const n of p.tool_names) srcMap.set(n, { kind: 'plugin', name: p.filename })
+    for (const n of p.tool_names) m.set(n, { kind: 'plugin', name: p.filename })
   for (const s of mcpServers.value)
-    for (const n of s.tool_names) srcMap.set(n, { kind: 'mcp', name: s.name })
+    for (const n of s.tool_names) m.set(n, { kind: 'mcp', name: s.name })
+  // 从 REGISTRY 和 TOOL_REGISTRY 两侧收集 pipeline 来源
+  for (const t of nodeTypes.value)
+    if (t.metadata?.source === 'pipeline') m.set(t.name, { kind: 'pipeline', name: t.name })
   for (const t of tools.value)
-    if (t.metadata?.source === 'pipeline') srcMap.set(t.name, { kind: 'pipeline', name: t.name })
-
-  const toolSet = new Set(tools.value.map((t) => t.name))
-  const map = new Map<string, CatalogItem>()
-  for (const t of nodeTypes.value) {
-    const roles: string[] = toolSet.has(t.name) ? ['node', 'tool'] : ['node']
-    map.set(catalogKey(t), { ...t, roles, source: srcMap.get(t.name) })
-  }
-  for (const t of tools.value) {
-    const k = catalogKey(t)
-    if (map.has(k)) continue
-    map.set(k, { ...t, roles: ['tool'], source: srcMap.get(t.name) })
-  }
-  return [...map.values()]
-})
-
-function hasRole(t: CatalogItem, role: string): boolean {
-  return (t.roles ?? []).includes(role)
+    if (t.metadata?.source === 'pipeline') m.set(t.name, { kind: 'pipeline', name: t.name })
+  return m
 }
 
-const roleCounts = computed(() => ({
-  all: catalogItems.value.length,
-  node: catalogItems.value.filter((t) => hasRole(t, 'node')).length,
-  tool: catalogItems.value.filter((t) => hasRole(t, 'tool')).length,
-}))
-
-const filteredItems = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  return catalogItems.value.filter((t) => {
-    if (roleFilter.value !== 'all' && !hasRole(t, roleFilter.value)) return false
-    if (q) {
-      const hay = `${t.name} ${t.label} ${t.description}`.toLowerCase()
-      if (!hay.includes(q)) return false
-    }
-    return true
-  })
+/** 节点名录（REGISTRY） */
+const nodeItems = computed<CatalogItem[]>(() => {
+  const srcMap = buildSrcMap()
+  return nodeTypes.value.map((t) => ({ ...t, source: srcMap.get(t.name) }))
 })
 
-/**
- * 分组：内置跟 metadata.group（域分组）；脚本按文件、MCP 按服务器。
- * 脚本/MCP 是装载单位，管理动作（删除/重连/启停）就挂在组头上。
- */
+/** 工具名录（TOOL_REGISTRY） */
+const toolItems = computed<CatalogItem[]>(() => {
+  const srcMap = buildSrcMap()
+  return tools.value.map((t) => ({ ...t, source: srcMap.get(t.name) }))
+})
+
+function matchSearch(item: CatalogItem, q: string): boolean {
+  if (!q) return true
+  const hay = `${item.name} ${item.label} ${item.description}`.toLowerCase()
+  return hay.includes(q)
+}
+
 interface CatalogGroup {
   key: string
   name: string
   items: CatalogItem[]
-  kind: 'domain' | 'script' | 'mcp'
+  kind: 'domain' | 'script' | 'mcp' | 'workflow'
   plugin?: PluginInfo
   server?: McpServer
 }
@@ -120,66 +100,69 @@ function domainGroupOf(t: CatalogItem): string {
   return t.metadata?.group || '其他'
 }
 
-const catalogGroups = computed<CatalogGroup[]>(() => {
-  const bySource = (kind: string, name: string) =>
-    filteredItems.value.filter((t) => t.source?.kind === kind && t.source?.name === name)
+const sortItems = (items: CatalogItem[]) =>
+  items.sort((a, b) => {
+    const oa = a.metadata?.order ?? 999
+    const ob = b.metadata?.order ?? 999
+    return oa !== ob ? oa - ob : a.name.localeCompare(b.name)
+  })
+
+/** 构建分组（通用：按 source.kind 区分域/脚本/工作流/MCP） */
+function buildGroups(items: CatalogItem[], q: string, extraKinds: ('mcp' | 'workflow')[] = []): CatalogGroup[] {
+  const filtered = items.filter((t) => matchSearch(t, q))
 
   // 内置：域分组
   const domainMap = new Map<string, CatalogItem[]>()
-  for (const t of filteredItems.value) {
+  for (const t of filtered) {
     if (t.source?.kind === 'plugin' || t.source?.kind === 'mcp' || t.source?.kind === 'pipeline') continue
     const g = domainGroupOf(t)
     if (!domainMap.has(g)) domainMap.set(g, [])
     domainMap.get(g)!.push(t)
   }
-  const sortItems = (items: CatalogItem[]) =>
-    items.sort((a, b) => {
-      const oa = a.metadata?.order ?? 999
-      const ob = b.metadata?.order ?? 999
-      return oa !== ob ? oa - ob : a.name.localeCompare(b.name)
-    })
-  const domains: CatalogGroup[] = [...domainMap.entries()].map(([name, items]) => ({
-    key: `domain::${name}`,
-    name,
-    items: sortItems(items),
-    kind: 'domain' as const,
+  const domains: CatalogGroup[] = [...domainMap.entries()].map(([name, grp]) => ({
+    key: `domain::${name}`, name, items: sortItems(grp), kind: 'domain' as const,
   }))
 
-  // 自定义脚本：按文件一组（含 0 条目的，管理入口不能消失）
+  // 自定义脚本：按文件一组
   const scripts: CatalogGroup[] = plugins.value.map((p) => ({
-    key: `script::${p.filename}`,
-    name: p.filename,
-    items: sortItems(bySource('plugin', p.filename)),
-    kind: 'script' as const,
-    plugin: p,
-  }))
-
-  // MCP：按服务器一组
-  const mcp: CatalogGroup[] = mcpServers.value.map((s) => ({
-    key: `mcp::${s.name}`,
-    name: s.name,
-    items: sortItems(bySource('mcp', s.name)),
-    kind: 'mcp' as const,
-    server: s,
+    key: `script::${p.filename}`, name: p.filename,
+    items: sortItems(filtered.filter((t) => t.source?.kind === 'plugin' && t.source?.name === p.filename)),
+    kind: 'script' as const, plugin: p,
   }))
 
   // 工作流
-  const workflows: CatalogGroup[] = [{
-    key: 'workflow::all',
-    name: '工作流',
-    items: sortItems(filteredItems.value.filter((t) => t.source?.kind === 'pipeline')),
+  const workflows: CatalogGroup[] = extraKinds.includes('workflow') ? [{
+    key: 'workflow::all', name: '工作流',
+    items: sortItems(filtered.filter((t) => t.source?.kind === 'pipeline')),
     kind: 'workflow' as const,
-  }]
+  }] : []
 
-  return [...domains, ...scripts, ...mcp, ...workflows]
-})
+  // MCP
+  const mcp: CatalogGroup[] = extraKinds.includes('mcp') ? mcpServers.value.map((s) => ({
+    key: `mcp::${s.name}`, name: s.name,
+    items: sortItems(filtered.filter((t) => t.source?.kind === 'mcp' && t.source?.name === s.name)),
+    kind: 'mcp' as const, server: s,
+  })) : []
 
-/** MCP 组默认折叠（Notion 一来就是 24 个工具）；搜索时自动展开命中所在的组 */
+  return [...domains, ...scripts, ...workflows, ...mcp]
+}
+
+const nodeGroups = computed(() => buildGroups(nodeItems.value, nodeSearch.value.trim().toLowerCase(), ['workflow']))
+const toolGroups = computed(() => buildGroups(toolItems.value, toolSearch.value.trim().toLowerCase(), ['workflow', 'mcp']))
+
+const nodeBuiltinCount = computed(() =>
+  nodeItems.value.filter((t) => !t.source?.kind || t.source.kind === 'builtin').length,
+)
+const toolBuiltinCount = computed(() =>
+  toolItems.value.filter((t) => !t.source?.kind || t.source.kind === 'builtin').length,
+)
+
+/** MCP 组默认折叠；搜索时自动展开 */
 const expandedGroups = ref<Set<string>>(new Set())
 
-function isGroupOpen(g: CatalogGroup): boolean {
+function isGroupOpen(g: CatalogGroup, search: string): boolean {
   if (g.kind === 'domain' || g.kind === 'script') return true
-  if (searchQuery.value.trim()) return true
+  if (search.trim()) return true
   return expandedGroups.value.has(g.key)
 }
 
@@ -191,9 +174,7 @@ function toggleGroup(g: CatalogGroup) {
   expandedGroups.value = next
 }
 
-const filtersActive = computed(() => roleFilter.value !== 'all' || searchQuery.value.trim() !== '')
-
-/** 四个区默认折叠，展开只影响显示不改数据 */
+/** 分区折叠状态 */
 const collapsedSections = ref<Set<string>>(new Set(['builtin', 'workflows', 'scripts', 'mcp']))
 
 function isSectionCollapsed(key: string): boolean {
@@ -205,24 +186,6 @@ function toggleSection(key: string) {
   if (next.has(key)) next.delete(key)
   else next.add(key)
   collapsedSections.value = next
-}
-
-const builtinCount = computed(
-  () => filteredItems.value.filter((t) => !t.source?.kind || t.source.kind === 'builtin').length,
-)
-const pluginItemCount = computed(
-  () => filteredItems.value.filter((t) => t.source?.kind === 'plugin').length,
-)
-const mcpItemCount = computed(
-  () => filteredItems.value.filter((t) => t.source?.kind === 'mcp').length,
-)
-const workflowItemCount = computed(
-  () => filteredItems.value.filter((t) => t.source?.kind === 'pipeline').length,
-)
-
-function resetFilters() {
-  roleFilter.value = 'all'
-  searchQuery.value = ''
 }
 
 /** 技能正文默认折叠 */
@@ -529,37 +492,16 @@ onMounted(fetchAll)
     </header>
 
     <el-tabs v-model="activeTab" class="cap-tabs">
-      <!-- ==================== 节点与工具 ==================== -->
-      <el-tab-pane label="节点与工具" name="catalog">
-        <p class="lead">
-          节点供工作流 YAML 以 <code>type:</code> 引用，工具供智能体 function calling 调用。同一个函数可以两端都注册。
-        </p>
+      <!-- ==================== 节点 ==================== -->
+      <el-tab-pane label="节点" name="nodes">
+        <p class="lead">节点供工作流 YAML 以 <code>type:</code> 引用，是 DAG 引擎的执行步骤。</p>
 
-        <!-- 筛选：用途 chip + 搜索 -->
         <div class="filter-bar">
-          <div class="chip-group">
-            <button class="chip" :class="{ on: roleFilter === 'all' }" @click="roleFilter = 'all'">
-              全部 <span class="chip-n">{{ roleCounts.all }}</span>
-            </button>
-            <button class="chip" :class="{ on: roleFilter === 'node' }" @click="roleFilter = 'node'">
-              节点 <span class="chip-n">{{ roleCounts.node }}</span>
-            </button>
-            <button class="chip" :class="{ on: roleFilter === 'tool' }" @click="roleFilter = 'tool'">
-              工具 <span class="chip-n">{{ roleCounts.tool }}</span>
-            </button>
-          </div>
-          <el-input
-            v-model="searchQuery"
-            class="search"
-            placeholder="搜索 名称/描述"
-            clearable
-            :prefix-icon="() => null"
-          />
+          <el-input v-model="nodeSearch" class="search" placeholder="搜索 名称/描述" clearable :prefix-icon="() => null" />
         </div>
 
-        <!-- 名录 -->
         <div v-loading="loading">
-          <!-- 内置：随代码走，不可装卸 -->
+          <!-- 内置 -->
           <div class="top-section">
             <div class="source-head">
               <h3 class="source-title" @click="toggleSection('builtin')">
@@ -567,11 +509,11 @@ onMounted(fetchAll)
                   <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 内置
-                <span class="group-count">{{ builtinCount }}</span>
+                <span class="group-count">{{ nodeBuiltinCount }}</span>
               </h3>
             </div>
             <template v-if="!isSectionCollapsed('builtin')">
-              <div v-for="g in catalogGroups.filter((x) => x.kind === 'domain')" :key="g.key" class="group-section">
+              <div v-for="g in nodeGroups.filter((x) => x.kind === 'domain')" :key="g.key" class="group-section">
                 <h3 class="group-title">
                   <span class="group-name">{{ g.name }}</span>
                   <span class="group-count">{{ g.items.length }}</span>
@@ -580,7 +522,7 @@ onMounted(fetchAll)
                   <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
                 </div>
               </div>
-              <div v-if="!catalogGroups.some((x) => x.kind === 'domain')" class="group-empty muted">无内置条目</div>
+              <div v-if="!nodeGroups.some((x) => x.kind === 'domain')" class="group-empty muted">无内置节点</div>
             </template>
           </div>
 
@@ -592,11 +534,106 @@ onMounted(fetchAll)
                   <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 工作流
-                <span class="group-count">{{ workflowItemCount }}</span>
+                <span class="group-count">{{ nodeGroups.find((x) => x.kind === 'workflow')?.items.length ?? 0 }}</span>
               </h3>
             </div>
             <template v-if="!isSectionCollapsed('workflows')">
-              <div v-for="g in catalogGroups.filter((x) => x.kind === 'workflow')" :key="g.key" class="group-section">
+              <div v-for="g in nodeGroups.filter((x) => x.kind === 'workflow')" :key="g.key" class="group-section">
+                <div v-if="g.items.length" class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+                </div>
+                <div v-else class="group-empty muted">无工作流节点</div>
+              </div>
+            </template>
+          </div>
+
+          <!-- 自定义脚本 -->
+          <div class="top-section">
+            <div class="source-head">
+              <h3 class="source-title" @click="toggleSection('scripts')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('scripts') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                自定义脚本
+                <span class="group-count">{{ nodeGroups.filter((x) => x.kind === 'script').reduce((n, g) => n + g.items.length, 0) }}</span>
+              </h3>
+              <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
+              <el-button type="primary" size="small" :loading="uploading" @click="fileInput?.click()">上传脚本</el-button>
+              <span class="guide-link" @click="guideOpen = true">编写指南</span>
+            </div>
+            <template v-if="!isSectionCollapsed('scripts')">
+              <p class="source-note">用 <code>@node</code> / <code>@node_and_tool</code> 写的 <code>.py</code> 文件 · 上传后自动热加载</p>
+              <div v-for="g in nodeGroups.filter((x) => x.kind === 'script')" :key="g.key" class="group-section">
+                <h3 class="group-title with-actions">
+                  <span class="group-name mono">{{ g.name }}</span>
+                  <el-tag v-if="g.plugin?.error" type="danger" size="small" disable-transitions>加载失败</el-tag>
+                  <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
+                  <span class="group-count">{{ g.items.length }} 个节点</span>
+                  <span class="group-actions">
+                    <el-button class="btn-soft btn-soft--danger" size="small" @click.stop="g.plugin && handleDeletePlugin(g.plugin)">删除</el-button>
+                  </span>
+                </h3>
+                <div v-if="g.plugin?.error" class="group-error">{{ g.plugin.error }}</div>
+                <div v-if="g.items.length" class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="plugin" />
+                </div>
+                <div v-else-if="!g.plugin?.error" class="group-empty muted">无注册节点</div>
+              </div>
+              <div v-if="!plugins.length" class="muted source-empty">暂无自定义脚本</div>
+            </template>
+          </div>
+
+          <div v-if="!nodeItems.length && !loading" class="empty">暂无节点</div>
+        </div>
+      </el-tab-pane>
+
+      <!-- ==================== 工具 ==================== -->
+      <el-tab-pane label="工具" name="tools">
+        <p class="lead">工具供智能体 function calling 调用，是 Agent 的原子操作能力。</p>
+
+        <div class="filter-bar">
+          <el-input v-model="toolSearch" class="search" placeholder="搜索 名称/描述" clearable :prefix-icon="() => null" />
+        </div>
+
+        <div v-loading="loading">
+          <!-- 内置 -->
+          <div class="top-section">
+            <div class="source-head">
+              <h3 class="source-title" @click="toggleSection('builtin')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('builtin') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                内置
+                <span class="group-count">{{ toolBuiltinCount }}</span>
+              </h3>
+            </div>
+            <template v-if="!isSectionCollapsed('builtin')">
+              <div v-for="g in toolGroups.filter((x) => x.kind === 'domain')" :key="g.key" class="group-section">
+                <h3 class="group-title">
+                  <span class="group-name">{{ g.name }}</span>
+                  <span class="group-count">{{ g.items.length }}</span>
+                </h3>
+                <div class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+                </div>
+              </div>
+              <div v-if="!toolGroups.some((x) => x.kind === 'domain')" class="group-empty muted">无内置工具</div>
+            </template>
+          </div>
+
+          <!-- 工作流 -->
+          <div class="top-section">
+            <div class="section-head">
+              <h3 class="source-title" @click="toggleSection('workflows')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('workflows') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                工作流
+                <span class="group-count">{{ toolGroups.find((x) => x.kind === 'workflow')?.items.length ?? 0 }}</span>
+              </h3>
+            </div>
+            <template v-if="!isSectionCollapsed('workflows')">
+              <div v-for="g in toolGroups.filter((x) => x.kind === 'workflow')" :key="g.key" class="group-section">
                 <div v-if="g.items.length" class="node-grid">
                   <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
                 </div>
@@ -605,7 +642,7 @@ onMounted(fetchAll)
             </template>
           </div>
 
-          <!-- 自定义脚本：按文件一组，管理挂在组头 -->
+          <!-- 自定义脚本 -->
           <div class="top-section">
             <div class="source-head">
               <h3 class="source-title" @click="toggleSection('scripts')">
@@ -613,36 +650,35 @@ onMounted(fetchAll)
                   <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 自定义脚本
-                <span class="group-count">{{ pluginItemCount }}</span>
+                <span class="group-count">{{ toolGroups.filter((x) => x.kind === 'script').reduce((n, g) => n + g.items.length, 0) }}</span>
               </h3>
               <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
               <el-button type="primary" size="small" :loading="uploading" @click="fileInput?.click()">上传脚本</el-button>
               <span class="guide-link" @click="guideOpen = true">编写指南</span>
             </div>
             <template v-if="!isSectionCollapsed('scripts')">
-            <p class="source-note">用 <code>@func</code> 写的 <code>.py</code> 文件 · 上传后自动热加载，函数会成为节点和工具</p>
-
-            <div v-for="g in catalogGroups.filter((x) => x.kind === 'script')" :key="g.key" class="group-section">
-              <h3 class="group-title with-actions">
-                <span class="group-name mono">{{ g.name }}</span>
-                <el-tag v-if="g.plugin?.error" type="danger" size="small" disable-transitions>加载失败</el-tag>
-                <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
-                <span class="group-count">节点 {{ g.plugin?.node_names.length ?? 0 }} · 工具 {{ g.plugin?.tool_names?.length ?? 0 }}</span>
-                <span class="group-actions">
-                  <el-button class="btn-soft btn-soft--danger" size="small" @click.stop="g.plugin && handleDeletePlugin(g.plugin)">删除</el-button>
-                </span>
-              </h3>
-              <div v-if="g.plugin?.error" class="group-error">{{ g.plugin.error }}</div>
-              <div v-if="g.items.length" class="node-grid">
-                <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="plugin" />
+              <p class="source-note">用 <code>@tool</code> / <code>@node_and_tool</code> 写的 <code>.py</code> 文件 · 上传后自动热加载</p>
+              <div v-for="g in toolGroups.filter((x) => x.kind === 'script')" :key="g.key" class="group-section">
+                <h3 class="group-title with-actions">
+                  <span class="group-name mono">{{ g.name }}</span>
+                  <el-tag v-if="g.plugin?.error" type="danger" size="small" disable-transitions>加载失败</el-tag>
+                  <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
+                  <span class="group-count">{{ g.items.length }} 个工具</span>
+                  <span class="group-actions">
+                    <el-button class="btn-soft btn-soft--danger" size="small" @click.stop="g.plugin && handleDeletePlugin(g.plugin)">删除</el-button>
+                  </span>
+                </h3>
+                <div v-if="g.plugin?.error" class="group-error">{{ g.plugin.error }}</div>
+                <div v-if="g.items.length" class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="plugin" />
+                </div>
+                <div v-else-if="!g.plugin?.error" class="group-empty muted">无注册工具</div>
               </div>
-              <div v-else-if="!g.plugin?.error" class="group-empty muted">无注册条目</div>
-            </div>
-            <div v-if="!plugins.length" class="muted source-empty">暂无自定义脚本</div>
+              <div v-if="!plugins.length" class="muted source-empty">暂无自定义脚本</div>
             </template>
           </div>
 
-          <!-- MCP 服务器：按服务器一组 -->
+          <!-- MCP 服务器 -->
           <div class="top-section">
             <div class="source-head">
               <h3 class="source-title" @click="toggleSection('mcp')">
@@ -650,56 +686,47 @@ onMounted(fetchAll)
                   <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 MCP 服务器
-                <span class="group-count">{{ mcpItemCount }}</span>
+                <span class="group-count">{{ toolGroups.filter((x) => x.kind === 'mcp').reduce((n, g) => n + g.items.length, 0) }}</span>
               </h3>
               <el-button type="primary" size="small" @click="openMcpCreate">新建</el-button>
               <el-button class="btn-soft" size="small" :loading="mcpBusy === '__all__'" @click="handleReconnectAll">全部重连</el-button>
             </div>
             <template v-if="!isSectionCollapsed('mcp')">
-            <p class="source-note">接入外部工具服务，供智能体调用 · 新建 / 编辑 / 删除 / 启停即时生效</p>
-
-            <div v-for="g in catalogGroups.filter((x) => x.kind === 'mcp')" :key="g.key" class="group-section">
-              <h3 class="group-title with-actions collapsible" @click="toggleGroup(g)">
-                <svg class="chev" :class="{ open: isGroupOpen(g) }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                <span class="group-name mono">{{ g.name }}</span>
-                <el-tag size="small" class="transport-tag" disable-transitions>{{ g.server?.transport }}</el-tag>
-                <el-tag size="small" :type="statusMeta[g.server?.status ?? '']?.type ?? 'info'" disable-transitions>
-                  {{ statusMeta[g.server?.status ?? '']?.label ?? g.server?.status }}
-                </el-tag>
-                <span class="group-count">{{ g.items.length }} 个工具</span>
-                <span class="group-actions" @click.stop>
-                  <el-button
-                    v-if="g.server && g.server.status !== 'connected'"
-                    class="btn-soft"
-                    size="small"
-                    :loading="mcpBusy === g.name"
-                    @click="handleReconnect(g.server)"
-                  >重连</el-button>
-                  <el-button class="btn-soft" size="small" @click="g.server && openMcpEdit(g.server)">编辑</el-button>
-                  <el-button class="btn-soft btn-soft--danger" size="small" @click="g.server && handleDeleteMcp(g.server)">删除</el-button>
-                </span>
-              </h3>
-              <div v-if="g.server?.error" class="group-error">{{ g.server.error }}</div>
-              <div v-if="isGroupOpen(g) && g.items.length" class="node-grid">
-                <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+              <p class="source-note">接入外部工具服务，供智能体调用 · 新建 / 编辑 / 删除 / 启停即时生效</p>
+              <div v-for="g in toolGroups.filter((x) => x.kind === 'mcp')" :key="g.key" class="group-section">
+                <h3 class="group-title with-actions collapsible" @click="toggleGroup(g)">
+                  <svg class="chev" :class="{ open: isGroupOpen(g, toolSearch) }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span class="group-name mono">{{ g.name }}</span>
+                  <el-tag size="small" class="transport-tag" disable-transitions>{{ g.server?.transport }}</el-tag>
+                  <el-tag size="small" :type="statusMeta[g.server?.status ?? '']?.type ?? 'info'" disable-transitions>
+                    {{ statusMeta[g.server?.status ?? '']?.label ?? g.server?.status }}
+                  </el-tag>
+                  <span class="group-count">{{ g.items.length }} 个工具</span>
+                  <span class="group-actions" @click.stop>
+                    <el-button
+                      v-if="g.server && g.server.status !== 'connected'"
+                      class="btn-soft"
+                      size="small"
+                      :loading="mcpBusy === g.name"
+                      @click="handleReconnect(g.server)"
+                    >重连</el-button>
+                    <el-button class="btn-soft" size="small" @click="g.server && openMcpEdit(g.server)">编辑</el-button>
+                    <el-button class="btn-soft btn-soft--danger" size="small" @click="g.server && handleDeleteMcp(g.server)">删除</el-button>
+                  </span>
+                </h3>
+                <div v-if="g.server?.error" class="group-error">{{ g.server.error }}</div>
+                <div v-if="isGroupOpen(g, toolSearch) && g.items.length" class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="func" />
+                </div>
+                <div v-else-if="isGroupOpen(g, toolSearch) && !g.items.length" class="group-empty muted">无可用工具</div>
               </div>
-              <div v-else-if="isGroupOpen(g) && !g.items.length" class="group-empty muted">
-                无可用工具
-              </div>
-            </div>
-            <div v-if="!mcpServers.length" class="muted source-empty">未配置 MCP 服务器</div>
+              <div v-if="!mcpServers.length" class="muted source-empty">未配置 MCP 服务器</div>
             </template>
           </div>
 
-          <div v-if="!filteredItems.length && !loading" class="empty">
-            <template v-if="filtersActive">
-              没有匹配的条目
-              <el-button size="small" text type="primary" @click="resetFilters">清除筛选</el-button>
-            </template>
-            <template v-else>暂无节点与工具</template>
-          </div>
+          <div v-if="!toolItems.length && !loading" class="empty">暂无工具</div>
         </div>
       </el-tab-pane>
 
@@ -790,7 +817,7 @@ onMounted(fetchAll)
     <!-- 编写指南 drawer -->
     <el-drawer v-model="guideOpen" title="脚本编写指南" size="min(640px, 90vw)">
       <div class="guide">
-        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@func</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可以在本页「自定义脚本」区直接上传。</p>
+        <p>在 <code>custom_plugins/</code> 目录下创建 <code>.py</code> 文件，用 <code>@node</code> / <code>@tool</code> 装饰器定义函数即可。文件修改后自动热加载，无需重启。也可以在本页「自定义脚本」区直接上传。</p>
 
         <h4 class="guide-h4">示例</h4>
         <pre class="guide-code">from pydantic import BaseModel, Field
@@ -801,22 +828,20 @@ class NotifyInput(BaseModel):
 class NotifyOutput(BaseModel):
     result: str = Field(description="发送结果")
 
-@func(label="发送通知", description="发送通知消息")
+@node_and_tool(label="发送通知", description="发送通知消息")
 async def send_notify(params: NotifyInput) -> NotifyOutput:
     return NotifyOutput(result=f"已发送: {params.message}")</pre>
         <p>函数名 <code>send_notify</code> 即为条目名：工作流 YAML 用 <code>type: send_notify</code> 引用，Agent 侧以同名 function calling 调用。输入输出参数类型都必须是 <code>BaseModel</code> 子类，框架自动推导 JSON Schema。</p>
 
-        <h4 class="guide-h4">注册选项</h4>
+        <h4 class="guide-h4">注册装饰器</h4>
         <table class="guide-table">
-          <thead><tr><th>参数</th><th>默认值</th><th>说明</th></tr></thead>
+          <thead><tr><th>装饰器</th><th>说明</th></tr></thead>
           <tbody>
-            <tr><td><code>label</code></td><td>—</td><td>显示名称（建议填写）</td></tr>
-            <tr><td><code>description</code></td><td>—</td><td>功能描述；作为工具时是 LLM 读的主要依据</td></tr>
-            <tr><td><code>node</code></td><td><code>True</code></td><td>注册为工作流节点</td></tr>
-            <tr><td><code>tool</code></td><td><code>True</code></td><td>注册为 Agent 工具</td></tr>
+            <tr><td><code>@node</code></td><td>注册为工作流节点（DAG 引擎可引用）</td></tr>
+            <tr><td><code>@tool</code></td><td>注册为 Agent 工具（LLM function calling 可调用）</td></tr>
+            <tr><td><code>@node_and_tool</code></td><td>同时注册为节点和工具（元数据只写一遍）</td></tr>
           </tbody>
         </table>
-        <p>两个开关独立：默认两端都注册；<code>node=False</code> 得到仅 Agent 可调用的工具，<code>tool=False</code> 得到仅流程使用的节点。卡片右上角的「仅节点 / 仅工具」就来自这两个开关——两端都注册时不标。</p>
 
         <h4 class="guide-h4">规则</h4>
         <ul class="guide-rules">

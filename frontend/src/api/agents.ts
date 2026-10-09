@@ -12,6 +12,7 @@ export interface AgentListItem {
   model: string
   tools: string[]
   skills: string[]
+  tags: string[]
   created_at: string | null
   updated_at: string | null
 }

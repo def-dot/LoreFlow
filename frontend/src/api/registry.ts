@@ -52,3 +52,7 @@ export function listTools(): Promise<FuncInfo[]> {
 export function listModels(): Promise<Record<string, string[]>> {
   return api.get('/models')
 }
+
+export function listBuiltinTools(): Promise<string[]> {
+  return api.get('/builtin-tools')
+}
