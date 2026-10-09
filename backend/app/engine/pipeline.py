@@ -307,7 +307,43 @@ class Pipeline(BaseModel):
 
     # ---- Schema 推导 ----
 
+    def _resolve_ref(self, refs: list[str], errors: list[str], upstream: set[str] | None) -> dict[str, Any] | None:
+        """校验 $ 引用路径列表并返回最后一条的 schema，失败返回 None。"""
+        schema: dict[str, Any] | None = None
+        for ref in refs:
+            parts = ref.split(".")
+            root, segments = parts[0], parts[1:]
+            # 获取根 schema
+            if root == "params":
+                if not self.params:
+                    errors.append(f"引用 ${ref!r}: params 未定义")
+                    return None
+                schema = {"type": "object", "properties": {k: v.model_dump() for k, v in self.params.items()}}
+            elif upstream is not None and root not in upstream:
+                errors.append(f"引用 ${ref!r}: 节点 {root!r} 不是上游依赖")
+                return None
+            else:
+                node = {n.name: n for n in self.nodes}.get(root)
+                if not node:
+                    errors.append(f"引用 ${ref!r}: 节点 {root!r} 不存在")
+                    return None
+                schema = self.get_node_schema(node).output_schema
+                if not schema:
+                    errors.append(f"引用 ${ref!r}: 节点 {root!r} 无 output schema")
+                    return None
+            # 沿路径下钻
+            for seg in segments:
+                props = schema.get("properties")
+                if isinstance(props, dict) and seg in props:
+                    schema = props[seg]
+                else:
+                    errors.append(f"引用 ${ref!r}: 路径段 {seg!r} 不存在")
+                    return None
+        return schema
+
     def get_value_schema(self, value: Any, errors: list[str] | None = None, upstream: set[str] | None = None) -> dict[str, Any] | None:
+        if errors is None:
+            errors = []
         """返回值的 JSON Schema（$引用解析路径，字面量推断类型）。"""
         # 嵌套 dict：递归推断每个属性的 schema
         if isinstance(value, dict):
@@ -329,50 +365,18 @@ class Pipeline(BaseModel):
             if all(s == first for s in schemas):
                 return {"type": "array", "items": first}
             return {"type": "array"}
-        if not isinstance(value, str) or not value.startswith("$"):
+        if not isinstance(value, str):
             return _INFER_SCHEMA.get(type(value).__name__, {"type": "string"})
-        parts = value.lstrip("$").split(".")
-        root, segments = parts[0], parts[1:]
-
-        if root == "params":
-            if not self.params:
-                if errors is not None:
-                    errors.append(f"引用 {value!r}: params 未定义")
-                return None
-            root_schema: dict[str, Any] | None = {
-                "type": "object",
-                "properties": {k: v.model_dump() for k, v in self.params.items()},
-            }
-        else:
-            if upstream is not None and root not in upstream:
-                if errors is not None:
-                    errors.append(f"引用 {value!r}: 节点 {root!r} 不是上游依赖")
-                return None
-            nodes_dict = {n.name: n for n in self.nodes}
-            node = nodes_dict.get(root)
-            if not node:
-                if errors is not None:
-                    errors.append(f"引用 {value!r}: 节点 {root!r} 不存在")
-                return None
-            root_schema = self.get_node_schema(node).output_schema
-            if not root_schema:
-                if errors is not None:
-                    errors.append(f"引用 {value!r}: 节点 {root!r} 无 output schema")
-                return None
-
-        if not segments:
-            return root_schema
-
-        schema: dict[str, Any] = root_schema
-        for seg in segments:
-            props = schema.get("properties")
-            if isinstance(props, dict) and seg in props:
-                schema = props[seg]
-            else:
-                if errors is not None:
-                    errors.append(f"引用 {value!r}: 路径段 {seg!r} 不存在")
-                return None
-        return schema
+        from .types import _REF_RE
+        # 纯引用：返回目标 schema（保持类型）
+        m = _REF_RE.fullmatch(value)
+        if m:
+            return self._resolve_ref([m.group(1)], errors, upstream)
+        # 内嵌引用或无引用：string
+        refs = _REF_RE.findall(value)
+        if refs and self._resolve_ref(refs, errors, upstream) is None:
+            return None
+        return {"type": "string"}
 
     def get_node_schema(self, node: Node) -> NodeSchema:
         """获取节点实例的 input/output schema（per-instance，处理动态类型）。"""

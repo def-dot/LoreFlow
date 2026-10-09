@@ -2,6 +2,7 @@
 Core types for the DAG Flow orchestration engine.
 """
 
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -56,18 +57,34 @@ class SuspendExecution(BaseException):
 # ---------------------------------------------------------------------------
 
 
+_REF_RE = re.compile(r"\$([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)")
+
+
 def resolve_ref(ctx: dict[str, Any], value: Any) -> Any:
-    """递归解析 value 中的 $ 引用（$a.b.c → ctx["a"]["b"]["c"]）。"""
+    """递归解析 value 中的 $ 引用。
+
+    - 纯引用 ``$a.b.c`` → 返回原始值（保持类型）。
+    - 内嵌引用 ``"前置 $a.b 后缀"`` → 字符串替换。
+    """
     if isinstance(value, dict):
         return {k: resolve_ref(ctx, v) for k, v in value.items()}
     if isinstance(value, list):
         return [resolve_ref(ctx, v) for v in value]
-    if not isinstance(value, str) or not value.startswith("$"):
+    if not isinstance(value, str):
         return value
-    parts = value.lstrip("$").split(".")
-    val: Any = ctx
-    for part in parts:
-        if not isinstance(val, dict) or part not in val:
-            raise KeyError(f"$ 引用解析失败：{value!r}，无法取 {part!r}")
-        val = val[part]
-    return val
+
+    def _deref(ref: str) -> Any:
+        parts = ref.split(".")
+        v: Any = ctx
+        for part in parts:
+            if not isinstance(v, dict) or part not in v:
+                raise KeyError(f"$ 引用解析失败：${ref!r}，无法取 {part!r}")
+            v = v[part]
+        return v
+
+    # 纯引用：保持原始类型
+    m = _REF_RE.fullmatch(value)
+    if m:
+        return _deref(m.group(1))
+    # 内嵌引用：字符串替换
+    return _REF_RE.sub(lambda m: str(_deref(m.group(1))), value)

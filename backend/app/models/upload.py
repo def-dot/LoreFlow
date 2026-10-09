@@ -11,7 +11,7 @@ class UploadRecord(SQLModel, table=True):
     __tablename__ = "uploads"
 
     id: int = Field(primary_key=True)
-    stored_name: str = Field(unique=True)  # UUID 文件名，如 "a1b2c3d4.txt"
+    stored_name: str = Field(unique=True)  # 相对路径，如 "uploads/a1b2c3d4.txt"
     filename: str                          # 原始文件名，如 "我的文档.txt"
     size: int                              # 文件大小（字节）
     created_at: datetime = Field(default_factory=datetime.now)
