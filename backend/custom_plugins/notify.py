@@ -4,7 +4,7 @@ from email.mime.text import MIMEText
 
 from pydantic import BaseModel, Field
 
-from app.registry import func
+from app.registry import node
 
 
 class SendEmailInput(BaseModel):
@@ -17,10 +17,9 @@ class SendEmailOutput(BaseModel):
     result: str = Field(description="发送结果")
 
 
-@func(
+@node(
     label="发送邮件",
     description="通过 SMTP 发送邮件",
-    tool=False,
 )
 async def send_email(params: SendEmailInput) -> SendEmailOutput:
     """动作节点：发送邮件。
@@ -62,10 +61,9 @@ class SendMessageOutput(BaseModel):
     result: str = Field(description="发送结果")
 
 
-@func(
+@node(
     label="发送短信",
     description="通过 HTTP API 发送短信",
-    tool=False,
 )
 async def send_message(params: SendMessageInput) -> SendMessageOutput:
     """动作节点：调用短信 API。

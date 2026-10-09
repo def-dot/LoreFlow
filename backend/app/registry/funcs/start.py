@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from ..types import func
+from ..types import node
 
 
 class StartParams(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-# @func(node=True, tool=False, label="输入", metadata={"group": "基础", "order": 1})
+# @node(label="输入", metadata={"group": "基础", "order": 1})
 # async def start(params: StartParams) -> StartParams:
 #     """透传外部输入，供下游节点通过 $ 引用取值。"""
 #     return params

@@ -70,6 +70,39 @@ REGISTRY: dict[str, FuncDef] = {}
 TOOL_REGISTRY: dict[str, FuncDef] = {}
 
 
+def _build_funcdef(
+    fn: Callable[..., Any],
+    label: str = "",
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> FuncDef:
+    """从函数构建 FuncDef（提取 input_schema / output_schema）。"""
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:
+        hints = {}
+
+    input_schema = None
+    for pname in inspect.signature(fn).parameters:
+        ann = hints.get(pname)
+        if ann is not None and isinstance(ann, type) and issubclass(ann, BaseModel):
+            input_schema = ann.model_json_schema()
+            break
+
+    ret = hints.get("return")
+    output_schema = ret.model_json_schema() if isinstance(ret, type) and issubclass(ret, BaseModel) else None
+
+    return FuncDef(
+        name=fn.__name__,
+        func=fn,
+        label=label,
+        description=description,
+        metadata=metadata or {},
+        input_schema=input_schema,
+        output_schema=output_schema,
+    )
+
+
 def func(
     label: str = "",
     description: str = "",
@@ -77,40 +110,46 @@ def func(
     node: bool = True,
     tool: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """统一注册装饰器：同时注册到 REGISTRY 和 TOOL_REGISTRY。
-    """
+    """统一注册装饰器：同时注册到 REGISTRY 和 TOOL_REGISTRY（向后兼容）。"""
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        try:
-            hints = typing.get_type_hints(fn)
-        except Exception:
-            hints = {}
-
-        input_schema = None
-        for pname in inspect.signature(fn).parameters:
-            ann = hints.get(pname)
-            if ann is not None and isinstance(ann, type) and issubclass(ann, BaseModel):
-                input_schema = ann.model_json_schema()
-                break
-
-        ret = hints.get("return")
-        output_schema = ret.model_json_schema() if isinstance(ret, type) and issubclass(ret, BaseModel) else None
-
-        fd = FuncDef(
-            name=fn.__name__,
-            func=fn,
-            label=label,
-            description=description,
-            metadata=metadata or {},
-            input_schema=input_schema,
-            output_schema=output_schema,
-        )
-
+        fd = _build_funcdef(fn, label, description, metadata)
         if node:
             REGISTRY[fd.name] = fd
         if tool:
             TOOL_REGISTRY[fd.name] = fd
+        setattr(fn, "__func_def__", fd)
+        return fn
 
+    return decorator
+
+
+def node(
+    label: str = "",
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """注册为 DAG 节点（仅 REGISTRY）。"""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        fd = _build_funcdef(fn, label, description, metadata)
+        REGISTRY[fd.name] = fd
+        setattr(fn, "__func_def__", fd)
+        return fn
+
+    return decorator
+
+
+def tool(
+    label: str = "",
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """注册为 Agent 工具（仅 TOOL_REGISTRY）。"""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        fd = _build_funcdef(fn, label, description, metadata)
+        TOOL_REGISTRY[fd.name] = fd
         setattr(fn, "__func_def__", fd)
         return fn
 

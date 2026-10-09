@@ -7,7 +7,7 @@ RAG 节点 — 知识库检索。
 
 from pydantic import BaseModel, Field
 
-from app.registry.types import func
+from app.registry.types import node
 from app.services import knowledge
 
 
@@ -28,7 +28,7 @@ class SearchKnowledgeParams(BaseModel):
     tags: list[str] = Field(default_factory=list, description="按标签名称筛选，为空则检索全部")
 
 
-@func(
+@node(
     label="检索知识库",
     description=(
         "从知识库中检索与问题最相关的文档片段。"

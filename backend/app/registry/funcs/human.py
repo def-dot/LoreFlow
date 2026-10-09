@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.engine.types import SuspendExecution
-from app.registry.types import func
+from app.registry.types import node
 
 
 class HumanInput(BaseModel):
@@ -23,8 +23,7 @@ class HumanOutput(BaseModel):
 logger = logging.getLogger(__name__)
 
 
-@func(
-    tool=False,
+@node(
     label="人工审核",
     description="人工审核节点，暂停等待审批",
     metadata={"group": "基础", "order": 10},

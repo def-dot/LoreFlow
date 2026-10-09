@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.registry.types import func
+from app.registry.types import node
 from app.services.llm import llm_chat_call
 from app.services.agent_tools import build_skill_prompt, build_tools, execute_tool_call
 
@@ -32,7 +32,7 @@ class AgentOutput(BaseModel):
     messages: list[dict[str, Any]] = Field(description="完整会话记录")
 
 
-@func(
+@node(
     label="智能代理",
     description="LLM 自动调用工具循环执行，直到无需工具或达到最大迭代次数",
     metadata={"group": "LLM", "order": 10},
@@ -53,10 +53,8 @@ async def agent(params: AgentParams) -> AgentOutput:
     parts.append(f"用户问题：{params.prompt}")
     messages.append({"role": "user", "content": "\n\n".join(parts)})
 
-    # --- 构建工具列表（有 skills 时自动注入 load_skill）---
+    # --- 构建工具列表（含内置工具）---
     tool_names: list[str] = list(params.tools or [])
-    if params.skills and "*" not in tool_names and "load_skill" not in tool_names:
-        tool_names.append("load_skill")
     tool_defs, pipeline_prompt = await build_tools(tool_names)
 
     # --- 技能目录 + pipeline 目录 + system prompt 注入首条 ---

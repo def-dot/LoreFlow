@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.services.llm import llm_chat_call
-from app.registry.types import func
+from app.registry.types import node
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class LLMClassifyParams(BaseModel):
     classify_labels: list[str] = Field(default=_CLASSIFY_LABELS, description="可选标签列表")
 
 
-@func(
+@node(
     label="LLM 对话",
     metadata={"group": "LLM", "order": 20},
     description="调用 LLM 模型生成回答",
@@ -67,7 +67,7 @@ async def llm_chat(params: LLMChatParams) -> LLMChatOutput:
     return LLMChatOutput(content=raw["content"], tool_calls=raw["tool_calls"])
 
 
-@func(
+@node(
     label="意图识别",
     description="通用意图分类器",
     metadata={"group": "LLM", "order": 30},
@@ -111,11 +111,10 @@ class RewriteQueryOutput(BaseModel):
     sub_queries: list[str] = Field(description="拆分后的子问题列表")
 
 
-@func(
+@node(
     label="查询改写",
     description="改写用户问题并拆分为多个检索子问题",
     metadata={"group": "LLM", "order": 35},
-    tool=False,
 )
 async def llm_rewrite_query(params: RewriteQueryParams) -> RewriteQueryOutput:
     user_content = params.query

@@ -17,7 +17,7 @@ from tavily import AsyncTavilyClient
 
 from pydantic import BaseModel, Field
 
-from app.registry.types import func
+from app.registry.types import node, tool
 from app.utils.http import http_client
 
 
@@ -113,7 +113,7 @@ async def _fetch_page(url: str) -> dict[str, str]:
 # HTTP 请求
 # ---------------------------------------------------------------------------
 
-@func(
+@node(
     label="网络请求",
     description="发送 HTTP 请求，返回状态码、响应头和响应体",
     metadata={"group": "基础", "order": 22},
@@ -146,7 +146,12 @@ async def http_request(params: HttpRequestInput) -> HttpRequestOutput:
 # Web 搜索
 # ---------------------------------------------------------------------------
 
-@func(
+@node(
+    label="网络搜索",
+    description="搜索互联网获取最新信息，返回搜索结果列表",
+    metadata={"group": "基础", "order": 23},
+)
+@tool(
     label="网络搜索",
     description="搜索互联网获取最新信息，返回搜索结果列表",
     metadata={"group": "基础", "order": 23},

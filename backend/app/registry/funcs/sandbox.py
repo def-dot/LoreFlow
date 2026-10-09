@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ConfigDict
 
 from app.core.config import settings
-from app.registry.types import func
+from app.registry.types import node, tool
 from app.utils.http import http_client
 
 
@@ -29,8 +29,7 @@ class CodeParams(BaseModel):
     timeout: int = Field(default=60, description="超时秒数")
 
 
-@func(
-    tool=False,
+@node(
     label="代码执行",
     description="执行定义了 main 函数的 Python 代码，程序按函数签名自动传参，返回 main 的返回值。",
     metadata={"group": "基础", "order": 19},
@@ -62,8 +61,7 @@ class RunCodeParams(BaseModel):
     timeout: int = Field(default=60, description="超时秒数")
 
 
-@func(
-    node=False,
+@tool(
     label="代码执行",
     description="在沙箱中执行 Python 代码并返回 stdout。如需保存文件，写入 /uploads 目录。",
     metadata={"group": "基础", "order": 20},
@@ -93,8 +91,7 @@ class PipInstallParams(BaseModel):
     packages: str = Field(description="要安装的包名，空格分隔，如 'scipy scikit-learn'", min_length=1)
 
 
-@func(
-    node=False,
+@tool(
     label="依赖安装",
     description="在沙箱中安装 Python 包。run_code 报 ModuleNotFoundError 时用此工具安装缺失包",
     metadata={"group": "基础", "order": 21},
