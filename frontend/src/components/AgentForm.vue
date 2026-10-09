@@ -97,9 +97,9 @@ const toolTabs = computed<ToolTab[]>(() => {
     return hay.includes(q)
   }
 
-  // ---- 内置（始终可用，不可取消）----
+  // ---- 内置：系统 @tool 注册的工具（排除插件/MCP/工作流来源）----
   const builtinItems: ToolItem[] = allTools.value
-    .filter((t) => isBuiltin(t.name) && matchTool(t))
+    .filter((t) => !srcMap.has(t.name) && matchTool(t))
     .map((t) => ({
       name: t.name,
       label: t.label || t.name,
@@ -111,14 +111,14 @@ const toolTabs = computed<ToolTab[]>(() => {
     label: '内置',
     sections: [{
       key: 'builtin',
-      title: '内置（始终可用）',
+      title: '内置',
       groups: builtinItems.length ? [{ groupName: '内置', items: builtinItems }] : [],
     }],
   }
 
-  // ---- 普通工具（排除内置）----
+  // ---- 工作流 ----
   const workflowItems = allTools.value
-    .filter((t) => t.metadata?.source === 'pipeline' && !isBuiltin(t.name) && matchTool(t))
+    .filter((t) => srcMap.get(t.name)?.kind === 'pipeline' && matchTool(t))
     .map((t) => ({
       name: t.name,
       label: t.label || t.name,
@@ -138,7 +138,7 @@ const toolTabs = computed<ToolTab[]>(() => {
   // ---- 自定义脚本 ----
   const scriptSections: ToolSection[] = plugins.value.map((p) => {
     const items = allTools.value
-      .filter((t) => srcMap.get(t.name)?.kind === 'plugin' && srcMap.get(t.name)?.name === p.filename && !isBuiltin(t.name) && matchTool(t))
+      .filter((t) => srcMap.get(t.name)?.kind === 'plugin' && srcMap.get(t.name)?.name === p.filename && matchTool(t))
       .map((t) => ({
         name: t.name,
         label: t.label || t.name,
