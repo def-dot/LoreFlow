@@ -24,7 +24,7 @@ from app.engine.pipeline import Pipeline
 logger = get_logger(__name__)
 from app.models.pipeline import PipelineRecord
 from app.registry import REGISTRY
-from app.registry.pipeline_tool import register_pipeline_tool, unregister_pipeline_tool
+from app.registry.pipeline_tool import register_pipeline, unregister_pipeline
 from app.registry.types import TOOL_REGISTRY
 
 PIPELINES_DIR = settings.PIPELINES_DIR
@@ -92,7 +92,7 @@ async def register_pipelines_from_db() -> None:
                 continue
             try:
                 cfg = Pipeline.model_validate(yaml.safe_load(rec.definition))
-                register_pipeline_tool(cfg)
+                register_pipeline(cfg)
             except Exception:
                 logger.warning("注册 DB pipeline %s 失败", rec.name, exc_info=True)
 
@@ -168,7 +168,7 @@ async def create_pipeline(definition: str) -> PipelineRecord:
         await session.refresh(rec)
 
     # 注册为 Agent 工具
-    register_pipeline_tool(cfg)
+    register_pipeline(cfg)
     return rec
 
 
@@ -212,8 +212,8 @@ async def update_pipeline(pipeline_id: int, definition: str) -> PipelineRecord:
         await session.refresh(rec)
 
     # 更新工具注册
-    unregister_pipeline_tool(old_name)
-    register_pipeline_tool(cfg)
+    unregister_pipeline(old_name)
+    register_pipeline(cfg)
     return rec
 
 
@@ -228,5 +228,5 @@ async def delete_pipeline(pipeline_id: int) -> bool:
         await session.commit()
 
     # 移除工具注册
-    unregister_pipeline_tool(pipeline_name)
+    unregister_pipeline(pipeline_name)
     return True

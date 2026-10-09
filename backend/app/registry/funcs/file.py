@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from app.registry.types import node, tool
+from app.registry.types import node_and_tool
 from app.utils import files
 
 
@@ -24,12 +24,7 @@ class ReadDocumentOutput(BaseModel):
     text: str = Field(description="文档正文")
 
 
-@node(
-    label="读取文档",
-    description="读取上传文档内容",
-    metadata={"group": "基础", "order": 12},
-)
-@tool(
+@node_and_tool(
     label="读取文档",
     description="读取上传文档内容",
     metadata={"group": "基础", "order": 12},

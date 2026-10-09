@@ -1,10 +1,10 @@
 """
-注册表核心 — FuncDef、@func 装饰器与双注册表。
+注册表核心 — FuncDef 与注册装饰器。
 
 - ``FuncDef`` 统一函数定义（节点类型和工具共用）
 - ``REGISTRY`` — 节点注册表（DAG 引擎）
 - ``TOOL_REGISTRY`` — 工具注册表（LLM Agent）
-- ``@func`` 装饰器同时注册两侧（node=True / tool=True）
+- ``@node`` / ``@tool`` / ``@node_and_tool`` 装饰器
 """
 
 from __future__ import annotations
@@ -103,27 +103,6 @@ def _build_funcdef(
     )
 
 
-def func(
-    label: str = "",
-    description: str = "",
-    metadata: dict[str, Any] | None = None,
-    node: bool = True,
-    tool: bool = True,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """统一注册装饰器：同时注册到 REGISTRY 和 TOOL_REGISTRY（向后兼容）。"""
-
-    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        fd = _build_funcdef(fn, label, description, metadata)
-        if node:
-            REGISTRY[fd.name] = fd
-        if tool:
-            TOOL_REGISTRY[fd.name] = fd
-        setattr(fn, "__func_def__", fd)
-        return fn
-
-    return decorator
-
-
 def node(
     label: str = "",
     description: str = "",
@@ -149,6 +128,23 @@ def tool(
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         fd = _build_funcdef(fn, label, description, metadata)
+        TOOL_REGISTRY[fd.name] = fd
+        setattr(fn, "__func_def__", fd)
+        return fn
+
+    return decorator
+
+
+def node_and_tool(
+    label: str = "",
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """同时注册为节点和工具（@node + @tool 快捷方式）。"""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        fd = _build_funcdef(fn, label, description, metadata)
+        REGISTRY[fd.name] = fd
         TOOL_REGISTRY[fd.name] = fd
         setattr(fn, "__func_def__", fd)
         return fn

@@ -3,8 +3,9 @@
 - :func:`load_plugins` 启动时（lifespan）调用一次；坏文件跳过并记录
   error（本次加载全部撤销）
 
-插件文件只需用 ``@func`` 装饰器定义函数：导入即注册进 ``REGISTRY`` /
-``TOOL_REGISTRY``。只扫描目录顶层的 *.py（下划线前缀跳过），不支持子包。
+插件文件用 ``@node`` / ``@tool`` / ``@node_and_tool`` 装饰器定义函数：
+导入即注册进 ``REGISTRY`` / ``TOOL_REGISTRY``。只扫描目录顶层的 *.py
+（下划线前缀跳过），不支持子包。
 """
 
 from __future__ import annotations

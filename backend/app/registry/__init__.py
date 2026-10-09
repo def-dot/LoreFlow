@@ -11,9 +11,9 @@
    - TOOL_REGISTRY — 工具定义（LLM Agent 工具列表）
 
 3. 装饰器（types.py）：
-   - @node()  注册到 REGISTRY（DAG 节点）
-   - @tool()  注册到 TOOL_REGISTRY（Agent 工具）
-   - @func()  同时注册两侧（向后兼容）
+   - @node()         注册到 REGISTRY（DAG 节点）
+   - @tool()         注册到 TOOL_REGISTRY（Agent 工具）
+   - @node_and_tool() 同时注册两侧
 
 4. 注册/查询均为 O(1) dict 操作，模块级暴露，零构造开销。
 """
@@ -22,19 +22,19 @@ from .types import (
     REGISTRY,
     TOOL_REGISTRY,
     FuncDef,
-    func,
     node,
+    node_and_tool,
     tool,
 )
 
-# 导入内置节点类型和工具 — 触发 @func 装饰器注册
+# 导入内置节点类型和工具 — 触发装饰器注册
 from . import funcs  # noqa: E402, F401
 
 __all__ = [
     "FuncDef",
     "REGISTRY",
     "TOOL_REGISTRY",
-    "func",
     "node",
+    "node_and_tool",
     "tool",
 ]
