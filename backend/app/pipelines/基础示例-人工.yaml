@@ -1,5 +1,7 @@
 name: 基础示例-人工
 description: 输入内容 → 人工审批 → 输出审核结果。
+metadata:
+  agent_tool: false
 nodes:
 - name: task_a
   type: human

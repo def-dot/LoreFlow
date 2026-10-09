@@ -1,5 +1,7 @@
 name: 基础示例-人工（多级）
 description: 输入内容 → 初审  → 终审 → 输出审核结果。
+metadata:
+  agent_tool: false
 nodes:
 - name: task_a
   type: human
