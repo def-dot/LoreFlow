@@ -77,18 +77,12 @@ params:
     default: [问候]
     ui: checkbox
   file:
-    type: object
+    type: string
     description: 单文件
-    properties:
-      stored_name: {type: string}
-      filename: {type: string}
     ui: file
   file_list:
     type: array
     description: 多文件
     items:
-      type: object
-      properties:
-        stored_name: {type: string}
-        filename: {type: string}
+      type: string
     ui: file_list

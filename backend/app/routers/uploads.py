@@ -1,8 +1,9 @@
-"""文件上传 — /api/v1/uploads（选文件即上传，返回 {stored_name, filename} 引用供 run 参数引用）"""
+"""文件上传 — /api/v1/uploads（选文件即上传，返回 stored_name 相对路径供 run 参数引用）"""
 
 from pathlib import Path
 
 from fastapi import APIRouter, File, UploadFile
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.response import UnifiedResponseRoute
@@ -13,7 +14,13 @@ from app.utils import files
 router = APIRouter(prefix="/uploads", route_class=UnifiedResponseRoute, tags=["uploads"])
 
 
-@router.post("", response_model=UploadRecord, status_code=201)
+class UploadResponse(BaseModel):
+    stored_name: str  # 相对路径，如 uploads/{uuid}.ext
+    filename: str
+    size: int
+
+
+@router.post("", response_model=UploadResponse, status_code=201)
 async def upload_file(
     file: UploadFile = File(..., description="文本文件（.txt/.md/.pdf）"),
 ) -> UploadRecord:
@@ -26,7 +33,11 @@ async def upload_file(
         raise ValueError("上传的文件内容为空")
     if len(data) > settings.UPLOAD_MAX_MB * 1024 * 1024:
         raise ValueError(f"文件超过大小上限（{settings.UPLOAD_MAX_MB}MB）")
-    stored = files.save_upload(data, suffix)
-    record = UploadRecord(stored_name=stored, filename=filename, size=len(data))
+    stored_name = files.save_upload(data, suffix)  # uploads/{uuid}.ext
+    record = UploadRecord(stored_name=stored_name, filename=filename, size=len(data))
     await uploads_service.create(record)
-    return record
+    return UploadResponse(
+        stored_name=stored_name,
+        filename=filename,
+        size=len(data),
+    )

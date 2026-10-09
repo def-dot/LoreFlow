@@ -26,11 +26,10 @@ _UI_WIDGETS = frozenset({
 })
 # type → 允许的 ui 组合（None 表示不写 ui 时的默认值）
 _TYPE_UI_COMPAT: dict[str, frozenset[str | None]] = {
-    "string":  frozenset({None, "text", "textarea", "select"}),
+    "string":  frozenset({None, "text", "textarea", "select", "file"}),
     "number":  frozenset({None, "number"}),
     "integer": frozenset({None, "number"}),
     "array":   frozenset({None, "checkbox", "select", "file_list"}),
-    "object":  frozenset({None, "file"}),
 }
 
 from app.registry import REGISTRY

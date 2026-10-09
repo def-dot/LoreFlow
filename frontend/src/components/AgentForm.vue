@@ -37,6 +37,7 @@ const allTags = ref<TagInfo[]>([])
 const plugins = ref<PluginInfo[]>([])
 const mcpServers = ref<McpServer[]>([])
 const mcpBusy = ref('')
+const collapsedMcp = ref<Set<string>>(new Set())
 const searchQuery = ref('')
 const toolDialogVisible = ref(false)
 const skillDialogVisible = ref(false)
@@ -89,7 +90,6 @@ const activeToolTab = ref('builtin')
 const toolTabs = computed<ToolTab[]>(() => {
   const srcMap = buildSourceMap()
   const q = searchQuery.value.trim().toLowerCase()
-  const isBuiltin = (name: string) => builtinToolNames.value.has(name)
 
   const matchTool = (t: ToolOut | ToolItem) => {
     if (!q) return true
@@ -97,9 +97,9 @@ const toolTabs = computed<ToolTab[]>(() => {
     return hay.includes(q)
   }
 
-  // ---- 内置：系统 @tool 注册的工具（排除插件/MCP/工作流来源）----
+  // ---- 内置：系统 @tool 注册的工具（排除插件/MCP/工作流来源，隐藏 load_skill）----
   const builtinItems: ToolItem[] = allTools.value
-    .filter((t) => !srcMap.has(t.name) && matchTool(t))
+    .filter((t) => !srcMap.has(t.name) && t.name !== 'load_skill' && matchTool(t))
     .map((t) => ({
       name: t.name,
       label: t.label || t.name,
@@ -156,7 +156,7 @@ const toolTabs = computed<ToolTab[]>(() => {
   // ---- MCP 服务器 ----
   const mcpSections: ToolSection[] = mcpServers.value.map((s) => {
     const items = allTools.value
-      .filter((t) => srcMap.get(t.name)?.kind === 'mcp' && srcMap.get(t.name)?.name === s.name && !isBuiltin(t.name) && matchTool(t))
+      .filter((t) => srcMap.get(t.name)?.kind === 'mcp' && srcMap.get(t.name)?.name === s.name && matchTool(t))
       .map((t) => ({
         name: t.name,
         label: t.label || t.name,
@@ -172,7 +172,7 @@ const toolTabs = computed<ToolTab[]>(() => {
   })
   const mcpTab: ToolTab = { key: 'mcp', label: 'MCP 服务器', sections: mcpSections }
 
-  return [builtinTab, workflowTab, scriptTab, mcpTab]
+  return [builtinTab, workflowTab, mcpTab, scriptTab]
 })
 
 /** 每个 tab 的命中数 */
@@ -225,6 +225,15 @@ function toggleSectionAll(sec: ToolSection) {
 
 function sectionSelectedCount(sec: ToolSection) {
   return sectionItems(sec).filter((t) => toolSet.value.has(t.name)).length
+}
+
+function toggleMcpCollapse(name: string) {
+  if (collapsedMcp.value.has(name)) collapsedMcp.value.delete(name)
+  else collapsedMcp.value.add(name)
+}
+
+function isMcpCollapsed(name: string) {
+  return collapsedMcp.value.has(name)
 }
 
 // ---- MCP 重连 ----
@@ -351,6 +360,8 @@ async function loadOptions() {
     allTags.value = tagsResp || []
     plugins.value = pluginsResp?.plugins || []
     mcpServers.value = mcpResp || []
+    // MCP 默认折叠
+    collapsedMcp.value = new Set((mcpResp || []).map((s) => s.name))
   } catch {
     // 静默失败
   }
@@ -559,7 +570,10 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
             <div class="tab-body">
               <template v-for="sec in tab.sections" :key="sec.key">
                 <!-- MCP 段头：服务器名 + 状态 + 重连 -->
-                <div v-if="sec.server" class="mcp-server-head">
+                <div v-if="sec.server" class="mcp-server-head collapsible" @click="toggleMcpCollapse(sec.server.name)">
+                  <svg class="chev" :class="{ open: !isMcpCollapsed(sec.server.name) }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
                   <span class="mcp-server-name">{{ sec.title }}</span>
                   <el-tag size="small" :type="statusMeta[sec.server.status]?.type ?? 'info'" disable-transitions>
                     {{ statusMeta[sec.server.status]?.label ?? sec.server.status }}
@@ -578,12 +592,14 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
                     v-if="sectionItems(sec).length"
                     class="btn-soft"
                     size="small"
-                    @click="toggleSectionAll(sec)"
+                    @click.stop="toggleSectionAll(sec)"
                   >
                     {{ isSectionAllSelected(sec) ? '取消' : '全选' }}
                   </el-button>
                 </div>
-                <div v-if="sec.server?.error" class="section-error">{{ sec.server.error }}</div>
+                <template v-if="sec.server && !isMcpCollapsed(sec.server.name)">
+                  <div v-if="sec.server?.error" class="section-error">{{ sec.server.error }}</div>
+                </template>
 
                 <!-- 非 MCP 段：段头含全选（内置段不显示）-->
                 <div v-if="!sec.server && sec.key !== 'builtin' && sectionItems(sec).length" class="section-head-inline">
@@ -598,7 +614,7 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
                 <!-- 工具列表 -->
                 <template v-for="group in sec.groups" :key="group.groupName">
                   <div v-if="tab.key === 'script'" class="group-label">{{ group.groupName }}</div>
-                  <div class="tool-list">
+                  <div v-if="!sec.server || !isMcpCollapsed(sec.server.name)" class="tool-list">
                     <label
                       v-for="t in group.items"
                       :key="t.name"
@@ -613,14 +629,14 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
                       />
                       <span class="tool-name">
                         {{ t.label }}
-                        <el-tag v-if="builtinToolNames.has(t.name)" size="small" type="success" disable-transitions>内置</el-tag>
+                        <el-tag v-if="builtinToolNames.has(t.name)" size="small" type="success" disable-transitions>固定</el-tag>
                       </span>
                       <span v-if="t.description" class="tool-desc">{{ t.description }}</span>
                     </label>
                   </div>
                 </template>
 
-                <div v-if="!sectionItems(sec).length" class="section-empty muted">
+                <div v-if="!sectionItems(sec).length && (!sec.server || !isMcpCollapsed(sec.server.name))" class="section-empty muted">
                   {{ searchQuery.trim() ? '无匹配工具' : (sec.server && sec.server.status !== 'connected' ? '服务器未连接' : '无可用工具') }}
                 </div>
               </template>
@@ -798,6 +814,10 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
   align-items: center;
   gap: 8px;
   padding: 6px 0;
+}
+.mcp-server-head.collapsible {
+  cursor: pointer;
+  user-select: none;
 }
 
 .mcp-server-name {

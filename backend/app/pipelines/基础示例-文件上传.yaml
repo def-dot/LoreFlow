@@ -15,12 +15,9 @@ nodes:
     result: $task_a.text
 params:
   file:
-    type: object
+    type: string
     title: 上传文件
     description: 上传 txt/md 等文本文件
-    properties:
-      stored_name: {type: string}
-      filename: {type: string}
     ui: file
 required:
 - file

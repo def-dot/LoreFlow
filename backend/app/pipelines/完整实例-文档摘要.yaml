@@ -1,0 +1,36 @@
+name: 完整实例-文档摘要
+description: 上传文档，LLM 生成摘要
+params:
+  document:
+    type: string
+    title: 文档
+    description: 上传 txt/md/pdf 文件
+    ui: file
+required:
+  - document
+nodes:
+  - name: read
+    type: read_document
+    label: 读取文档
+    inputs:
+      document: $params.document
+  - name: summarize
+    type: llm_chat
+    label: 生成摘要
+    depends_on:
+      - read
+    inputs:
+      system: 你是一个文档分析助手，请用简洁的语言总结文档内容。
+      prompt: |
+        文件：$params.document
+
+        内容：
+        $read.text
+
+        请生成摘要。
+  - name: __end__
+    type: end
+    depends_on:
+      - summarize
+    inputs:
+      summary: $summarize

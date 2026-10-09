@@ -642,42 +642,6 @@ onMounted(fetchAll)
             </template>
           </div>
 
-          <!-- 自定义脚本 -->
-          <div class="top-section">
-            <div class="source-head">
-              <h3 class="source-title" @click="toggleSection('scripts')">
-                <svg class="chev" :class="{ open: !isSectionCollapsed('scripts') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                自定义脚本
-                <span class="group-count">{{ toolGroups.filter((x) => x.kind === 'script').reduce((n, g) => n + g.items.length, 0) }}</span>
-              </h3>
-              <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
-              <el-button type="primary" size="small" :loading="uploading" @click="fileInput?.click()">上传脚本</el-button>
-              <span class="guide-link" @click="guideOpen = true">编写指南</span>
-            </div>
-            <template v-if="!isSectionCollapsed('scripts')">
-              <p class="source-note">用 <code>@tool</code> / <code>@node_and_tool</code> 写的 <code>.py</code> 文件 · 上传后自动热加载</p>
-              <div v-for="g in toolGroups.filter((x) => x.kind === 'script')" :key="g.key" class="group-section">
-                <h3 class="group-title with-actions">
-                  <span class="group-name mono">{{ g.name }}</span>
-                  <el-tag v-if="g.plugin?.error" type="danger" size="small" disable-transitions>加载失败</el-tag>
-                  <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
-                  <span class="group-count">{{ g.items.length }} 个工具</span>
-                  <span class="group-actions">
-                    <el-button class="btn-soft btn-soft--danger" size="small" @click.stop="g.plugin && handleDeletePlugin(g.plugin)">删除</el-button>
-                  </span>
-                </h3>
-                <div v-if="g.plugin?.error" class="group-error">{{ g.plugin.error }}</div>
-                <div v-if="g.items.length" class="node-grid">
-                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="plugin" />
-                </div>
-                <div v-else-if="!g.plugin?.error" class="group-empty muted">无注册工具</div>
-              </div>
-              <div v-if="!plugins.length" class="muted source-empty">暂无自定义脚本</div>
-            </template>
-          </div>
-
           <!-- MCP 服务器 -->
           <div class="top-section">
             <div class="source-head">
@@ -723,6 +687,42 @@ onMounted(fetchAll)
                 <div v-else-if="isGroupOpen(g, toolSearch) && !g.items.length" class="group-empty muted">无可用工具</div>
               </div>
               <div v-if="!mcpServers.length" class="muted source-empty">未配置 MCP 服务器</div>
+            </template>
+          </div>
+
+          <!-- 自定义脚本 -->
+          <div class="top-section">
+            <div class="source-head">
+              <h3 class="source-title" @click="toggleSection('scripts')">
+                <svg class="chev" :class="{ open: !isSectionCollapsed('scripts') }" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                自定义脚本
+                <span class="group-count">{{ toolGroups.filter((x) => x.kind === 'script').reduce((n, g) => n + g.items.length, 0) }}</span>
+              </h3>
+              <input ref="fileInput" type="file" accept=".py" hidden @change="onFileChange" />
+              <el-button type="primary" size="small" :loading="uploading" @click="fileInput?.click()">上传脚本</el-button>
+              <span class="guide-link" @click="guideOpen = true">编写指南</span>
+            </div>
+            <template v-if="!isSectionCollapsed('scripts')">
+              <p class="source-note">用 <code>@tool</code> / <code>@node_and_tool</code> 写的 <code>.py</code> 文件 · 上传后自动热加载</p>
+              <div v-for="g in toolGroups.filter((x) => x.kind === 'script')" :key="g.key" class="group-section">
+                <h3 class="group-title with-actions">
+                  <span class="group-name mono">{{ g.name }}</span>
+                  <el-tag v-if="g.plugin?.error" type="danger" size="small" disable-transitions>加载失败</el-tag>
+                  <el-tag v-else type="success" size="small" disable-transitions>正常</el-tag>
+                  <span class="group-count">{{ g.items.length }} 个工具</span>
+                  <span class="group-actions">
+                    <el-button class="btn-soft btn-soft--danger" size="small" @click.stop="g.plugin && handleDeletePlugin(g.plugin)">删除</el-button>
+                  </span>
+                </h3>
+                <div v-if="g.plugin?.error" class="group-error">{{ g.plugin.error }}</div>
+                <div v-if="g.items.length" class="node-grid">
+                  <NodeTypeCard v-for="t in g.items" :key="catalogKey(t)" :node="t" variant="plugin" />
+                </div>
+                <div v-else-if="!g.plugin?.error" class="group-empty muted">无注册工具</div>
+              </div>
+              <div v-if="!plugins.length" class="muted source-empty">暂无自定义脚本</div>
             </template>
           </div>
 
