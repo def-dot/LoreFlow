@@ -32,11 +32,11 @@ class PipelineOutput(BaseModel):
 def _make_pipeline_runner(pipeline: Pipeline):
     """创建 Pipeline 执行闭包。"""
 
-    async def _run(inputs: dict[str, Any] | None = None) -> PipelineOutput:
-        pipeline.validate_inputs(inputs)
+    async def _run(**kwargs: Any) -> PipelineOutput:
+        pipeline.validate_inputs(kwargs)
 
         try:
-            _, output = await pipeline.run(inputs=inputs or {})
+            _, output = await pipeline.run(inputs=kwargs)
         except Exception as exc:
             logger.exception("[pipeline] 执行失败: %s", pipeline.name)
             return PipelineOutput(status="failed", error=str(exc))

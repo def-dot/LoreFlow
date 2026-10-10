@@ -19,12 +19,10 @@ logger = logging.getLogger(__name__)
 class AgentParams(BaseModel):
     prompt: str = Field(description="用户提示词", min_length=1)
     system: str | None = Field(default=None, description="系统提示词")
-    context: str | None = Field(default=None, description="上下文")
-    file_names: list[str] | None = Field(default=None, description="上传文件列表")
     model: str | None = Field(default=None, description="模型名")
-    tools: list[str] | None = Field(default=None, description="工具名列表，['*'] 加载全部")
-    skills: list[str] | None = Field(default=None, description="技能名列表，['*'] 加载全部")
-    max_iterations: int = Field(default=5, description="最大循环次数")
+    tools: list[str] = Field(default_factory=list, description="工具名列表")
+    skills: list[str] = Field(default_factory=list, description="技能名列表")
+    max_iterations: int = Field(default=10, description="最大循环次数")
 
 
 class AgentOutput(BaseModel):
@@ -38,68 +36,35 @@ class AgentOutput(BaseModel):
     metadata={"group": "LLM", "order": 10},
 )
 async def agent(params: AgentParams) -> AgentOutput:
-    max_iter = params.max_iterations or 5
+    tool_defs = build_tools(params.tools)
 
-    # --- 归一化 file_paths：统一为 upload ID 列表 ---
-    file_names = params.file_names or []
-  
-    messages: list[dict[str, str]] = []
+    # --- system prompt ---
+    system_parts = [params.system, build_skill_prompt(params.skills)]
+    system_content = "\n\n".join(p for p in system_parts if p)
 
-    parts: list[str] = []
-    if file_names:
-        parts.append("已上传文件：\n" + "\n".join(f"- /uploads/{fid}" for fid in file_names))
-    if isinstance(params.context, str) and params.context.strip():
-        parts.append(f"参考资料：\n{params.context}")
-    parts.append(f"用户问题：{params.prompt}")
-    messages.append({"role": "user", "content": "\n\n".join(parts)})
-
-    # --- 构建工具列表（含内置工具）---
-    tool_names: list[str] = list(params.tools or [])
-    tool_defs, pipeline_prompt = await build_tools(tool_names)
-
-    # --- 技能目录 + pipeline 目录 + system prompt 注入首条 ---
-    system_content = params.system or ""
-    if params.skills:
-        skill_prompt = build_skill_prompt(params.skills) or ""
-        system_content += "\n\n" + skill_prompt
-    if pipeline_prompt:
-        system_content += "\n\n" + pipeline_prompt
-
+    messages: list[dict[str, Any]] = []
     if system_content:
-        messages.insert(0, {"role": "system", "content": system_content.strip()})
+        messages.append({"role": "system", "content": system_content})
+    messages.append({"role": "user", "content": params.prompt})
 
     content = ""
-
-    for iteration in range(1, max_iter + 1):
-        logger.info("[agent] iteration %d / %d", iteration, max_iter)
+    for i in range(params.max_iterations):
+        logger.info("[agent] iteration %d / %d", i + 1, params.max_iterations)
 
         result = await llm_chat_call(params.model, messages, tools=tool_defs)
-        logger.info(result)
-
         content = result["content"]
         tool_calls = result.get("tool_calls", [])
 
         if not tool_calls:
-            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-            logger.info("[agent] finished after %d iteration(s)", iteration)
+            messages.append({"role": "assistant", "content": content})
             break
 
-        tool_results = [await execute_tool_call(tc) for tc in tool_calls]
-        for tr in tool_results:
-            logger.info("[agent] tool %s -> %s: %s", tr["tool_name"], tr["status"], tr["output"])
-
-        messages.append({
-            "role": "assistant",
-            "content": content,
-            "tool_calls": tool_calls,
-        })
-        for tr in tool_results:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tr["tool_call_id"],
-                "content": tr["output"],
-            })
+        messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+        for tc in tool_calls:
+            tr = await execute_tool_call(tc)
+            logger.info("[agent] tool %s -> %s", tr["tool_name"], tr["status"])
+            messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "content": tr["output"]})
     else:
-        logger.warning("[agent] max iterations (%d) reached", max_iter)
+        logger.warning("[agent] max iterations (%d) reached", params.max_iterations)
 
     return AgentOutput(content=content, messages=messages)
