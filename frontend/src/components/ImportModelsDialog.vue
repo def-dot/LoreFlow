@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { importModels, type AvailableModel } from '@/api/providers'
 
@@ -18,30 +18,36 @@ const selected = ref<AvailableModel[]>([])
 const types = ref<Record<string, string>>({})
 const importing = ref(false)
 
-const newModels = computed(() => props.models.filter((m) => !m.imported))
-
 watch(
   () => props.visible,
-  (v) => {
+  async (v) => {
     if (v) {
       types.value = Object.fromEntries(props.models.map((m) => [m.name, m.model_type]))
+      await nextTick()
+      // 已导入的默认勾选
+      selected.value = props.models.filter((m) => m.imported)
     }
   },
 )
 
 function onSelectionChange(rows: AvailableModel[]) {
-  selected.value = rows.filter((m) => !m.imported)
+  selected.value = rows
 }
 
+const newSelected = () => selected.value.filter((m) => !m.imported)
+
 async function handleImport() {
-  if (!props.providerId || !selected.value.length) return
+  const items = newSelected()
+  if (!props.providerId || !items.length) return
   importing.value = true
   try {
-    const items = selected.value.map((m) => ({
-      name: m.name,
-      model_type: (types.value[m.name] || 'chat') as 'chat' | 'embedding' | 'rerank',
-    }))
-    await importModels(props.providerId, items)
+    await importModels(
+      props.providerId,
+      items.map((m) => ({
+        name: m.name,
+        model_type: (types.value[m.name] || 'chat') as 'chat' | 'embedding' | 'rerank',
+      })),
+    )
     ElMessage.success(`已导入 ${items.length} 个模型`)
     emit('update:visible', false)
     emit('imported')
@@ -68,16 +74,10 @@ const typeOptions = [
     @update:model-value="emit('update:visible', $event)"
   >
     <p class="hint">
-      共 {{ models.length }} 个模型，已导入 {{ models.length - newModels.length }} 个，可导入 {{ newModels.length }} 个。
+      共 {{ models.length }} 个模型，已导入 {{ models.filter((m) => m.imported).length }} 个。
     </p>
-    <el-table
-      ref="tableRef"
-      :data="models"
-      size="small"
-      max-height="360"
-      @selection-change="onSelectionChange"
-    >
-      <el-table-column type="selection" width="40" :selectable="(row: AvailableModel) => !row.imported" />
+    <el-table :data="models" size="small" max-height="360" @selection-change="onSelectionChange">
+      <el-table-column type="selection" width="40" />
       <el-table-column prop="name" label="模型名称" min-width="220" show-overflow-tooltip />
       <el-table-column label="类型" width="140">
         <template #default="{ row }">
@@ -98,10 +98,10 @@ const typeOptions = [
       <el-button
         type="primary"
         :loading="importing"
-        :disabled="!selected.length"
+        :disabled="!newSelected().length"
         @click="handleImport"
       >
-        导入选中 ({{ selected.length }})
+        导入 ({{ newSelected().length }})
       </el-button>
     </template>
   </el-dialog>
