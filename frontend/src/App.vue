@@ -24,6 +24,7 @@ const runsStore = useRunsStore()
       <router-link to="/" class="nav-link" :class="{ active: route.name === 'runs' }">运行</router-link>
       <router-link to="/pipelines" class="nav-link" :class="{ active: route.name === 'pipelines' }">工作流</router-link>
       <router-link to="/capabilities" class="nav-link" :class="{ active: route.name === 'capabilities' }">能力目录</router-link>
+      <router-link to="/models" class="nav-link" :class="{ active: route.name === 'models' }">模型</router-link>
       <router-link to="/agents" class="nav-link" :class="{ active: route.name === 'agents' || route.name === 'agent-chat' }">智能体</router-link>
       <router-link to="/knowledge" class="nav-link" :class="{ active: route.name === 'knowledge' }">知识库</router-link>
     </nav>

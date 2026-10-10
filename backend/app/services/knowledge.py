@@ -196,6 +196,72 @@ async def ingest_document(upload_id: str, filename: str, *, tag_ids: list[int] |
     return {"doc_id": doc_id, "status": DocumentStatus.PENDING}
 
 
+async def ingest_document_sync(upload_id: str, filename: str) -> int:
+    """同步入库：创建文档 → 解析 → 写入切片，返回 document_id。
+
+    用于 agent 对话上传文件，需要立即可用的场景。
+    """
+    suffix = os.path.splitext(filename)[1].lower()
+    file_path = str(settings.UPLOADS_DIR / upload_id)
+    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else None
+
+    async with AsyncSessionLocal() as session:
+        doc = DocumentRecord(
+            filename=filename,
+            upload_id=upload_id,
+            file_path=file_path,
+            file_size=file_size,
+            file_ext=suffix,
+            status=DocumentStatus.PROCESSING,
+        )
+        session.add(doc)
+        await session.commit()
+        await session.refresh(doc)
+        doc_id = doc.id
+
+    try:
+        # 子进程解析（复用现有 docling 流程）
+        import json
+        import sys
+        import tempfile
+
+        output_fd, output_path = tempfile.mkstemp(suffix=".json")
+        os.close(output_fd)
+
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "app.services.docling_chunk", file_path,
+            "--output", output_path,
+            "--doc-id", str(doc_id),
+            env={**os.environ, "PYTHONUTF8": "1"},
+        )
+        try:
+            await proc.communicate()
+            with open(output_path, encoding="utf-8") as f:
+                result = json.load(f)
+            if not result["ok"]:
+                raise RuntimeError(f"解析失败: {result['error']}")
+            chunks = result["data"]
+        finally:
+            os.remove(output_path)
+
+        if not chunks:
+            await _update_document_status(doc_id, DocumentStatus.FAILED, error="未解析出文本块")
+            raise RuntimeError("未解析出文本块")
+
+        inserted = await _insert_chunks(chunks, document_id=doc_id)
+        if inserted == 0:
+            await _update_document_status(doc_id, DocumentStatus.FAILED, error="文本块入库失败")
+            raise RuntimeError("文本块入库失败")
+
+        await _update_document_status(doc_id, DocumentStatus.COMPLETED, chunk_count=inserted)
+        logger.info("[kb] sync ingest doc %d completed: %d chunks", doc_id, inserted)
+        return doc_id
+
+    except Exception as exc:
+        await _update_document_status(doc_id, DocumentStatus.FAILED, error=str(exc)[:2000])
+        raise
+
+
 async def parse_document(document_id: int) -> None:
     """文档解析 — 分块 — 入库（Arq worker 调用）。
 
@@ -355,7 +421,13 @@ async def _insert_chunks(chunks: list[dict[str, Any]], document_id: int) -> int:
 # ── 检索（BM25 + Vector + RRF + Reranker） ─────────────────────────
 
 
-async def search_chunks(query: str, top_k: int = 5, *, tags: list[str] | None = None) -> list[dict[str, Any]]:
+async def search_chunks(
+    query: str,
+    top_k: int = 5,
+    *,
+    tags: list[str] | None = None,
+    doc_ids: list[int] | None = None,
+) -> list[dict[str, Any]]:
     """混合检索：BM25 + 向量 + RRF 融合 + Reranker 精排。"""
     t0 = time.perf_counter()
     query_vec = await embed_query(query)
@@ -369,6 +441,7 @@ async def search_chunks(query: str, top_k: int = 5, *, tags: list[str] | None = 
         limit=settings.RECALL_COUNT,
         rrf_k=settings.RRF_K,
         tags=tags,
+        doc_ids=doc_ids,
     )
     logger.info("[perf] hybrid_rrf: %.2fs (%d results)", time.perf_counter() - t0, len(recalls))
 
@@ -399,11 +472,12 @@ async def search_multi(
     queries: list[str],
     tags: list[str] | None = None,
     top_k: int = 5,
+    doc_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """并发检索多个 query，多 query 时自动去重，返回结构化结果列表。"""
 
     async def _retrieve_one(q: str):
-        return await search_chunks(q, top_k=top_k, tags=tags)
+        return await search_chunks(q, top_k=top_k, tags=tags, doc_ids=doc_ids)
 
     all_results = await asyncio.gather(*[_retrieve_one(q) for q in queries])
 
@@ -437,20 +511,34 @@ async def _get_chunks_hybrid_rrf(
     limit: int = 100,
     rrf_k: int = 60,
     tags: list[str] | None = None,
+    doc_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """单 SQL 完成稠密向量 + tsvector BM25 双路召回 + RRF 融合。"""
     query_vec_str = _vector_to_str(query_vec)
 
-    # 标签过滤：按标签名称限定 document_id 范围
-    tag_filter = ""
-    if tags:
-        tag_filter = (
+    # 范围过滤：tags 和 doc_ids 为 OR 关系（标签范围 ∪ 上传文件）
+    scope_filter = ""
+    if tags and doc_ids:
+        scope_filter = (
+            "AND ("
+            "  c.document_id IN ("
+            "    SELECT dt.document_id FROM document_tags dt"
+            "    JOIN tags t ON t.id = dt.tag_id"
+            "    WHERE t.name = ANY(:tags)"
+            "  )"
+            "  OR c.document_id = ANY(:doc_ids)"
+            ")"
+        )
+    elif tags:
+        scope_filter = (
             "AND c.document_id IN ("
             "  SELECT dt.document_id FROM document_tags dt"
             "  JOIN tags t ON t.id = dt.tag_id"
             "  WHERE t.name = ANY(:tags)"
             ")"
         )
+    elif doc_ids:
+        scope_filter = "AND c.document_id = ANY(:doc_ids)"
 
     hybrid_sql = text(f"""
         WITH qv AS (
@@ -467,7 +555,7 @@ async def _get_chunks_hybrid_rrf(
             FROM chunks c, qv
             WHERE c.embedding IS NOT NULL
               AND 1.0 - (c.embedding <=> qv.v) > :threshold
-              {tag_filter}
+              {scope_filter}
             ORDER BY c.embedding <=> qv.v
             LIMIT :limit
         ),
@@ -476,7 +564,7 @@ async def _get_chunks_hybrid_rrf(
                    ROW_NUMBER() OVER (ORDER BY ts_rank(c.tsv_content, qt.q) DESC) AS rank
             FROM chunks c, qt
             WHERE c.tsv_content @@ qt.q
-              {tag_filter}
+              {scope_filter}
             ORDER BY ts_rank(c.tsv_content, qt.q) DESC
             LIMIT :limit
         )
@@ -501,6 +589,8 @@ async def _get_chunks_hybrid_rrf(
     }
     if tags:
         params["tags"] = tags
+    if doc_ids:
+        params["doc_ids"] = doc_ids
 
     async with AsyncSessionLocal() as session:
         rows = (await session.execute(hybrid_sql, params)).fetchall()

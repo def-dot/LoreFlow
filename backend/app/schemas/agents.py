@@ -18,6 +18,7 @@ class _AgentBody(BaseModel):
     model: str = ""
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list, description="绑定的知识库标签")
 
 
 class AgentCreate(_AgentBody):

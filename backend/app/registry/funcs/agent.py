@@ -36,6 +36,8 @@ class AgentOutput(BaseModel):
     metadata={"group": "LLM", "order": 10},
 )
 async def agent(params: AgentParams) -> AgentOutput:
+    if params.skills and "load_skill" not in params.tools:
+        params.tools.append("load_skill")
     tool_defs = build_tools(params.tools)
 
     # --- system prompt ---

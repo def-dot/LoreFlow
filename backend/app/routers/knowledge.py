@@ -38,8 +38,8 @@ async def upload_document_direct(
         raise ValueError(f"文件超过大小上限（{settings.UPLOAD_MAX_MB}MB）")
 
     parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()] if tag_ids else []
-    stored = files.save_upload(data, suffix)
-    result = await knowledge.ingest_document(stored, filename, tag_ids=parsed_tag_ids)
+    stored_name = files.save_upload(data, suffix)  # uploads/{uuid}.ext
+    result = await knowledge.ingest_document(stored_name, filename, tag_ids=parsed_tag_ids)
     return {"doc_id": result["doc_id"], "filename": filename, "status": result["status"]}
 
 

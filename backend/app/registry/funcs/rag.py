@@ -26,6 +26,7 @@ class SearchKnowledgeOutput(BaseModel):
 class SearchKnowledgeParams(BaseModel):
     queries: str | list[str] = Field(description="检索关键词，单个字符串或列表")
     tags: list[str] = Field(default_factory=list, description="按标签名称筛选，为空则检索全部")
+    doc_ids: list[int] | None = Field(default=None, description="按文档 ID 筛选，用于检索特定上传文件")
 
 
 @node(
@@ -33,13 +34,14 @@ class SearchKnowledgeParams(BaseModel):
     description=(
         "从知识库中检索与问题最相关的文档片段。"
         "支持多查询并发检索并自动去重。"
+        "可通过 doc_ids 参数限定检索特定文档。"
     ),
     metadata={"group": "基础", "order": 30},
 )
 async def retrieve_knowledge(params: SearchKnowledgeParams) -> SearchKnowledgeOutput:
     queries = [params.queries] if isinstance(params.queries, str) else params.queries
     results = await knowledge.search_multi(
-        queries, tags=params.tags or None, top_k=5,
+        queries, tags=params.tags or None, top_k=5, doc_ids=params.doc_ids,
     )
     return SearchKnowledgeOutput(
         sources=results,

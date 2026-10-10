@@ -2,37 +2,37 @@
 文件节点 — 读取上传文档内容（通用，不依赖 RAG）。
 """
 
+import asyncio
 from pathlib import Path
 
+from docling.document_converter import DocumentConverter
 from pydantic import BaseModel, Field
 
 from app.registry.types import node_and_tool
-from app.utils import files
+
+_converter = DocumentConverter()
 
 
-class DocumentRef(BaseModel):
-    stored_name: str = Field(description="UUID 存储文件名", min_length=1)
-    filename: str = Field(description="原始文件名", min_length=1)
-
-
-class ReadDocumentParams(BaseModel):
-    document: DocumentRef = Field(description="上传文档")
+class ReadDocumentInput(BaseModel):
+    document: str = Field(description="文档相对路径，如 uploads/abc.txt", min_length=1)
 
 
 class ReadDocumentOutput(BaseModel):
-    doc_name: str = Field(description="文档名称")
-    text: str = Field(description="文档正文")
+    text: str = Field(description="文档正文（Markdown 格式）")
 
 
 @node_and_tool(
     label="读取文档",
-    description="读取上传文档内容",
+    description="读取上传文档内容（支持 txt/md/pdf/docx/xlsx）",
     metadata={"group": "基础", "order": 12},
 )
-async def read_document(params: ReadDocumentParams) -> ReadDocumentOutput:
-    """从上传目录读取 params 声明的 document 文件"""
-    text = files.read_upload(params.document.stored_name)
-    if not text.strip():
-        raise ValueError("上传文档正文为空：文件内容为空白文本")
-    stem = Path(params.document.filename).stem or "document"
-    return ReadDocumentOutput(doc_name=stem, text=text)
+async def read_document(params: ReadDocumentInput) -> ReadDocumentOutput:
+    """从相对路径读取文档，返回 Markdown 格式文本"""
+    path = Path(params.document)
+    if ".." in params.document:
+        raise ValueError("无效的文件路径")
+    if not path.is_file():
+        raise ValueError(f"文件不存在：{params.document}")
+    result = await asyncio.to_thread(_converter.convert, str(path))
+    text = result.document.export_to_markdown()
+    return ReadDocumentOutput(text=text)

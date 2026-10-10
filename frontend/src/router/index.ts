@@ -6,6 +6,7 @@ import Agents from '@/views/Agents.vue'
 import AgentChat from '@/views/AgentChat.vue'
 import Knowledge from '@/views/Knowledge.vue'
 import Chunks from '@/views/Chunks.vue'
+import Models from '@/views/Models.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -14,6 +15,7 @@ const router = createRouter({
     { path: '/capabilities', name: 'capabilities', component: Capabilities },
     { path: '/plugins', redirect: '/capabilities' },
     { path: '/pipelines', name: 'pipelines', component: Pipelines },
+    { path: '/models', name: 'models', component: Models },
     { path: '/agents', name: 'agents', component: Agents },
     { path: '/agents/:id/chat', name: 'agent-chat', component: AgentChat },
     { path: '/knowledge', name: 'knowledge', component: Knowledge },

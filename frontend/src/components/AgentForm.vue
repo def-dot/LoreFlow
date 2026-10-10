@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { listModels, listTools, listSkills, listBuiltinTools, type ToolOut } from '@/api/registry'
+import { listModels, type ModelItem } from '@/api/providers'
+import { listTools, listSkills, type ToolOut } from '@/api/registry'
 import { listPlugins, type PluginInfo } from '@/api/plugins'
 import { listMcpServers, reconnectMcpServer, type McpServer } from '@/api/mcp'
 import { listTags, type TagInfo } from '@/api/knowledge'
@@ -29,9 +30,8 @@ const form = ref({
 })
 
 const saving = ref(false)
-const models = ref<Record<string, string[]>>({})
+const models = ref<ModelItem[]>([])
 const allTools = ref<ToolOut[]>([])
-const builtinToolNames = ref<Set<string>>(new Set())
 const allSkills = ref<{ name: string; description: string }[]>([])
 const allTags = ref<TagInfo[]>([])
 const plugins = ref<PluginInfo[]>([])
@@ -341,18 +341,16 @@ const isEdit = computed(() => !!props.agent?.id)
 
 async function loadOptions() {
   try {
-    const [m, toolsResp, skillsResp, pluginsResp, mcpResp, builtinResp, tagsResp] = await Promise.all([
+    const [m, toolsResp, skillsResp, pluginsResp, mcpResp, tagsResp] = await Promise.all([
       listModels(),
       listTools(),
       listSkills(),
       listPlugins(),
       listMcpServers(),
-      listBuiltinTools(),
       listTags(),
     ])
     models.value = m
     allTools.value = toolsResp || []
-    builtinToolNames.value = new Set(builtinResp || [])
     allSkills.value = (skillsResp || []).map((s) => ({
       name: s.name,
       description: s.description || '',
@@ -370,13 +368,12 @@ async function loadOptions() {
 loadOptions()
 
 const modelOptions = computed(() => {
-  const opts: { label: string; value: string }[] = []
-  for (const [provider, mlist] of Object.entries(models.value)) {
-    for (const m of mlist as string[]) {
-      opts.push({ label: `${provider}:${m}`, value: `${provider}:${m}` })
-    }
-  }
-  return opts
+  return models.value
+    .filter((m) => m.model_type === 'chat' && m.is_enabled)
+    .map((m) => ({
+      label: `${m.provider?.name}:${m.name}`,
+      value: `${m.provider?.name}:${m.name}`,
+    }))
 })
 
 // ---- 保存 ----
@@ -619,17 +616,15 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
                       v-for="t in group.items"
                       :key="t.name"
                       class="tool-row"
-                      :class="{ on: isToolSelected(t.name) || builtinToolNames.has(t.name), builtin: builtinToolNames.has(t.name) }"
+                      :class="{ on: isToolSelected(t.name) }"
                     >
                       <input
                         type="checkbox"
-                        :checked="isToolSelected(t.name) || builtinToolNames.has(t.name)"
-                        :disabled="builtinToolNames.has(t.name)"
+                        :checked="isToolSelected(t.name)"
                         @change="toggleTool(t.name)"
                       />
                       <span class="tool-name">
                         {{ t.label }}
-                        <el-tag v-if="builtinToolNames.has(t.name)" size="small" type="success" disable-transitions>固定</el-tag>
                       </span>
                       <span v-if="t.description" class="tool-desc">{{ t.description }}</span>
                     </label>

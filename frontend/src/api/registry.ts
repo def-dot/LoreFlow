@@ -48,11 +48,3 @@ export async function downloadSkill(name: string): Promise<Blob> {
 export function listTools(): Promise<FuncInfo[]> {
   return api.get('/tools')
 }
-
-export function listModels(): Promise<Record<string, string[]>> {
-  return api.get('/models')
-}
-
-export function listBuiltinTools(): Promise<string[]> {
-  return api.get('/builtin-tools')
-}

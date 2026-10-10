@@ -1,0 +1,27 @@
+name: 完整实例-文档摘要-Agent
+description: 上传文档，Agent 自主读取并生成摘要
+params:
+  document:
+    type: string
+    title: 文档
+    description: 上传 txt/md/pdf 文件
+    ui: file
+required:
+  - document
+nodes:
+  - name: summarize
+    type: agent
+    label: 文档摘要
+    inputs:
+      system: 你是一个文档分析助手。请读取指定文档内容，然后用简洁的语言生成摘要。
+      prompt: |
+        请读取以下文档并生成摘要：$params.document
+      tools:
+        - read_document
+      max_iterations: 3
+  - name: __end__
+    type: end
+    depends_on:
+      - summarize
+    inputs:
+      summary: $summarize.content

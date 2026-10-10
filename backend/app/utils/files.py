@@ -42,29 +42,28 @@ def _extract_pdf_text(data: bytes) -> str:
 
 
 def save_upload(data: bytes, suffix: str) -> str:
-    """惰性建目录并落盘，返回存储名 ``{uuid_hex}{suffix}``（后端起的键，非用户输入）。"""
+    """惰性建目录并落盘，返回相对路径 ``uploads/{uuid_hex}{suffix}``。"""
     settings.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    stored = f"{uuid.uuid4().hex}{suffix}"
-    (settings.UPLOADS_DIR / stored).write_bytes(data)
-    return stored
+    stored_name = f"{uuid.uuid4().hex}{suffix}"
+    (settings.UPLOADS_DIR / stored_name).write_bytes(data)
+    return f"uploads/{stored_name}"
 
 
-def read_upload(upload_id: str) -> str:
-    """按存储名读全文文本（JSON 模式可手输任意 id，先防路径穿越与白名单外扩展名）。
+def read_upload(path_or_name: str) -> str:
+    """按相对路径或文件名读全文文本（防路径穿越与白名单外扩展名）。
 
+    接受 ``uploads/{uuid}.ext`` 或 ``{uuid}.ext`` 两种格式。
     PDF 文件使用 pypdf 提取文本，其余走 decode_text 编码探测链。
     """
-    if (
-        not upload_id
-        or "/" in upload_id
-        or "\\" in upload_id
-        or ".." in upload_id
-        or Path(upload_id).suffix.lower() not in ALLOWED_SUFFIXES
-    ):
-        raise ValueError("无效的文件引用：document.id 必须是上传接口返回的文件标识")
-    path = settings.UPLOADS_DIR / upload_id
+    if not path_or_name or ".." in path_or_name or "\\" in path_or_name:
+        raise ValueError("无效的文件引用")
+    # 兼容两种格式：uploads/abc.txt 或 abc.txt
+    name = path_or_name.split("/", 1)[1] if "/" in path_or_name else path_or_name
+    if Path(name).suffix.lower() not in ALLOWED_SUFFIXES:
+        raise ValueError("无效的文件引用：不支持的文件类型")
+    path = settings.UPLOADS_DIR / name
     if not path.is_file():
-        raise ValueError(f"上传文件不存在或已被清理：{upload_id}")
+        raise ValueError(f"上传文件不存在或已被清理：{path_or_name}")
     if path.suffix.lower() == ".pdf":
         return _extract_pdf_text(path.read_bytes())
     return decode_text(path.read_bytes())

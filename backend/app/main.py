@@ -35,6 +35,7 @@ from app.routers import (
     mcp,
     pipelines,
     plugins,
+    providers,
     registry,
     runs,
     skills,
@@ -90,6 +91,7 @@ app.include_router(mcp.router, prefix=API_V1)
 app.include_router(agents.router, prefix=API_V1)
 app.include_router(conversations.router, prefix=API_V1)
 app.include_router(knowledge.router, prefix=API_V1)
+app.include_router(providers.router, prefix=API_V1)
 app.include_router(health.router, prefix=API_V1)
 
 # 静态文件：/uploads/*

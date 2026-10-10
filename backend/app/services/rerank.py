@@ -1,4 +1,4 @@
-"""BGE-Reranker-v2-m3 精排服务 — 通过 TEI HTTP API。"""
+"""BGE-Reranker 精排服务 — 优先从 DB settings 读取配置，fallback 到 .env 的 TEI。"""
 
 from __future__ import annotations
 
@@ -10,10 +10,23 @@ from app.utils.http import http_client
 logger = logging.getLogger(__name__)
 
 
+async def _get_rerank_config() -> tuple[str, str]:
+    """返回 (base_url, model_name)。优先从 settings 表读取，fallback 到 .env。"""
+    try:
+        from app.services.model_lookup import resolve_default_model
+        base_url, _api_key, model_name = await resolve_default_model("default_rerank_model")
+        return base_url, model_name
+    except Exception:
+        logger.debug("DB rerank 配置读取失败，fallback 到 .env", exc_info=True)
+
+    return settings.TEI_RERANK_URL, "bge-reranker-v2-m3"
+
+
 async def _rerank_batch(query: str, texts: list[str]) -> list[float]:
     """单批 rerank，返回与 texts 等长的分数列表。"""
+    base_url, _model = await _get_rerank_config()
     response = await http_client().post(
-        f"{settings.TEI_RERANK_URL}/rerank",
+        f"{base_url}/rerank",
         json={"query": query, "texts": texts, "truncate": True},
     )
     response.raise_for_status()

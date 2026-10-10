@@ -72,9 +72,29 @@ async def run_agent_chat(
     """
 
     # 1. 构建 user message 并持久化
+    doc_ids: list[int] = []
     if file_ids:
+        # 同步入库：解析文件 → 写入切片 → 可检索
+        from app.services.knowledge import ingest_document_sync
+
         file_list = "\n".join(f"- /uploads/{fid}" for fid in file_ids)
         user_message = f"[附件]\n{file_list}\n\n{user_message}"
+
+        for fid in file_ids:
+            try:
+                # 从 upload 记录获取原始文件名
+                from app.models.upload import UploadRecord
+                from sqlmodel import select as sql_select
+                async with AsyncSessionLocal() as session:
+                    upload = (await session.exec(
+                        sql_select(UploadRecord).where(UploadRecord.stored_name == fid)
+                    )).first()
+                    filename = upload.filename if upload else fid
+
+                did = await ingest_document_sync(fid, filename)
+                doc_ids.append(did)
+            except Exception as exc:
+                logger.warning("[agent_chat] 文件 %s 入库失败: %s", fid, exc)
 
     async with AsyncSessionLocal() as session:
         session.add(MessageRecord(conversation_id=conversation_id, role="user", content=user_message))
@@ -83,16 +103,25 @@ async def run_agent_chat(
     # 2. 加载历史（含刚写入的 user message）
     messages = await _load_history(conversation_id)
 
-    # 4. 构建工具列表（含 Pipeline 工具）
+    # 4. 构建工具列表（含内置工具 + Pipeline 工具）
     tool_names: list[str] = list(agent.tools or [])
-    if agent.skills and "*" not in tool_names and "load_skill" not in tool_names:
+    if agent.skills and "load_skill" not in tool_names:
         tool_names.append("load_skill")
     tools, pipeline_prompt = await build_tools(tool_names)
 
     # 3. 插入 system prompt
-    if agent.system_prompt or agent.skills or pipeline_prompt:
+    if agent.system_prompt or agent.skills or pipeline_prompt or doc_ids or agent.tags:
         skill_prompt = build_skill_prompt(agent.skills) or ""
         parts = [agent.system_prompt or "", skill_prompt, pipeline_prompt or ""]
+        if agent.tags:
+            tag_str = "、".join(agent.tags)
+            parts.append(f"你的知识库范围：{tag_str}。检索时请传入 tags 参数限定范围。")
+        if doc_ids:
+            doc_id_str = ", ".join(str(d) for d in doc_ids)
+            parts.append(
+                f"用户上传了文件，文档 ID：[{doc_id_str}]。"
+                "如需检索文件内容，请使用 retrieve_knowledge 工具并传入 doc_ids 参数。"
+            )
         system_prompt = "\n\n".join(p for p in parts if p).strip()
         messages.insert(0, {"role": "system", "content": system_prompt})
 

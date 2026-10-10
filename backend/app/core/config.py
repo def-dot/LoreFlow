@@ -58,9 +58,6 @@ class Settings(BaseSettings):
     UPLOADS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "uploads"
     UPLOAD_MAX_MB: int = 20
 
-    # LLM Provider 配置文件路径（默认: 项目根目录 providers.yml）
-    PROVIDERS_FILE: Path = Path(__file__).resolve().parent.parent.parent.parent / "providers.yml"
-
     # Database
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432
