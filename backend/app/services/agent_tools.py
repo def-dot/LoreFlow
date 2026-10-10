@@ -14,115 +14,37 @@ from app.registry.skills import SKILL_REGISTRY
 logger = logging.getLogger(__name__)
 
 
-async def build_tools(tools_input: list[str]) -> tuple[list[dict[str, Any]] | None, str | None]:
-    """构建 OpenAI 格式工具列表 + Pipeline 目录 prompt。
-
-    返回 ``(tools, pipeline_prompt)`` — tools 为 None 表示无工具。
-    ``"*"`` 匹配全部工具（含 Pipeline）；``"pipeline"`` 匹配全部 Pipeline 工具。
+def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
+    """构建 OpenAI 格式工具列表。
     """
-    select_all = "*" in tools_input
-    select_all_pipeline = select_all or "pipeline" in tools_input
-
-    # 普通工具名（去掉 "*"/"pipeline" 通配符）
-    normal_names = [t for t in tools_input if t not in ("*", "pipeline")]
-
     result: list[dict[str, Any]] = []
-    pipeline_refs: list[str] = []
-
-    for name, td in TOOL_REGISTRY.items():
-        is_pipeline = td.metadata.get("group") == "pipeline"
-
-        if is_pipeline:
-            if select_all_pipeline:
-                pipeline_refs.append(name)
-                result.append(_tooldef_to_openai(td))
-            elif name in normal_names:
-                normal_names.remove(name)
-                pipeline_refs.append(name)
-                result.append(_tooldef_to_openai(td))
-        else:
-            if select_all or name in normal_names:
-                if name in normal_names:
-                    normal_names.remove(name)
-                result.append(_tooldef_to_openai(td))
-
-    for name in normal_names:
-        logger.warning("未知工具：%s", name)
-
-    # 构建 pipeline 目录 prompt
-    pipeline_prompt = await build_pipeline_prompt(select_all_pipeline, pipeline_refs)
-
-    return result or None, pipeline_prompt
-
-
-def _tooldef_to_openai(td: FuncDef) -> dict[str, Any]:
-    """FuncDef → OpenAI function calling 格式。"""
-    schema = td.input_schema or {"type": "object", "properties": {}}
-    return {
-        "type": "function",
-        "function": {"name": td.name, "description": td.description, "parameters": schema},
-    }
-
-
-async def build_pipeline_prompt(select_all: bool, refs: list[str]) -> str | None:
-    """构建可用 Pipeline 的结构化目录，注入 Agent system prompt。"""
-    pipelines: list[dict[str, Any]] = []
-    for name in refs:
+    for name in tools_input:
         td = TOOL_REGISTRY.get(name)
         if td is None:
+            logger.warning("未知工具：%s", name)
             continue
-
-        # 从 JSON Schema 提取参数信息
-        schema = td.input_schema or {}
-        props = schema.get("properties", {})
-        required_set = set(schema.get("required", []))
-        params_info: list[str] = []
-        for pname, pschema in props.items():
-            ptype = pschema.get("type", "string")
-            pdesc = pschema.get("description", pname)
-            req = "必填" if pname in required_set else "可选"
-            enum_info = ""
-            if "enum" in pschema:
-                enum_info = f"，可选值：{pschema['enum']}"
-            params_info.append(f"    - {pname} ({ptype}, {req})：{pdesc}{enum_info}")
-
-        params_block = "\n".join(params_info) if params_info else "    （无参数）"
-        pipelines.append(f"  <workflow name=\"{name}\">\n"
-                         f"    <description>{td.description}</description>\n"
-                         f"    <params>\n{params_block}\n    </params>\n"
-                         f"  </workflow>")
-
-    if not pipelines:
-        return None
-
-    catalog = "\n".join(pipelines)
-    return (
-        "以下工作流可通过 run_pipeline 工具执行。"
-        "当用户任务匹配某个工作流的描述时，调用该工具并将所需参数传入 inputs 字段。\n\n"
-        f"<workflows>\n{catalog}\n</workflows>"
-    )
+        schema = td.input_schema or {"type": "object", "properties": {}}
+        result.append({
+            "type": "function",
+            "function": {"name": td.name, "description": td.description, "parameters": schema},
+        })
+    return result or None
 
 
 def build_skill_prompt(skill_names: list[str]) -> str | None:
     """构建技能目录 prompt，无技能返回 None。"""
-    skill_names = list(SKILL_REGISTRY) if "*" in skill_names else skill_names
-    if not skill_names:
-        return None
-    
-    resolved = []
-    for name in skill_names:
-        td = SKILL_REGISTRY.get(name)
+    skills = []
+    for n in skill_names:
+        td = SKILL_REGISTRY.get(n)
         if td is None:
-            logger.warning("未知技能：%s", name)
-            continue
-        resolved.append(td)
-
-    if not resolved:
+            logger.warning("未知技能：%s", n)
+        else:
+            skills.append(td)
+    if not skills:
         return None
-
     catalog = "\n".join(
         f"  <skill><name>{s.name}</name><description>{s.description}</description></skill>"
-        for s in resolved
+        for s in skills
     )
     return (
         "以下技能提供特定任务的专业指令。当任务匹配某个技能的描述时，"
