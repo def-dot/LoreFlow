@@ -6,7 +6,8 @@ from enum import StrEnum
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, Index, Text
 from sqlalchemy.dialects.postgresql import ARRAY, INTEGER, TSVECTOR
-from sqlmodel import Field, SQLModel
+from sqlalchemy.orm import relationship
+from sqlmodel import Field, Relationship, SQLModel
 
 from app.core.config import settings
 
@@ -32,7 +33,6 @@ class DocumentRecord(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     filename: str = Field(max_length=500)
-    upload_id: str = Field(max_length=200)
     file_path: str | None = Field(default=None, max_length=500)
     file_size: int | None = Field(default=None)
     file_ext: str | None = Field(default=None, max_length=20)
@@ -43,6 +43,15 @@ class DocumentRecord(SQLModel, table=True):
     parse_duration_ms: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None)
+
+    tags: list["TagRecord"] = Relationship(
+        sa_relationship=relationship(
+            "TagRecord",
+            secondary="document_tags",
+            order_by="TagRecord.name",
+            lazy="selectin",
+        ),
+    )
 
 
 # ---------- 切片 ----------

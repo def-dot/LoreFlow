@@ -20,6 +20,16 @@ def stub_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def stub_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """绕过 Redis：取消任务改为无操作（delete_document 会调 cancel_parse）。"""
+
+    async def _noop(_doc_id: int) -> bool:
+        return False
+
+    monkeypatch.setattr(arq_mod, "cancel_parse", _noop)
+
+
+@pytest.fixture(autouse=True)
 def chwd_to_uploads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CWD 指向 tmp_path，使 Path(stored_name) 相对路径正确解析。"""
     (tmp_path / "uploads").mkdir()
@@ -38,8 +48,8 @@ async def test_upload_and_infer_tags(client: AsyncClient, monkeypatch: pytest.Mo
     """/uploads 存文件，/documents/infer-tags 推断标签，/documents/upload 入库。"""
     import app.services.knowledge as kb
 
-    async def _fake_infer(text: str) -> list[dict]:
-        return [{"id": 99, "name": "设定"}]
+    async def _fake_infer(text: str) -> list[str]:
+        return ["设定"]
 
     monkeypatch.setattr(kb, "infer_tags_for_text", _fake_infer)
 
@@ -53,12 +63,12 @@ async def test_upload_and_infer_tags(client: AsyncClient, monkeypatch: pytest.Mo
     infer = await client.post("/api/v1/documents/infer-tags", json={"stored_names": [s1, s2]})
     assert infer.status_code == 200
     for item in infer.json()["data"]["items"]:
-        assert item["suggested_tags"] == [{"id": 99, "name": "设定"}]
+        assert item["suggested_tags"] == ["设定"]
 
     # 入库
     up = await _upload_docs(client, [
-        {"stored_name": s1, "filename": "a.md", "tag_ids": [99]},
-        {"stored_name": s2, "filename": "b.txt", "tag_ids": []},
+        {"stored_name": s1, "filename": "a.md", "tags": ["设定"]},
+        {"stored_name": s2, "filename": "b.txt", "tags": []},
     ])
     assert up.status_code == 202
     items = up.json()["data"]["items"]
@@ -79,18 +89,108 @@ async def test_upload_rejects_bad_extension(client: AsyncClient) -> None:
 
 
 async def test_upload_with_tags(client: AsyncClient) -> None:
-    """入库时指定 tag_ids，文档带上标签。"""
-    t1 = (await client.post("/api/v1/tags", json={"name": "设定"})).json()["data"]
-    t2 = (await client.post("/api/v1/tags", json={"name": "人物"})).json()["data"]
+    """入库时按标签名关联；未登记的标签自动创建。"""
+    await client.post("/api/v1/tags", json={"name": "设定"})
 
     r = await _upload_file(client, "tagged.md", "内容".encode())
     stored = r.json()["data"]["stored_name"]
 
     up = await _upload_docs(client, [
-        {"stored_name": stored, "filename": "tagged.md", "tag_ids": [t1["id"], t2["id"]]},
+        {"stored_name": stored, "filename": "tagged.md", "tags": ["设定", "人物"]},
     ])
     assert up.status_code == 202
     doc_id = up.json()["data"]["items"][0]["doc_id"]
     docs = (await client.get("/api/v1/documents")).json()["data"]["items"]
     doc = next(d for d in docs if d["id"] == doc_id)
-    assert {t["id"] for t in doc["tags"]} == {t1["id"], t2["id"]}
+    assert set(doc["tags"]) == {"设定", "人物"}
+    # 「人物」被自动登记进标签表
+    assert set((await client.get("/api/v1/tags")).json()["data"]) >= {"设定", "人物"}
+
+
+async def test_rename_tag_updates_documents(client: AsyncClient) -> None:
+    """重命名标签后，文档上的标签跟着变；按标签名筛选仍命中。"""
+    r = await _upload_file(client, "a.md", "内容".encode())
+    stored = r.json()["data"]["stored_name"]
+    up = await _upload_docs(client, [{"stored_name": stored, "filename": "a.md", "tags": ["旧名"]}])
+    doc_id = up.json()["data"]["items"][0]["doc_id"]
+
+    renamed = await client.put("/api/v1/tags/旧名", json={"name": "新名"})
+    assert renamed.status_code == 200 and renamed.json()["data"] == {"name": "新名"}
+
+    doc = (await client.get(f"/api/v1/documents/{doc_id}")).json()["data"]
+    assert doc["tags"] == ["新名"]
+
+    hit = await client.get("/api/v1/documents", params={"tags": "新名"})
+    assert [d["id"] for d in hit.json()["data"]["items"]] == [doc_id]
+    miss = await client.get("/api/v1/documents", params={"tags": "旧名"})
+    assert miss.json()["data"]["items"] == []
+
+
+# ── 同名冲突预检 ───────────────────────────────────────────────────
+
+
+async def test_upload_same_name_rejected(client: AsyncClient) -> None:
+    """同名文档：整批中止，error_code=duplicate_name。"""
+    r1 = await _upload_file(client, "a.md", b"# V1")
+    stored1 = r1.json()["data"]["stored_name"]
+    up1 = await _upload_docs(client, [{"stored_name": stored1, "filename": "a.md", "tags": []}])
+    assert up1.json()["data"]["items"][0]["doc_id"] is not None
+
+    # 同名再次入库
+    r2 = await _upload_file(client, "a.md", b"# V2")
+    stored2 = r2.json()["data"]["stored_name"]
+    up2 = await _upload_docs(client, [{"stored_name": stored2, "filename": "a.md", "tags": []}])
+    items = up2.json()["data"]["items"]
+    assert items[0]["doc_id"] is None
+    assert items[0]["error_code"] == "duplicate_name"
+    assert "同名文档" in items[0]["error"]
+
+    # 总数仍为 1
+    total = (await client.get("/api/v1/documents")).json()["data"]["total"]
+    assert total == 1
+
+
+async def test_upload_batch_rejected_on_any_duplicate(client: AsyncClient) -> None:
+    """批量入库中有一个同名，整批中止，其余也不入库。"""
+    r1 = await _upload_file(client, "exist.md", b"old")
+    stored1 = r1.json()["data"]["stored_name"]
+    await _upload_docs(client, [{"stored_name": stored1, "filename": "exist.md", "tags": []}])
+
+    # 上传新文件 + 同名文件
+    r_new = await _upload_file(client, "new.md", b"new")
+    r_dup = await _upload_file(client, "exist.md", b"dup")
+    up = await _upload_docs(client, [
+        {"stored_name": r_new.json()["data"]["stored_name"], "filename": "new.md", "tags": []},
+        {"stored_name": r_dup.json()["data"]["stored_name"], "filename": "exist.md", "tags": []},
+    ])
+    items = up.json()["data"]["items"]
+    # 整批中止：new.md 也没入库
+    assert items[0]["doc_id"] is None
+    assert items[0]["error"] is None
+    assert items[1]["error_code"] == "duplicate_name"
+
+    total = (await client.get("/api/v1/documents")).json()["data"]["total"]
+    assert total == 1  # 只有最初那个
+
+
+async def test_delete_document_cleans_disk(client: AsyncClient) -> None:
+    """DELETE /documents/{id} 清理暂存文件和 parsed json。"""
+    from app.core.config import settings
+
+    data = b"# To delete"
+    r = await _upload_file(client, "del.md", data)
+    stored = r.json()["data"]["stored_name"]
+    up = await _upload_docs(client, [{"stored_name": stored, "filename": "del.md", "tags": []}])
+    doc_id = up.json()["data"]["items"][0]["doc_id"]
+
+    staged_file = settings.UPLOADS_DIR / Path(stored).name
+    parsed_json = Path("parsed", f"{doc_id}.json")
+    parsed_json.parent.mkdir(parents=True, exist_ok=True)
+    parsed_json.write_text("{}")
+    assert staged_file.exists()
+
+    resp = await client.delete(f"/api/v1/documents/{doc_id}")
+    assert resp.status_code == 200
+
+    assert not staged_file.exists()
+    assert not parsed_json.exists()

@@ -1,46 +1,98 @@
 """知识库管理 API。"""
 
+import asyncio
 from io import BytesIO
 from pathlib import Path
 
 import pypdfium2 as pdfium
 from docling_core.types.doc import DoclingDocument  # type: ignore[attr-defined]
-from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
-from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core import database
 from app.core.response import UnifiedResponseRoute
 from app.models.knowledge import DocumentRecord, DocumentTagRecord, TagRecord
-from app.schemas.knowledge import ChunkListResponse, DocumentListResponse, StatusCounts, TagInfo
+from app.schemas.knowledge import ChunkListResponse, DocumentListResponse, StatusCounts
 from app.services import knowledge
-from app.utils import files
 
 # ── 文档（扁平接口）──────────────────────────────────────────────────
 
 router = APIRouter(route_class=UnifiedResponseRoute, tags=["knowledge"])
 
 
-@router.post("/documents/upload", status_code=202)
-async def upload_document_direct(
-    file: UploadFile = File(..., description="文档文件（.txt/.md/.pdf）"),
-    tag_ids: str = Form("", description="标签 ID 列表，逗号分隔"),
-) -> dict:
-    """直接上传文档。"""
-    filename = file.filename or ""
-    suffix = Path(filename).suffix.lower()
-    if suffix not in files.ALLOWED_SUFFIXES:
-        raise ValueError(f"不支持的文件类型 {suffix or '（无扩展名）'}")
-    data = await file.read()
-    if not data:
-        raise ValueError("上传的文件内容为空")
-    if len(data) > settings.UPLOAD_MAX_MB * 1024 * 1024:
-        raise ValueError(f"文件超过大小上限（{settings.UPLOAD_MAX_MB}MB）")
+class UploadItem(BaseModel):
+    stored_name: str
+    filename: str
+    tags: list[str] = []
 
-    parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()] if tag_ids else []
-    stored_name = files.save_upload(data, suffix)  # uploads/{uuid}.ext
-    result = await knowledge.ingest_document(stored_name, filename, tag_ids=parsed_tag_ids)
-    return {"doc_id": result["doc_id"], "filename": filename, "status": result["status"]}
+
+class UploadRequest(BaseModel):
+    items: list[UploadItem]
+
+
+class InferTagsRequest(BaseModel):
+    stored_names: list[str]
+
+
+@router.post("/documents/infer-tags", status_code=200)
+async def infer_tags(body: InferTagsRequest) -> dict:
+    """对已保存文件读文本预览并 LLM 推断标签，并行处理，逐文件返回推荐标签。"""
+
+    async def _read_preview(stored_name: str) -> tuple[str, str]:
+        """读取文件文本预览，返回 (stored_name, text_preview)。"""
+        file_path = Path(stored_name)
+        suffix = file_path.suffix.lower()
+        text = ""
+        if suffix in (".txt", ".md"):
+            text = file_path.read_text(encoding="utf-8", errors="replace")[:2000]
+        elif suffix == ".pdf":
+            try:
+                pdf = pdfium.PdfDocument(str(file_path))
+                text = "\n".join(
+                    pdf[i].get_textpage().get_text_range() for i in range(min(len(pdf), 3))
+                )[:2000]
+            except Exception:
+                text = ""
+        return stored_name, text
+
+    previews = await asyncio.gather(*(_read_preview(s) for s in body.stored_names))
+
+    # 并行 LLM 推断
+    async def _infer(stored_name: str, text: str) -> dict:
+        if not text:
+            return {"stored_name": stored_name, "suggested_tags": []}
+        suggested = await knowledge.infer_tags_for_text(text)
+        return {"stored_name": stored_name, "suggested_tags": suggested}
+
+    results = await asyncio.gather(*(_infer(sn, txt) for sn, txt in previews))
+    return {"items": list(results)}
+
+
+@router.post("/documents/upload", status_code=202)
+async def upload_documents(body: UploadRequest) -> dict:
+    """批量入库（文件已在盘上）；同名冲突整批中止。"""
+    # ── 预检查：同名冲突整批中止 ──
+    filenames = [item.filename for item in body.items]
+    existing = await knowledge.get_existing_filenames(filenames)
+    if existing:
+        return {
+            "items": [
+                {"filename": item.filename, "doc_id": None, "status": None,
+                 "error": f"同名文档「{item.filename}」已存在" if item.filename in existing else None,
+                 "error_code": "duplicate_name" if item.filename in existing else None}
+                for item in body.items
+            ]
+        }
+
+    # ── 正常入库 ──
+    items: list[dict] = []
+    for item in body.items:
+        try:
+            result = await knowledge.ingest_document(item.stored_name, item.filename, tags=item.tags)
+            items.append({"filename": item.filename, "doc_id": result["doc_id"], "status": result["status"], "error": None, "error_code": None})
+        except Exception as exc:
+            items.append({"filename": item.filename, "doc_id": None, "status": None, "error": str(exc), "error_code": None})
+    return {"items": items}
 
 
 @router.get("/documents")
@@ -49,11 +101,11 @@ async def list_all_documents(
     offset: int = Query(0, ge=0),
     status: str = Query("", description="按状态筛选"),
     q: str = Query("", description="按文件名搜索"),
-    tag_ids: str = Query("", description="按标签筛选，逗号分隔"),
+    tags: str = Query("", description="按标签名筛选，逗号分隔"),
 ) -> DocumentListResponse:
-    parsed_tag_ids = [int(x) for x in tag_ids.split(",") if x.strip()] if tag_ids else []
+    parsed_tags = [x.strip() for x in tags.split(",") if x.strip()] if tags else []
     items, total = await knowledge.list_all_documents(
-        limit=limit, offset=offset, status=status, q=q, tag_ids=parsed_tag_ids
+        limit=limit, offset=offset, status=status, q=q, tags=parsed_tags
     )
     return DocumentListResponse(items=items, total=total)
 
@@ -91,14 +143,14 @@ async def delete_document(doc_id: int) -> dict:
 
 
 class UpdateDocTags(BaseModel):
-    tag_ids: list[int]
+    tags: list[str]
 
 
 @router.put("/documents/{doc_id}/tags")
 async def update_document_tags(doc_id: int, body: UpdateDocTags) -> dict:
-    if not await knowledge.update_document_tags(doc_id, body.tag_ids):
+    if not await knowledge.update_document_tags(doc_id, body.tags):
         raise HTTPException(status_code=404, detail="文档不存在")
-    return {"document_id": doc_id, "tag_ids": body.tag_ids}
+    return {"document_id": doc_id, "tags": body.tags}
 
 
 @router.post("/documents/{doc_id}/cancel")
@@ -156,7 +208,7 @@ async def get_document_page(doc_id: int, page_no: int) -> dict:
 @router.get("/documents/{doc_id}/pages/{page_no}/image")
 async def get_page_image(doc_id: int, page_no: int) -> Response:
     """渲染 PDF 单页为 PNG 图片，非 PDF 返回原文纯文本"""
-    async with AsyncSessionLocal() as db:
+    async with database.AsyncSessionLocal() as db:
         doc_record = await db.get(DocumentRecord, doc_id)
     if doc_record is None or not doc_record.file_path:
         raise HTTPException(status_code=404, detail="文档不存在")
@@ -193,25 +245,31 @@ class TagCreate(BaseModel):
 
 @router.post("/tags", status_code=201)
 async def create_tag(body: TagCreate) -> dict:
-    tag = await knowledge.create_tag(body.name)
-    return {"id": tag["id"], "name": tag["name"]}
+    try:
+        return await knowledge.create_tag(body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/tags")
-async def list_tags() -> list[dict]:
+async def list_tags() -> list[str]:
     return await knowledge.list_tags()
 
 
-@router.put("/tags/{tag_id}")
-async def update_tag(tag_id: int, body: TagCreate) -> dict:
-    tag = await knowledge.update_tag(tag_id, body.name)
+@router.put("/tags/{tag_name}")
+async def update_tag(tag_name: str, body: TagCreate) -> dict:
+    """重命名标签，文档上的引用由外键级联更新。"""
+    try:
+        tag = await knowledge.update_tag(tag_name, body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")
-    return {"id": tag["id"], "name": tag["name"]}
+    return tag
 
 
-@router.delete("/tags/{tag_id}")
-async def delete_tag(tag_id: int) -> dict:
-    if not await knowledge.delete_tag(tag_id):
+@router.delete("/tags/{tag_name}")
+async def delete_tag(tag_name: str) -> dict:
+    if not await knowledge.delete_tag(tag_name):
         raise HTTPException(status_code=404, detail="标签不存在")
-    return {"deleted": tag_id}
+    return {"deleted": tag_name}

@@ -1,10 +1,5 @@
 import { api } from './request'
 
-export interface TagInfo {
-  id: number
-  name: string
-}
-
 export interface DocumentItem {
   id: number
   filename: string
@@ -14,7 +9,7 @@ export interface DocumentItem {
   parse_duration_ms: number | null
   file_size: number | null
   created_at: string | null
-  tags: TagInfo[]
+  tags: string[]
 }
 
 export interface DocumentListResponse {
@@ -50,9 +45,9 @@ export const listAllDocuments = (params?: {
   offset?: number
   status?: string
   q?: string
-  tag_ids?: number[]
+  tags?: string[]
 }) => api.get<DocumentListResponse>('/documents', {
-  params: { ...params, tag_ids: params?.tag_ids?.length ? params.tag_ids.join(',') : undefined },
+  params: { ...params, tags: params?.tags?.length ? params.tags.join(',') : undefined },
 })
 
 export const getDocument = (docId: number) =>
@@ -73,8 +68,8 @@ export const cancelDocument = (docId: number) =>
 export const retryDocument = (docId: number) =>
   api.post(`/documents/${docId}/retry`)
 
-export const updateDocumentTags = (docId: number, tagIds: number[]) =>
-  api.put(`/documents/${docId}/tags`, { tag_ids: tagIds })
+export const updateDocumentTags = (docId: number, tags: string[]) =>
+  api.put(`/documents/${docId}/tags`, { tags })
 
 // 直接上传文档（批量，逐文件返回入库结果）
 export interface UploadResult {
@@ -82,33 +77,34 @@ export interface UploadResult {
   doc_id: number | null
   status: string | null
   error: string | null
+  error_code: 'duplicate_name' | null
 }
 
 // 推断标签
 export interface InferTagsItem {
   stored_name: string
-  suggested_tags: TagInfo[]
+  suggested_tags: string[]
 }
 
 export const inferTags = (storedNames: string[]) =>
   api.post<{ items: InferTagsItem[] }>('/documents/infer-tags', { stored_names: storedNames })
 
-// 确认入库（文件已在盘上，传 stored_name + 标签）
-export const uploadDocuments = (items: { stored_name: string; filename: string; tag_ids: number[] }[]) =>
+// 确认入库（文件已在盘上，传 stored_name + 标签名）
+export const uploadDocuments = (items: { stored_name: string; filename: string; tags: string[] }[]) =>
   api.post<{ items: UploadResult[] }>('/documents/upload', { items })
 
-// 标签 CRUD
+// 标签 CRUD（以标签名为键）
 export const listTags = () =>
-  api.get<TagInfo[]>('/tags')
+  api.get<string[]>('/tags')
 
 export const createTag = (name: string) =>
-  api.post<TagInfo>('/tags', { name })
+  api.post<{ name: string }>('/tags', { name })
 
-export const updateTag = (id: number, name: string) =>
-  api.put<TagInfo>(`/tags/${id}`, { name })
+export const updateTag = (oldName: string, newName: string) =>
+  api.put<{ name: string }>(`/tags/${encodeURIComponent(oldName)}`, { name: newName })
 
-export const deleteTag = (id: number) =>
-  api.delete(`/tags/${id}`)
+export const deleteTag = (name: string) =>
+  api.delete(`/tags/${encodeURIComponent(name)}`)
 
 // 解析结果对照
 export interface PageData {

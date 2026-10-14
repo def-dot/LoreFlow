@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Delete, RefreshRight, VideoPause, Document, View, Search, EditPen, UploadFilled, Loading,
+  Delete, RefreshRight, VideoPause, Document, View, Search, EditPen, UploadFilled, Loading, Close,
 } from '@element-plus/icons-vue'
 import {
   listAllDocuments,
@@ -19,7 +19,6 @@ import {
   updateTag,
   deleteTag,
   type DocumentItem,
-  type TagInfo,
   type StatusCounts,
 } from '@/api/knowledge'
 import { uploadFile } from '@/api/uploads'
@@ -32,7 +31,7 @@ const documents = ref<DocumentItem[]>([])
 const loading = ref(false)
 const searchFileName = ref('')
 const filterStatus = ref('')
-const filterTagIds = ref<number[]>([])
+const filterTagNames = ref<string[]>([])
 
 const page = ref(1)
 const pageSize = 20
@@ -63,7 +62,7 @@ const statusMeta: Record<string, { label: string; color: string; live?: boolean 
 }
 
 const hasFilter = computed(() =>
-  !!searchFileName.value.trim() || filterStatus.value !== '' || filterTagIds.value.length > 0,
+  !!searchFileName.value.trim() || filterStatus.value !== '' || filterTagNames.value.length > 0,
 )
 
 // 用全局状态计数判断是否在解析：翻页/筛选后仍能持续轮询
@@ -77,7 +76,7 @@ async function fetchDocuments(opts: { silent?: boolean } = {}) {
       offset: (page.value - 1) * pageSize,
       status: filterStatus.value || undefined,
       q: searchFileName.value.trim() || undefined,
-      tag_ids: filterTagIds.value.length ? filterTagIds.value : undefined,
+      tags: filterTagNames.value.length ? filterTagNames.value : undefined,
     })
     documents.value = res.items
     total.value = res.total
@@ -107,10 +106,10 @@ function onStatusSelectChange() {
   fetchDocuments()
 }
 
-function toggleTagFilter(tagId: number) {
-  const idx = filterTagIds.value.indexOf(tagId)
-  if (idx >= 0) filterTagIds.value.splice(idx, 1)
-  else filterTagIds.value.push(tagId)
+function toggleTagFilter(tagName: string) {
+  const idx = filterTagNames.value.indexOf(tagName)
+  if (idx >= 0) filterTagNames.value.splice(idx, 1)
+  else filterTagNames.value.push(tagName)
   page.value = 1
   fetchDocuments()
 }
@@ -118,7 +117,7 @@ function toggleTagFilter(tagId: number) {
 function clearFilters() {
   searchFileName.value = ''
   filterStatus.value = ''
-  filterTagIds.value = []
+  filterTagNames.value = []
   page.value = 1
   fetchDocuments()
 }
@@ -135,7 +134,7 @@ function onSearchChange() {
 
 // ---- 标签 ----
 
-const tags = ref<TagInfo[]>([])
+const tags = ref<string[]>([])
 const addingTag = ref(false)
 const addTagInputRef = ref<any>(null)
 
@@ -156,7 +155,7 @@ watch(addingTag, (v) => {
   }
 })
 
-function handleTagMenu(command: string, tag: TagInfo) {
+function handleTagMenu(command: string, tag: string) {
   if (command === 'edit') startEditTag(tag)
   else if (command === 'delete') handleDeleteTag(tag)
 }
@@ -185,27 +184,28 @@ function cancelAddTag() {
   newTagName.value = ''
 }
 
-async function handleDeleteTag(tag: TagInfo) {
+async function handleDeleteTag(tag: string) {
   try {
-    await ElMessageBox.confirm(`删除标签「${tag.name}」后，文档上的该标签也会一并移除。`, '删除标签', { type: 'warning' })
-    await deleteTag(tag.id)
-    const idx = filterTagIds.value.indexOf(tag.id)
-    if (idx >= 0) filterTagIds.value.splice(idx, 1)
+    await ElMessageBox.confirm(`删除标签「${tag}」后，文档上的该标签也会一并移除。`, '删除标签', { type: 'warning' })
+    await deleteTag(tag)
+    const idx = filterTagNames.value.indexOf(tag)
+    if (idx >= 0) filterTagNames.value.splice(idx, 1)
     await Promise.all([fetchTags(), refreshAll()])
     ElMessage.success('已删除')
   } catch { /* 用户取消 */ }
 }
 
-const editingTagId = ref<number | null>(null)
+// 正在重命名的标签原名；editingTagName 为输入框里的新名
+const editingTagOld = ref<string | null>(null)
 const editingTagName = ref('')
 
-function startEditTag(tag: TagInfo) {
-  editingTagId.value = tag.id
-  editingTagName.value = tag.name
+function startEditTag(tag: string) {
+  editingTagOld.value = tag
+  editingTagName.value = tag
 }
 
-watch(editingTagId, (id) => {
-  if (id === null) return
+watch(editingTagOld, (oldName) => {
+  if (oldName === null) return
   setTimeout(() => {
     const el = document.querySelector('.tag-edit-input input') as HTMLInputElement | null
     if (el) {
@@ -216,14 +216,15 @@ watch(editingTagId, (id) => {
 })
 
 async function confirmEditTag() {
-  const id = editingTagId.value
+  const oldName = editingTagOld.value
   const name = editingTagName.value.trim()
-  if (!id || !name) { editingTagId.value = null; return }
-  const orig = tags.value.find(t => t.id === id)
-  if (orig && orig.name === name) { editingTagId.value = null; return }
+  if (!oldName || !name) { editingTagOld.value = null; return }
+  if (oldName === name) { editingTagOld.value = null; return }
   try {
-    await updateTag(id, name)
-    editingTagId.value = null
+    await updateTag(oldName, name)
+    editingTagOld.value = null
+    const fi = filterTagNames.value.indexOf(oldName)
+    if (fi >= 0) filterTagNames.value.splice(fi, 1, name)
     await Promise.all([fetchTags(), fetchDocuments()])
     ElMessage.success('已更新')
   } catch (err: any) {
@@ -232,7 +233,7 @@ async function confirmEditTag() {
 }
 
 function cancelEditTag() {
-  editingTagId.value = null
+  editingTagOld.value = null
 }
 
 // ---- 入库（上传） ----
@@ -244,12 +245,12 @@ interface PendingItem {
   stored_name: string | null
   filename: string
   error: string | null
-  tag_ids: number[]
+  tags: string[]
   tags_loading: boolean
 }
 
 const pendingItems = ref<PendingItem[]>([])
-const allTags = ref<TagInfo[]>([])
+const allTags = ref<string[]>([])
 const previewing = ref(false)
 const uploadDialogVisible = ref(false)
 const uploading = ref(false)
@@ -278,16 +279,16 @@ async function acceptFiles(files: File[]) {
   try {
     // 获取全部标签
     const allTagsResp = await listTags()
-    allTags.value = allTagsResp as unknown as TagInfo[]
+    allTags.value = allTagsResp
 
     // 逐文件上传（复用 /uploads 接口）
     const items: PendingItem[] = []
     for (const f of ok) {
       try {
         const rec = await uploadFile(f)
-        items.push({ stored_name: rec.stored_name, filename: rec.filename, error: null, tag_ids: [], tags_loading: true })
+        items.push({ stored_name: rec.stored_name, filename: rec.filename, error: null, tags: [], tags_loading: true })
       } catch {
-        items.push({ stored_name: null, filename: f.name, error: '上传失败', tag_ids: [], tags_loading: false })
+        items.push({ stored_name: null, filename: f.name, error: '上传失败', tags: [], tags_loading: false })
       }
     }
     pendingItems.value = items
@@ -300,7 +301,7 @@ async function acceptFiles(files: File[]) {
         for (const r of results) {
           const target = pendingItems.value.find(p => p.stored_name === r.stored_name)
           if (target) {
-            target.tag_ids = r.suggested_tags.map(t => t.id)
+            target.tags = r.suggested_tags
             target.tags_loading = false
           }
         }
@@ -345,18 +346,34 @@ function onDrop(e: DragEvent) {
   if (files?.length) acceptFiles([...files])
 }
 
+function removePendingItem(index: number) {
+  pendingItems.value.splice(index, 1)
+  if (!pendingItems.value.length) uploadDialogVisible.value = false
+}
+
 async function confirmUpload() {
   const valid = pendingItems.value.filter(i => i.stored_name && !i.error)
   if (!valid.length) return
   uploading.value = true
   try {
     const { items } = await uploadDocuments(
-      valid.map(i => ({ stored_name: i.stored_name!, filename: i.filename, tag_ids: i.tag_ids })),
+      valid.map(i => ({ stored_name: i.stored_name!, filename: i.filename, tags: i.tags })),
     )
-    const failed = items.filter(i => i.error)
-    const okCount = items.length - failed.length
-    if (okCount) ElMessage.success(`已入队 ${okCount} 个文件，后台正在解析`)
-    for (const f of failed) ElMessage.error(`${f.filename}：${f.error}`)
+
+    // 同名冲突 → 标记冲突项，弹窗保留
+    const conflicts = items.filter(r => r.error_code === 'duplicate_name')
+    if (conflicts.length) {
+      for (const c of conflicts) {
+        const target = pendingItems.value.find(p => p.filename === c.filename)
+        if (target) target.error = c.error
+      }
+      ElMessage.error(`同名已存在，未入库：${conflicts.map(r => r.filename).join('、')}`)
+      return
+    }
+
+    // 全部成功
+    const okCount = items.filter(r => !r.error).length
+    ElMessage.success(`${okCount} 个已入队`)
     uploadDialogVisible.value = false
     pendingItems.value = []
     await refreshAll()
@@ -370,6 +387,12 @@ async function confirmUpload() {
 function cancelUpload() {
   uploadDialogVisible.value = false
   pendingItems.value = []
+}
+
+function togglePreviewTag(item: PendingItem, tagName: string) {
+  const idx = item.tags.indexOf(tagName)
+  if (idx >= 0) item.tags.splice(idx, 1)
+  else item.tags.push(tagName)
 }
 
 // ---- 文档操作 ----
@@ -423,14 +446,13 @@ function openDocument(row: DocumentItem) {
 
 // ---- 文档标签编辑 ----
 
-async function handleDocTagChange(row: DocumentItem, tagId: number, checked: boolean) {
-  const currentIds = row.tags.map(t => t.id)
-  const nextIds = checked
-    ? [...currentIds, tagId]
-    : currentIds.filter(id => id !== tagId)
+async function handleDocTagChange(row: DocumentItem, tagName: string, checked: boolean) {
+  const next = checked
+    ? [...row.tags, tagName]
+    : row.tags.filter(n => n !== tagName)
   try {
-    await updateDocumentTags(row.id, nextIds)
-    row.tags = tags.value.filter(t => nextIds.includes(t.id))
+    await updateDocumentTags(row.id, next)
+    row.tags = next
   } catch {
     ElMessage.error('更新标签失败')
   }
@@ -541,14 +563,14 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="toolbar-row tag-row">
-          <template v-for="t in tags" :key="t.id">
-            <el-dropdown v-if="editingTagId !== t.id" trigger="contextmenu" @command="handleTagMenu($event, t)">
+          <template v-for="t in tags" :key="t">
+            <el-dropdown v-if="editingTagOld !== t" trigger="contextmenu" @command="handleTagMenu($event, t)">
               <button
                 type="button"
                 class="tag-chip"
-                :class="{ on: filterTagIds.includes(t.id) }"
-                @click="toggleTagFilter(t.id)"
-              >{{ t.name }}</button>
+                :class="{ on: filterTagNames.includes(t) }"
+                @click="toggleTagFilter(t)"
+              >{{ t }}</button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item :icon="EditPen" command="edit">编辑</el-dropdown-item>
@@ -594,19 +616,19 @@ onUnmounted(() => {
                   @click="openDocument(row)"
                 >{{ row.filename }}</span>
                 <span class="doc-tags-wrap">
-                  <span v-for="t in row.tags" :key="t.id" class="doc-tag">{{ t.name }}</span>
+                  <span v-for="t in row.tags" :key="t" class="doc-tag">{{ t }}</span>
                   <el-popover trigger="click" :width="200">
                     <template #reference>
                       <span class="doc-tag doc-tag-edit">+/-</span>
                     </template>
                   <div class="doc-tag-popover">
-                    <label v-for="t in tags" :key="t.id" class="doc-tag-option">
+                    <label v-for="t in tags" :key="t" class="doc-tag-option">
                       <input
                         type="checkbox"
-                        :checked="row.tags.some((rt: TagInfo) => rt.id === t.id)"
-                        @change="handleDocTagChange(row, t.id, ($event.target as HTMLInputElement).checked)"
+                        :checked="row.tags.includes(t)"
+                        @change="handleDocTagChange(row, t, ($event.target as HTMLInputElement).checked)"
                       />
-                      {{ t.name }}
+                      {{ t }}
                     </label>
                     <p v-if="!tags.length" class="muted" style="margin:0;font-size:12px;">暂无标签</p>
                   </div>
@@ -723,28 +745,42 @@ onUnmounted(() => {
 
         <!-- 预览结果：逐文件标签 -->
         <template v-else>
-          <div v-for="item in pendingItems" :key="item.stored_name || item.filename" class="preview-file">
+          <div v-for="(item, idx) in pendingItems" :key="item.stored_name || item.filename" class="preview-file">
             <div class="preview-file-head">
               <el-icon class="file-icon"><Document /></el-icon>
               <span class="file-name" :title="item.filename">{{ item.filename }}</span>
+              <span v-if="!item.error && allTags.length" class="doc-tags-wrap">
+                <template v-if="item.tags_loading">
+                  <el-icon class="is-loading tag-loading-icon"><Loading /></el-icon>
+                </template>
+                <template v-else>
+                  <span v-for="t in item.tags" :key="t" class="doc-tag">{{ t }}</span>
+                  <el-popover trigger="click" :width="200">
+                    <template #reference>
+                      <span class="doc-tag doc-tag-edit">+/-</span>
+                    </template>
+                    <div class="doc-tag-popover">
+                      <label v-for="t in allTags" :key="t" class="doc-tag-option">
+                        <input
+                          type="checkbox"
+                          :checked="item.tags.includes(t)"
+                          @change="togglePreviewTag(item, t)"
+                        />
+                        {{ t }}
+                      </label>
+                    </div>
+                  </el-popover>
+                </template>
+              </span>
               <span v-if="item.error" class="file-error">{{ item.error }}</span>
-            </div>
-            <div v-if="!item.error && allTags.length" class="preview-tags">
-              <template v-if="item.tags_loading">
-                <el-icon class="is-loading tag-loading-icon"><Loading /></el-icon>
-                <span class="tag-loading-text">正在推断标签…</span>
-              </template>
-              <el-checkbox-group v-else v-model="item.tag_ids">
-                <el-checkbox v-for="t in allTags" :key="t.id" :value="t.id">{{ t.name }}</el-checkbox>
-              </el-checkbox-group>
+              <el-icon class="remove-btn" @click="removePendingItem(idx)"><Close /></el-icon>
             </div>
           </div>
-          <p v-if="allTags.length" class="muted upload-hint">不选标签则解析后由 LLM 自动归类。</p>
         </template>
       </div>
       <template #footer>
         <el-button @click="cancelUpload">取消</el-button>
-        <el-button type="primary" :loading="uploading" :disabled="previewing" @click="confirmUpload">确认入库</el-button>
+        <el-button type="primary" :loading="uploading" :disabled="previewing || pendingItems.some(i => i.error)" @click="confirmUpload">确认入库</el-button>
       </template>
     </el-dialog>
   </div>
@@ -941,6 +977,9 @@ onUnmounted(() => {
   opacity: 0;
   transition: opacity 0.15s;
 }
+.preview-file-head .doc-tag-edit {
+  opacity: 1;
+}
 .doc-tags-wrap:hover .doc-tag-edit {
   opacity: 1;
 }
@@ -1113,7 +1152,7 @@ onUnmounted(() => {
   flex: none;
 }
 .file-name {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -1127,23 +1166,19 @@ onUnmounted(() => {
   font-size: 11.5px;
   color: var(--danger, #e5484d);
 }
-.preview-tags {
-  padding: 0 12px 10px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
+.remove-btn {
+  flex: none;
+  margin-left: auto;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 14px;
+  transition: color 0.15s;
+}
+.remove-btn:hover {
+  color: var(--danger, #e5484d);
 }
 .tag-loading-icon {
   color: var(--ink-3);
-}
-.tag-loading-text {
-  font-size: 12px;
-  color: var(--ink-3);
-}
-.upload-hint {
-  margin: 0;
-  font-size: 12px;
 }
 
 /* ---- 窄屏 ---- */

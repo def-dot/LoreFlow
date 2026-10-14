@@ -5,11 +5,6 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
-class TagInfo(BaseModel):
-    id: int
-    name: str
-
-
 class DocumentListItem(BaseModel):
     id: int
     filename: str
@@ -19,7 +14,7 @@ class DocumentListItem(BaseModel):
     parse_duration_ms: int | None = None
     file_size: int | None = None
     created_at: str | None = None
-    tags: list[TagInfo] = []
+    tags: list[str] = []
 
 
 class DocumentListResponse(BaseModel):

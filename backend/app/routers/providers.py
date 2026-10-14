@@ -10,14 +10,11 @@ from app.core.database import AsyncSessionLocal
 from app.core.response import UnifiedResponseRoute
 from app.models.provider import ModelRecord, ProviderRecord, SettingRecord
 from app.schemas.providers import (
-    AvailableModel,
-    ImportModel,
     ModelBody,
     ModelOut,
     ModelSettings,
     ProviderBody,
     ProviderOut,
-    ProviderTestResult,
 )
 from app.utils.http import http_client
 
@@ -36,7 +33,39 @@ async def create_provider(body: ProviderBody) -> ProviderOut:
         session.add(provider)
         await session.commit()
         await session.refresh(provider)
-        return provider
+
+    # 自动导入可用模型
+    try:
+        await _auto_import_models(provider)
+    except Exception:
+        pass  # 导入失败不阻塞创建
+
+    return provider
+
+
+async def _auto_import_models(provider: ProviderRecord) -> int:
+    """自动导入 provider 的所有可用模型，返回新增数量。"""
+    headers: dict[str, str] = {}
+    if provider.api_key:
+        headers["Authorization"] = f"Bearer {provider.api_key}"
+    resp = await http_client().get(f"{provider.base_url}/models", headers=headers)
+    resp.raise_for_status()
+    model_ids = [m["id"] for m in resp.json().get("data", [])]
+    if not model_ids:
+        return 0
+
+    async with AsyncSessionLocal() as session:
+        existing = (await session.exec(
+            select(ModelRecord.name).where(ModelRecord.provider_id == provider.id)
+        )).all()
+        new_models = [
+            ModelRecord(provider_id=provider.id, name=name, model_type=_guess_model_type(name))
+            for name in model_ids
+            if name not in existing
+        ]
+        session.add_all(new_models)
+        await session.commit()
+    return len(new_models)
 
 
 @router.get("/providers", response_model=list[ProviderOut])
@@ -110,68 +139,17 @@ async def delete_provider(provider_id: int) -> dict[str, int]:
     return {"deleted": provider_id}
 
 
-@router.post("/providers/{provider_id}/test", response_model=ProviderTestResult)
-async def test_provider(provider_id: int) -> ProviderTestResult:
-    async with AsyncSessionLocal() as session:
-        p = (await session.exec(select(ProviderRecord).where(ProviderRecord.id == provider_id))).one_or_none()
-    if p is None:
-        raise HTTPException(status_code=404, detail=f"Provider {provider_id!r} 不存在")
-    try:
-        headers: dict[str, str] = {}
-        if p.api_key:
-            headers["Authorization"] = f"Bearer {p.api_key}"
-        resp = await http_client().get(f"{p.base_url}/models", headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        model_list = [m["id"] for m in data.get("data", [])] if "data" in data else []
-        return ProviderTestResult(success=True, models=model_list)
-    except Exception as e:
-        return ProviderTestResult(success=False, error=str(e))
-
-
-@router.get("/providers/{provider_id}/available-models", response_model=list[AvailableModel])
-async def get_available_models(provider_id: int) -> list[AvailableModel]:
-    async with AsyncSessionLocal() as session:
-        p = (await session.exec(select(ProviderRecord).where(ProviderRecord.id == provider_id))).one_or_none()
-    if p is None:
-        raise HTTPException(status_code=404, detail=f"Provider {provider_id!r} 不存在")
-    try:
-        headers: dict[str, str] = {}
-        if p.api_key:
-            headers["Authorization"] = f"Bearer {p.api_key}"
-        resp = await http_client().get(f"{p.base_url}/models", headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        model_ids = [m["id"] for m in data.get("data", [])] if "data" in data else []
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"获取模型列表失败: {e}")
-    async with AsyncSessionLocal() as session:
-        existing = {m.name for m in (await session.exec(
-            select(ModelRecord).where(ModelRecord.provider_id == provider_id)
-        )).all()}
-    return [
-        AvailableModel(name=m, model_type=_guess_model_type(m), imported=m in existing)
-        for m in model_ids
-    ]
-
-
-@router.post("/providers/{provider_id}/import-models")
-async def import_models(provider_id: int, body: list[ImportModel]) -> dict[str, int]:
+@router.post("/providers/{provider_id}/sync-models")
+async def sync_models(provider_id: int) -> dict[str, int]:
+    """一键同步：获取远程模型列表并导入新模型。"""
     async with AsyncSessionLocal() as session:
         p = (await session.exec(select(ProviderRecord).where(ProviderRecord.id == provider_id))).one_or_none()
         if p is None:
             raise HTTPException(status_code=404, detail=f"Provider {provider_id!r} 不存在")
-        existing = {m.name for m in (await session.exec(
-            select(ModelRecord).where(ModelRecord.provider_id == provider_id)
-        )).all()}
-        created = 0
-        for item in body:
-            if item.name in existing or item.model_type not in ("chat", "embedding", "rerank"):
-                continue
-            session.add(ModelRecord(provider_id=provider_id, name=item.name, model_type=item.model_type))
-            created += 1
-        await session.commit()
-    return {"imported": created}
+
+    # 复用 _auto_import_models 逻辑
+    await _auto_import_models(p)
+    return {"synced": True}
 
 
 # ── Model CRUD ────────────────────────────────────────────────────────────────
@@ -243,6 +221,37 @@ async def update_model(model_id: int, body: ModelBody) -> ModelOut:
         m.sqlmodel_update(body.model_dump())
         m.updated_at = datetime.now()
         await session.commit()
+        return m
+
+
+@router.patch("/models/{model_id}/toggle", response_model=ModelOut)
+async def toggle_model(model_id: int) -> ModelOut:
+    """切换模型启用/禁用状态。"""
+    async with AsyncSessionLocal() as session:
+        m = (await session.exec(select(ModelRecord).where(ModelRecord.id == model_id))).one_or_none()
+        if m is None:
+            raise HTTPException(status_code=404, detail=f"Model {model_id!r} 不存在")
+        m.is_enabled = not m.is_enabled
+        m.updated_at = datetime.now()
+        await session.commit()
+        await session.refresh(m)
+        return m
+
+
+@router.patch("/models/{model_id}/type", response_model=ModelOut)
+async def update_model_type(model_id: int, body: dict[str, str]) -> ModelOut:
+    """更新模型类型。"""
+    model_type = body.get("model_type")
+    if model_type not in ("chat", "embedding", "rerank"):
+        raise HTTPException(status_code=400, detail="model_type 必须是 chat / embedding / rerank")
+    async with AsyncSessionLocal() as session:
+        m = (await session.exec(select(ModelRecord).where(ModelRecord.id == model_id))).one_or_none()
+        if m is None:
+            raise HTTPException(status_code=404, detail=f"Model {model_id!r} 不存在")
+        m.model_type = model_type
+        m.updated_at = datetime.now()
+        await session.commit()
+        await session.refresh(m)
         return m
 
 

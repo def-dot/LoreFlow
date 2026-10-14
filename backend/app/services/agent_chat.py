@@ -137,7 +137,7 @@ async def run_agent_chat(
             reasoning_content = ""
             current_tool_calls: list[dict[str, Any]] = []
 
-            async for chunk in llm_chat_stream(agent.model or None, messages, tools=tools):
+            async for chunk in llm_chat_stream(model_key=agent.model or None, messages=messages, tools=tools):
                 reasoning_delta = chunk.get("reasoning", "")
                 if reasoning_delta:
                     reasoning_content += reasoning_delta

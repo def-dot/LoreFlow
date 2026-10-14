@@ -7,6 +7,7 @@ import {
   type ModelItem,
   type ModelSettings as Settings,
 } from '@/api/providers'
+import ModelTreeSelect from '@/components/ModelTreeSelect.vue'
 
 // 模型清单由父级 Models.vue 统一拉取，这里不重复请求 /models
 const props = defineProps<{ models: ModelItem[] }>()
@@ -22,41 +23,10 @@ const chatModels = computed(() => props.models.filter((m) => m.model_type === 'c
 const embeddingModels = computed(() => props.models.filter((m) => m.model_type === 'embedding' && m.is_enabled))
 const rerankModels = computed(() => props.models.filter((m) => m.model_type === 'rerank' && m.is_enabled))
 
-// 树形选项：provider 为分组节点（不可选），model 为叶子节点
-interface TreeNode {
-  id: number | string
-  label: string
-  disabled?: boolean
-  children?: TreeNode[]
-}
-
-function toTree(models: ModelItem[]): TreeNode[] {
-  const groups = new Map<number, { label: string; children: TreeNode[] }>()
-  for (const m of models) {
-    const g = groups.get(m.provider_id) ?? {
-      label: m.provider?.name ?? `Provider ${m.provider_id}`,
-      children: [],
-    }
-    g.children.push({ id: m.model_key, label: m.name })
-    groups.set(m.provider_id, g)
-  }
-  return [...groups.entries()].map(([pid, g]) => ({
-    id: `p-${pid}`,
-    label: g.label,
-    disabled: true,
-    children: g.children,
-  }))
-}
-
-function filterNode(query: string, data: TreeNode): boolean {
-  if (!query) return true
-  return data.label.toLowerCase().includes(query.toLowerCase())
-}
-
 const fields = computed(() => [
-  { key: 'default_chat_model' as const, label: '文本生成 (Chat)', placeholder: '选择默认 LLM', tree: toTree(chatModels.value) },
-  { key: 'default_embedding_model' as const, label: 'Embedding', placeholder: '选择默认 Embedding 模型', tree: toTree(embeddingModels.value) },
-  { key: 'default_rerank_model' as const, label: 'Rerank', placeholder: '选择默认 Rerank 模型', tree: toTree(rerankModels.value) },
+  { key: 'default_chat_model' as const, label: '文本生成 (Chat)', placeholder: '选择默认 LLM', models: chatModels.value },
+  { key: 'default_embedding_model' as const, label: 'Embedding', placeholder: '选择默认 Embedding 模型', models: embeddingModels.value },
+  { key: 'default_rerank_model' as const, label: 'Rerank', placeholder: '选择默认 Rerank 模型', models: rerankModels.value },
 ])
 
 
@@ -91,16 +61,9 @@ onMounted(loadSettings)
     <div class="settings-row">
       <div class="setting-group" v-for="f in fields" :key="f.key">
         <span class="setting-label">{{ f.label }}</span>
-        <el-tree-select
+        <ModelTreeSelect
           v-model="settings[f.key]"
-          :data="f.tree"
-          :props="{ value: 'id', label: 'label', children: 'children', disabled: 'disabled' }"
-          node-key="id"
-          :filter-node-method="filterNode"
-          popper-class="model-tree-popper"
-          default-expand-all
-          filterable
-          clearable
+          :models="f.models"
           :placeholder="f.placeholder"
           size="default"
           class="setting-select"
@@ -139,17 +102,5 @@ onMounted(loadSettings)
 }
 .setting-select {
   width: 240px;
-}
-</style>
-
-<style>
-/* 下拉面板被 teleport 到 body，scoped 样式够不到 */
-.model-tree-popper .el-tree-node.is-disabled > .el-tree-node__content {
-  cursor: default;
-}
-.model-tree-popper .el-tree-node.is-disabled > .el-tree-node__content .el-tree-node__label {
-  color: var(--ink-2);
-  opacity: 1;
-  font-weight: 600;
 }
 </style>

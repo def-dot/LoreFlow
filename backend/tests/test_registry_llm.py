@@ -1,25 +1,34 @@
 """注册表 LLM 节点 — 不依赖 Ollama 服务的确定性路径"""
 
 import pytest
+from pydantic import ValidationError
 
-from app.registry.funcs.llm import final_answer, llm_classify
-
-
-async def test_classify_human_keyword_short_circuits() -> None:
-    """提示词包含「人工」→ 直接判 human，不过模型（确定性、优先级最高）。"""
-    out = await llm_classify({"prompt": "别让机器人回答，我要找人工客服"})
-    assert out == {"intent": "human", "raw": "关键词命中：人工"}
+from app.registry.funcs.llm import LLMClassifyParams, llm_classify
 
 
-async def test_final_answer_picks_executed_branch() -> None:
-    """互斥分支汇合：_upstream 按 depends_on 顺序取第一个非空输出（未执行支路为 None）。"""
-    assert await final_answer({"_upstream": {"llm_chat": "你好呀", "rag_answer": None}}) == {
-        "branch": "llm_chat", "answer": "你好呀",
-    }
-    assert await final_answer({"_upstream": {"llm_chat": None, "rag_answer": "北境要塞……"}}) == {
-        "branch": "rag_answer", "answer": "北境要塞……",
-    }
-    with pytest.raises(ValueError):
-        await final_answer({"_upstream": {"llm_chat": None, "rag_answer": None}})
-    with pytest.raises(ValueError):
-        await final_answer({})  # 未声明 depends_on → 无 _upstream
+async def test_classify_parses_structured_intent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """结构化输出：响应 schema 拿 classify_labels 做 enum，解析后只暴露 intent。"""
+    from app.registry.funcs import llm as llm_funcs
+
+    async def fake_chat(model_key, messages, tools=None, response_format=None):
+        schema = response_format["json_schema"]["schema"]
+        assert schema["properties"]["intent"]["enum"] == ["chat", "human"]
+        assert schema["required"] == ["intent"]
+        assert schema["additionalProperties"] is False
+        return {"content": '{"intent": "human"}', "tool_calls": []}
+
+    monkeypatch.setattr(llm_funcs, "llm_chat_call", fake_chat)
+    out = await llm_classify(LLMClassifyParams(prompt="我要找人工客服", classify_labels=["chat", "human"]))
+    assert out.model_dump() == {"intent": "human"}
+
+
+async def test_classify_rejects_label_outside_enum(monkeypatch: pytest.MonkeyPatch) -> None:
+    """动态模型按 classify_labels 校验，越界标签直接报错。"""
+    from app.registry.funcs import llm as llm_funcs
+
+    async def fake_chat(model_key, messages, tools=None, response_format=None):
+        return {"content": '{"intent": "unknown"}', "tool_calls": []}
+
+    monkeypatch.setattr(llm_funcs, "llm_chat_call", fake_chat)
+    with pytest.raises(ValidationError):
+        await llm_classify(LLMClassifyParams(prompt="你好", classify_labels=["chat", "human"]))

@@ -26,11 +26,12 @@ nodes:
   type: llm_classify
   label: 意图分类
   inputs:
-    prompt: $params.query
-    classify_system: |
-      你是意图分类器，只允许输出以下标签之一，禁止输出其他内容：
+    prompt: |
+      分类标签含义：
       rag —— 需要查询知识库/文档/资料才能准确回答的事实性问题
       chat —— 问候、闲聊、创作、翻译等不需要检索的请求
+
+      待分类内容：$params.query
     classify_labels:
     - rag
     - chat

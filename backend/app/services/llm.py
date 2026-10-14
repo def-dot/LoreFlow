@@ -2,7 +2,7 @@
 LLM 公共调用层 — 统一 OpenAI 兼容接口，支持多 provider 后端。
 
 模型引用格式：
-- ``provider:model`` → 指定 provider 和模型
+- ``provider_name/model_name`` → 指定 provider 和模型
 - ``None`` → 使用 settings 表中 default_chat_model 指定的模型
 
 配置从数据库读取（providers + models + settings 表），由「模型管理」页面维护。
@@ -24,21 +24,23 @@ logger = logging.getLogger(__name__)
 # 配置读取
 # ---------------------------------------------------------------------------
 
-async def _resolve_chat_model(model: str | None) -> tuple[str, str, str]:
+async def _resolve_chat_model(model_key: str | None) -> tuple[str, str, str]:
     """解析模型引用 → (base_url, api_key, model_name)。"""
-    if model and ":" in model:
-        provider_name, model_name = model.split(":", 1)
-        return await _lookup_from_db(provider_name, model_name)
-
-    # 使用默认模型：查 settings 表（格式 provider_name/model_name）
-    from app.services.model_lookup import resolve_default_model
-    return await resolve_default_model("default_chat_model")
-
-
-async def _lookup_from_db(provider_name: str, model_name: str) -> tuple[str, str, str]:
     from app.core.database import AsyncSessionLocal
-    from app.models.provider import ProviderRecord
+    from app.models.provider import ProviderRecord, SettingRecord
     from sqlmodel import select
+
+    # model_key 为空时，从 settings 表读默认模型
+    if not model_key:
+        async with AsyncSessionLocal() as session:
+            rec = (await session.exec(
+                select(SettingRecord).where(SettingRecord.key == "default_chat_model")
+            )).one_or_none()
+        if not rec or not rec.value:
+            raise ValueError("未配置默认模型，请在「模型管理」页面设置默认文本生成模型")
+        model_key = rec.value.strip()
+
+    provider_name, model_name = model_key.split("/", 1)
 
     async with AsyncSessionLocal() as session:
         p = (await session.exec(
@@ -50,36 +52,20 @@ async def _lookup_from_db(provider_name: str, model_name: str) -> tuple[str, str
     raise ValueError(f"Provider {provider_name!r} 不存在，请在「模型管理」页面添加")
 
 
-async def list_models() -> dict[str, list[str]]:
-    """返回每个 provider 的可用模型列表。"""
-    from app.core.database import AsyncSessionLocal
-    from app.models.provider import ModelRecord, ProviderRecord
-    from sqlmodel import select
-
-    async with AsyncSessionLocal() as session:
-        rows = (await session.exec(
-            select(ModelRecord, ProviderRecord.name)
-            .join(ProviderRecord, ModelRecord.provider_id == ProviderRecord.id)
-            .where(ModelRecord.is_enabled == True)  # noqa: E712
-        )).all()
-    result: dict[str, list[str]] = {}
-    for m, pname in rows:
-        result.setdefault(pname, []).append(m.name)
-    return result
-
-
 # ---------------------------------------------------------------------------
 # LLM 调用
 # ---------------------------------------------------------------------------
 
 async def llm_chat_call(
-    model: str | None,
-    messages: list[dict[str, str]],
+    model_key: str | None = None,
+    messages: list[dict[str, str]] | None = None,
     tools: list[dict[str, Any]] | None = None,
     response_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """POST /chat/completions（非流式）→ ``{"content": str, "tool_calls": list}``。"""
-    base_url, api_key, model_name = await _resolve_chat_model(model)
+    if messages is None:
+        raise ValueError("messages is required")
+    base_url, api_key, model_name = await _resolve_chat_model(model_key)
 
     payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": False}
     if tools is not None:
@@ -104,12 +90,12 @@ async def llm_chat_call(
 
 
 async def llm_chat_stream(
-    model: str | None,
+    model_key: str | None,
     messages: list[dict[str, str]],
     tools: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """POST /chat/completions（流式）→ 逐 chunk yield。"""
-    base_url, api_key, model_name = await _resolve_chat_model(model)
+    base_url, api_key, model_name = await _resolve_chat_model(model_key)
 
     payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": True}
     if tools is not None:

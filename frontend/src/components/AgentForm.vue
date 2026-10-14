@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { listModels, type ModelItem } from '@/api/providers'
+import { listModels, getModelSettings, type ModelItem } from '@/api/providers'
+import ModelTreeSelect from '@/components/ModelTreeSelect.vue'
 import { listTools, listSkills, type ToolOut } from '@/api/registry'
 import { listPlugins, type PluginInfo } from '@/api/plugins'
 import { listMcpServers, reconnectMcpServer, type McpServer } from '@/api/mcp'
-import { listTags, type TagInfo } from '@/api/knowledge'
+import { listTags } from '@/api/knowledge'
 import { ElMessage } from 'element-plus'
 import type { AgentListItem } from '@/api/agents'
 
@@ -33,7 +34,7 @@ const saving = ref(false)
 const models = ref<ModelItem[]>([])
 const allTools = ref<ToolOut[]>([])
 const allSkills = ref<{ name: string; description: string }[]>([])
-const allTags = ref<TagInfo[]>([])
+const allTags = ref<string[]>([])
 const plugins = ref<PluginInfo[]>([])
 const mcpServers = ref<McpServer[]>([])
 const mcpBusy = ref('')
@@ -341,13 +342,14 @@ const isEdit = computed(() => !!props.agent?.id)
 
 async function loadOptions() {
   try {
-    const [m, toolsResp, skillsResp, pluginsResp, mcpResp, tagsResp] = await Promise.all([
+    const [m, toolsResp, skillsResp, pluginsResp, mcpResp, tagsResp, settings] = await Promise.all([
       listModels(),
       listTools(),
       listSkills(),
       listPlugins(),
       listMcpServers(),
       listTags(),
+      getModelSettings().catch(() => null),
     ])
     models.value = m
     allTools.value = toolsResp || []
@@ -360,6 +362,11 @@ async function loadOptions() {
     mcpServers.value = mcpResp || []
     // MCP 默认折叠
     collapsedMcp.value = new Set((mcpResp || []).map((s) => s.name))
+    // 新建时默认选中「模型管理」里设置的默认文本模型
+    const defaultKey = settings?.default_chat_model
+    if (!props.agent && defaultKey && m.some((x) => x.model_key === defaultKey && x.model_type === 'chat' && x.is_enabled)) {
+      form.value.model = defaultKey
+    }
   } catch {
     // 静默失败
   }
@@ -367,14 +374,9 @@ async function loadOptions() {
 
 loadOptions()
 
-const modelOptions = computed(() => {
-  return models.value
-    .filter((m) => m.model_type === 'chat' && m.is_enabled)
-    .map((m) => ({
-      label: `${m.provider?.name}:${m.name}`,
-      value: `${m.provider?.name}:${m.name}`,
-    }))
-})
+const chatModels = computed(() =>
+  models.value.filter((m) => m.model_type === 'chat' && m.is_enabled),
+)
 
 // ---- 保存 ----
 
@@ -426,20 +428,13 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
       </el-form-item>
 
       <el-form-item label="模型">
-        <el-select
-          v-model="form.model"
+        <ModelTreeSelect
+          :model-value="form.model"
+          :models="chatModels"
           placeholder="使用默认模型"
-          clearable
-          filterable
           style="width: 100%"
-        >
-          <el-option
-            v-for="opt in modelOptions"
-            :key="opt.value"
-            :label="opt.label"
-            :value="opt.value"
-          />
-        </el-select>
+          @update:model-value="form.model = $event ?? ''"
+        />
       </el-form-item>
 
       <el-form-item label="系统提示词">
@@ -502,9 +497,9 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
         >
           <el-option
             v-for="t in allTags"
-            :key="t.id"
-            :label="t.name"
-            :value="t.name"
+            :key="t"
+            :label="t"
+            :value="t"
           />
         </el-select>
       </el-form-item>
