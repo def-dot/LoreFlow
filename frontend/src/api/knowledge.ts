@@ -76,16 +76,26 @@ export const retryDocument = (docId: number) =>
 export const updateDocumentTags = (docId: number, tagIds: number[]) =>
   api.put(`/documents/${docId}/tags`, { tag_ids: tagIds })
 
-// 直接上传文档
-export const uploadDocumentDirect = (file: File, tagIds?: number[]) => {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (tagIds && tagIds.length) formData.append('tag_ids', tagIds.join(','))
-  return api.post<{ doc_id: number; filename: string; status: string }>(
-    '/documents/upload',
-    formData,
-  )
+// 直接上传文档（批量，逐文件返回入库结果）
+export interface UploadResult {
+  filename: string
+  doc_id: number | null
+  status: string | null
+  error: string | null
 }
+
+// 推断标签
+export interface InferTagsItem {
+  stored_name: string
+  suggested_tags: TagInfo[]
+}
+
+export const inferTags = (storedNames: string[]) =>
+  api.post<{ items: InferTagsItem[] }>('/documents/infer-tags', { stored_names: storedNames })
+
+// 确认入库（文件已在盘上，传 stored_name + 标签）
+export const uploadDocuments = (items: { stored_name: string; filename: string; tag_ids: number[] }[]) =>
+  api.post<{ items: UploadResult[] }>('/documents/upload', { items })
 
 // 标签 CRUD
 export const listTags = () =>

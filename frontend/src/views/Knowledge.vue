@@ -3,12 +3,13 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Delete, RefreshRight, VideoPause, Document, View, Search, EditPen, UploadFilled,
+  Delete, RefreshRight, VideoPause, Document, View, Search, EditPen, UploadFilled, Loading,
 } from '@element-plus/icons-vue'
 import {
   listAllDocuments,
   deleteDocument,
-  uploadDocumentDirect,
+  inferTags,
+  uploadDocuments,
   cancelDocument,
   retryDocument,
   updateDocumentTags,
@@ -21,6 +22,7 @@ import {
   type TagInfo,
   type StatusCounts,
 } from '@/api/knowledge'
+import { uploadFile } from '@/api/uploads'
 
 const router = useRouter()
 
@@ -237,8 +239,18 @@ function cancelEditTag() {
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
-const pendingFiles = ref<File[]>([])
-const pendingTagIds = ref<number[]>([])
+
+interface PendingItem {
+  stored_name: string | null
+  filename: string
+  error: string | null
+  tag_ids: number[]
+  tags_loading: boolean
+}
+
+const pendingItems = ref<PendingItem[]>([])
+const allTags = ref<TagInfo[]>([])
+const previewing = ref(false)
 const uploadDialogVisible = ref(false)
 const uploading = ref(false)
 
@@ -252,7 +264,7 @@ function onFilePicked(e: Event) {
   input.value = ''
 }
 
-function acceptFiles(files: File[]) {
+async function acceptFiles(files: File[]) {
   const ok = files.filter(f => /\.(txt|md|pdf)$/i.test(f.name))
   if (!ok.length) {
     ElMessage.error('仅支持 TXT / MD / PDF 文件')
@@ -261,9 +273,48 @@ function acceptFiles(files: File[]) {
   if (ok.length < files.length) {
     ElMessage.warning(`已跳过 ${files.length - ok.length} 个不支持的文件`)
   }
-  pendingFiles.value = ok
-  pendingTagIds.value = []
+  previewing.value = true
   uploadDialogVisible.value = true
+  try {
+    // 获取全部标签
+    const allTagsResp = await listTags()
+    allTags.value = allTagsResp as unknown as TagInfo[]
+
+    // 逐文件上传（复用 /uploads 接口）
+    const items: PendingItem[] = []
+    for (const f of ok) {
+      try {
+        const rec = await uploadFile(f)
+        items.push({ stored_name: rec.stored_name, filename: rec.filename, error: null, tag_ids: [], tags_loading: true })
+      } catch {
+        items.push({ stored_name: null, filename: f.name, error: '上传失败', tag_ids: [], tags_loading: false })
+      }
+    }
+    pendingItems.value = items
+
+    // 异步推断标签
+    const toInfer = items.filter(i => i.stored_name && !i.error)
+    if (toInfer.length && allTags.value.length) {
+      const names = toInfer.map(i => i.stored_name!)
+      inferTags(names).then(({ items: results }) => {
+        for (const r of results) {
+          const target = pendingItems.value.find(p => p.stored_name === r.stored_name)
+          if (target) {
+            target.tag_ids = r.suggested_tags.map(t => t.id)
+            target.tags_loading = false
+          }
+        }
+      }).catch(() => {
+        for (const p of pendingItems.value) p.tags_loading = false
+      })
+    } else {
+      for (const p of pendingItems.value) p.tags_loading = false
+    }
+  } catch {
+    uploadDialogVisible.value = false
+  } finally {
+    previewing.value = false
+  }
 }
 
 // 整页即落点：拖入时升起扫描纱幕，松手进入入库确认
@@ -295,20 +346,22 @@ function onDrop(e: DragEvent) {
 }
 
 async function confirmUpload() {
-  const files = pendingFiles.value
-  if (!files.length) return
+  const valid = pendingItems.value.filter(i => i.stored_name && !i.error)
+  if (!valid.length) return
   uploading.value = true
   try {
-    for (const f of files) {
-      await uploadDocumentDirect(f, pendingTagIds.value)
-    }
-    ElMessage.success(`已入队 ${files.length} 个文件，后台正在解析`)
+    const { items } = await uploadDocuments(
+      valid.map(i => ({ stored_name: i.stored_name!, filename: i.filename, tag_ids: i.tag_ids })),
+    )
+    const failed = items.filter(i => i.error)
+    const okCount = items.length - failed.length
+    if (okCount) ElMessage.success(`已入队 ${okCount} 个文件，后台正在解析`)
+    for (const f of failed) ElMessage.error(`${f.filename}：${f.error}`)
     uploadDialogVisible.value = false
-    pendingFiles.value = []
-    pendingTagIds.value = []
+    pendingItems.value = []
     await refreshAll()
-  } catch (err: any) {
-    ElMessage.error(err?.response?.data?.msg || err.message || '入库失败')
+  } catch {
+    // 网络/服务端错误提示由 request 拦截器统一弹出；保留弹窗可重试
   } finally {
     uploading.value = false
   }
@@ -316,8 +369,7 @@ async function confirmUpload() {
 
 function cancelUpload() {
   uploadDialogVisible.value = false
-  pendingFiles.value = []
-  pendingTagIds.value = []
+  pendingItems.value = []
 }
 
 // ---- 文档操作 ----
@@ -661,29 +713,38 @@ onUnmounted(() => {
     </div>
 
     <!-- 入库确认 -->
-    <el-dialog v-model="uploadDialogVisible" title="入库确认" width="460px" :close-on-click-modal="false" @close="cancelUpload">
+    <el-dialog v-model="uploadDialogVisible" title="入库确认" width="560px" :close-on-click-modal="false" @close="cancelUpload">
       <div class="upload-body">
-        <ul class="file-queue">
-          <li v-for="f in pendingFiles" :key="f.name + f.size" class="file-item">
-            <el-icon class="file-icon"><Document /></el-icon>
-            <span class="file-name" :title="f.name">{{ f.name }}</span>
-            <span class="file-size">{{ formatFileSize(f.size) }}</span>
-          </li>
-        </ul>
-
-        <div v-if="tags.length" class="upload-tags">
-          <span class="upload-label">标签</span>
-          <div class="upload-tag-opts">
-            <el-checkbox-group v-model="pendingTagIds">
-              <el-checkbox v-for="t in tags" :key="t.id" :value="t.id">{{ t.name }}</el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <p class="muted upload-hint">不选则解析后由 LLM 自动归类。</p>
+        <!-- 预览加载中 -->
+        <div v-if="previewing" class="preview-loading">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>正在保存文件…</span>
         </div>
+
+        <!-- 预览结果：逐文件标签 -->
+        <template v-else>
+          <div v-for="item in pendingItems" :key="item.stored_name || item.filename" class="preview-file">
+            <div class="preview-file-head">
+              <el-icon class="file-icon"><Document /></el-icon>
+              <span class="file-name" :title="item.filename">{{ item.filename }}</span>
+              <span v-if="item.error" class="file-error">{{ item.error }}</span>
+            </div>
+            <div v-if="!item.error && allTags.length" class="preview-tags">
+              <template v-if="item.tags_loading">
+                <el-icon class="is-loading tag-loading-icon"><Loading /></el-icon>
+                <span class="tag-loading-text">正在推断标签…</span>
+              </template>
+              <el-checkbox-group v-else v-model="item.tag_ids">
+                <el-checkbox v-for="t in allTags" :key="t.id" :value="t.id">{{ t.name }}</el-checkbox>
+              </el-checkbox-group>
+            </div>
+          </div>
+          <p v-if="allTags.length" class="muted upload-hint">不选标签则解析后由 LLM 自动归类。</p>
+        </template>
       </div>
       <template #footer>
         <el-button @click="cancelUpload">取消</el-button>
-        <el-button type="primary" :loading="uploading" @click="confirmUpload">确认入库</el-button>
+        <el-button type="primary" :loading="uploading" :disabled="previewing" @click="confirmUpload">确认入库</el-button>
       </template>
     </el-dialog>
   </div>
@@ -1024,22 +1085,28 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 18px;
 }
-.file-queue {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 0;
+  justify-content: center;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.preview-file {
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
 }
-.file-item {
+.preview-file + .preview-file {
+  margin-top: -1px;
+}
+.preview-file-head {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-}
-.file-item + .file-item {
-  border-top: 1px solid var(--line);
 }
 .file-icon {
   color: var(--accent);
@@ -1055,27 +1122,27 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-size {
+.file-error {
   flex: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-3);
+  font-size: 11.5px;
+  color: var(--danger, #e5484d);
 }
-.upload-label {
-  display: block;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ink-2);
-  margin-bottom: 8px;
-}
-.upload-tag-opts {
+.preview-tags {
+  padding: 0 12px 10px;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px 16px;
 }
+.tag-loading-icon {
+  color: var(--ink-3);
+}
+.tag-loading-text {
+  font-size: 12px;
+  color: var(--ink-3);
+}
 .upload-hint {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 12px;
 }
 

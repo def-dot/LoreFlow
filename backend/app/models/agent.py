@@ -16,7 +16,7 @@ class AgentRecord(SQLModel, table=True):
     name: str = Field(max_length=200)
     description: str = ""
     system_prompt: str = Field(default="", sa_column=Column(Text))
-    model: str = ""  # provider:model 格式，空则用全局默认
+    model: str = ""  # provider_name/model_name 格式，空则用全局默认
     tools: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     skills: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))

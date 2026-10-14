@@ -1,21 +1,20 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { EditPen, Delete } from '@element-plus/icons-vue'
+import { EditPen, Refresh, ArrowRight } from '@element-plus/icons-vue'
 import {
   listProviders,
   listModels,
   deleteProvider,
-  deleteModel,
-  getAvailableModels,
+  syncModels,
+  toggleModel,
+  updateModelType,
   type ProviderItem,
   type ModelItem,
-  type AvailableModel,
 } from '@/api/providers'
 import ProviderForm from '@/components/ProviderForm.vue'
 import ModelForm from '@/components/ModelForm.vue'
 import ModelSettings from '@/components/ModelSettings.vue'
-import ImportModelsDialog from '@/components/ImportModelsDialog.vue'
 
 // ---- 数据 ----
 const providers = ref<ProviderItem[]>([])
@@ -31,10 +30,11 @@ const modelFormOpen = ref(false)
 const editingModel = ref<ModelItem | null>(null)
 const modelProvider = ref<ProviderItem | null>(null)
 
-// ---- Import models dialog ----
-const importDialogOpen = ref(false)
-const importProviderId = ref<number | null>(null)
-const availableModels = ref<AvailableModel[]>([])
+// ---- 同步状态 ----
+const syncingId = ref<number | null>(null)
+
+// ---- 折叠状态 ----
+const expandedProviders = ref<Set<number>>(new Set())
 
 async function fetchAll() {
   loading.value = true
@@ -64,17 +64,7 @@ async function onProviderSaved(provider: ProviderItem) {
   providerFormOpen.value = false
   editingProvider.value = null
   await fetchAll()
-  // 自动拉取可导入模型
-  try {
-    const list = await getAvailableModels(provider.id)
-    if (list?.length) {
-      importProviderId.value = provider.id
-      availableModels.value = list
-      importDialogOpen.value = true
-    }
-  } catch {
-    // 连不上就跳过，不阻塞
-  }
+  ElMessage.success('Provider 已创建，模型已自动导入')
 }
 
 async function handleDeleteProvider(p: ProviderItem) {
@@ -116,22 +106,21 @@ async function onModelSaved() {
   await fetchAll()
 }
 
-async function handleDeleteModel(m: ModelItem) {
+async function handleToggleModel(m: ModelItem) {
   try {
-    await ElMessageBox.confirm(
-      `确定删除模型「${m.name}」？`,
-      '删除模型',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  try {
-    await deleteModel(m.id)
-    ElMessage.success(`已删除 ${m.name}`)
+    await toggleModel(m.id)
     await fetchAll()
   } catch (e: any) {
-    ElMessage.error(e?.message || '删除失败')
+    ElMessage.error(e?.message || '操作失败')
+  }
+}
+
+async function handleTypeChange(m: ModelItem, newType: string) {
+  try {
+    await updateModelType(m.id, newType)
+    await fetchAll()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '操作失败')
   }
 }
 
@@ -139,16 +128,25 @@ function modelsOfProvider(pid: number): ModelItem[] {
   return models.value.filter((m) => m.provider_id === pid)
 }
 
-const typeLabel: Record<string, string> = {
-  chat: '文本生成',
-  embedding: 'Embedding',
-  rerank: 'Rerank',
+function toggleExpand(pid: number) {
+  if (expandedProviders.value.has(pid)) {
+    expandedProviders.value.delete(pid)
+  } else {
+    expandedProviders.value.add(pid)
+  }
 }
 
-const typeTagType: Record<string, 'primary' | 'success' | 'warning'> = {
-  chat: 'primary',
-  embedding: 'success',
-  rerank: 'warning',
+async function handleSyncModels(p: ProviderItem) {
+  syncingId.value = p.id
+  try {
+    await syncModels(p.id)
+    await fetchAll()
+    ElMessage.success('模型已同步')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '同步失败')
+  } finally {
+    syncingId.value = null
+  }
 }
 
 onMounted(fetchAll)
@@ -182,6 +180,10 @@ onMounted(fetchAll)
             <div class="card-head">
               <span class="provider-name">{{ p.name }}</span>
               <span class="card-actions">
+                <el-button class="btn-soft" size="small" :loading="syncingId === p.id" @click="handleSyncModels(p)">
+                  <el-icon v-if="syncingId !== p.id"><Refresh /></el-icon>
+                  <span>同步</span>
+                </el-button>
                 <el-button class="btn-soft" size="small" @click="openProviderEdit(p)">编辑</el-button>
                 <el-button class="btn-soft btn-soft--danger" size="small" @click="handleDeleteProvider(p)">删除</el-button>
               </span>
@@ -199,25 +201,37 @@ onMounted(fetchAll)
 
             <!-- 该 Provider 下的模型 -->
             <div class="model-list">
-              <div v-for="m in modelsOfProvider(p.id)" :key="m.id" class="model-row">
-                <span class="model-name mono">{{ m.name }}</span>
-                <el-tag size="small" :type="typeTagType[m.model_type] ?? 'info'" disable-transitions>
-                  {{ typeLabel[m.model_type] ?? m.model_type }}
-                </el-tag>
-                <el-tag v-if="!m.is_enabled" size="small" type="info" disable-transitions>已禁用</el-tag>
-                <span class="row-actions">
-                  <button type="button" class="act" title="编辑" @click="openModelEdit(m)">
-                    <el-icon><EditPen /></el-icon>
-                  </button>
-                  <button type="button" class="act danger" title="删除" @click="handleDeleteModel(m)">
-                    <el-icon><Delete /></el-icon>
-                  </button>
+              <div class="model-toggle" @click="toggleExpand(p.id)">
+                <span class="toggle-label">
+                  模型 ({{ modelsOfProvider(p.id).filter(m => m.is_enabled).length }}/{{ modelsOfProvider(p.id).length }})
                 </span>
+                <el-icon class="toggle-icon" :class="{ expanded: expandedProviders.has(p.id) }">
+                  <ArrowRight />
+                </el-icon>
               </div>
-              <div v-if="!modelsOfProvider(p.id).length" class="empty-models">
-                <span class="muted">暂无模型</span>
-              </div>
-              <el-button class="btn-soft add-model" size="small" @click="openModelCreate(p)">＋ 添加模型</el-button>
+              <template v-if="expandedProviders.has(p.id)">
+                <div v-for="m in modelsOfProvider(p.id)" :key="m.id" class="model-row">
+                  <span class="model-name mono">{{ m.name }}</span>
+                  <el-select
+                    v-model="m.model_type"
+                    size="small"
+                    style="width: 110px"
+                    @change="handleTypeChange(m, $event)"
+                  >
+                    <el-option label="文本生成" value="chat" />
+                    <el-option label="Embedding" value="embedding" />
+                    <el-option label="Rerank" value="rerank" />
+                  </el-select>
+                  <el-switch
+                    v-model="m.is_enabled"
+                    size="small"
+                    @change="handleToggleModel(m)"
+                  />
+                </div>
+                <div v-if="!modelsOfProvider(p.id).length" class="empty-models">
+                  <span class="muted">暂无模型</span>
+                </div>
+              </template>
             </div>
           </div>
 
@@ -248,14 +262,6 @@ onMounted(fetchAll)
     >
       <ModelForm :model="editingModel" :provider="modelProvider" @saved="onModelSaved" />
     </el-drawer>
-
-    <!-- 导入模型弹窗 -->
-    <ImportModelsDialog
-      v-model:visible="importDialogOpen"
-      :provider-id="importProviderId"
-      :models="availableModels"
-      @imported="fetchAll"
-    />
   </div>
 </template>
 
@@ -372,6 +378,28 @@ onMounted(fetchAll)
   flex-direction: column;
   gap: 4px;
 }
+.model-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.model-toggle:hover {
+  color: var(--ink);
+}
+.toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.toggle-icon {
+  transition: transform 0.2s;
+}
+.toggle-icon.expanded {
+  transform: rotate(90deg);
+}
 .model-row {
   display: flex;
   align-items: center;
@@ -381,16 +409,14 @@ onMounted(fetchAll)
   border-radius: 8px;
   background: rgba(16, 21, 42, 0.5);
 }
+.model-row .el-switch {
+  margin-left: auto;
+}
 .model-name {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
   min-width: 120px;
-}
-.row-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 2px;
 }
 .act {
   display: inline-flex;

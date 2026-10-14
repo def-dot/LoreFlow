@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class AgentParams(BaseModel):
     prompt: str = Field(description="用户提示词", min_length=1)
     system: str | None = Field(default=None, description="系统提示词")
-    model: str | None = Field(default=None, description="模型名")
+    model_key: str | None = Field(default=None, description="模型引用（provider_name/model_name 格式，None 则用默认）")
     tools: list[str] = Field(default_factory=list, description="工具名列表")
     skills: list[str] = Field(default_factory=list, description="技能名列表")
     max_iterations: int = Field(default=10, description="最大循环次数")
@@ -53,7 +53,7 @@ async def agent(params: AgentParams) -> AgentOutput:
     for i in range(params.max_iterations):
         logger.info("[agent] iteration %d / %d", i + 1, params.max_iterations)
 
-        result = await llm_chat_call(params.model, messages, tools=tool_defs)
+        result = await llm_chat_call(params.model_key, messages, tools=tool_defs)
         content = result["content"]
         tool_calls = result.get("tool_calls", [])
 

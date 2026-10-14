@@ -17,7 +17,7 @@
         "--transport",
         "stdio",
         "--dsn",
-        "postgresql://postgres:postgres@localhost:5432/loreflow?sslmode=disable"
+        "postgresql://postgres:postgres@localhost:5434/loreflow?sslmode=disable"
       ],
       "env": {}
     },

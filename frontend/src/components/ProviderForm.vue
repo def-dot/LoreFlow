@@ -4,9 +4,7 @@ import { ElMessage } from 'element-plus'
 import {
   createProvider,
   updateProvider,
-  testProvider,
   type ProviderItem,
-  type ProviderTestResult,
 } from '@/api/providers'
 
 const props = defineProps<{
@@ -24,8 +22,6 @@ const form = ref({
 })
 
 const saving = ref(false)
-const testing = ref(false)
-const testResult = ref<ProviderTestResult | null>(null)
 const showApiKey = ref(false)
 
 const isEdit = computed(() => !!props.provider?.id)
@@ -42,28 +38,9 @@ watch(
     } else {
       form.value = { name: '', base_url: '', api_key: '' }
     }
-    testResult.value = null
   },
   { immediate: true },
 )
-
-async function handleTest() {
-  if (!isEdit.value || !props.provider?.id) return
-  testing.value = true
-  testResult.value = null
-  try {
-    testResult.value = await testProvider(props.provider.id)
-    if (testResult.value.success) {
-      ElMessage.success(`连通成功，发现 ${testResult.value.models.length} 个模型`)
-    } else {
-      ElMessage.error(`连通失败：${testResult.value.error}`)
-    }
-  } catch (e: any) {
-    ElMessage.error(e?.message || '测试失败')
-  } finally {
-    testing.value = false
-  }
-}
 
 async function handleSave() {
   if (!form.value.name.trim()) {
@@ -120,26 +97,12 @@ async function handleSave() {
 
       <el-form-item>
         <div class="actions">
-          <el-button v-if="isEdit" :loading="testing" @click="handleTest">测试连通性</el-button>
           <el-button type="primary" :loading="saving" @click="handleSave">
             {{ isEdit ? '保存修改' : '创建 Provider' }}
           </el-button>
         </div>
       </el-form-item>
     </el-form>
-
-    <!-- 测试结果 -->
-    <div v-if="testResult" class="test-result" :class="{ success: testResult.success, fail: !testResult.success }">
-      <div v-if="testResult.success">
-        <p>✅ 连通成功，发现 {{ testResult.models.length }} 个模型：</p>
-        <div class="test-models">
-          <el-tag v-for="m in testResult.models" :key="m" size="small" type="success">{{ m }}</el-tag>
-        </div>
-      </div>
-      <div v-else>
-        <p>❌ 连通失败：{{ testResult.error }}</p>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -150,28 +113,5 @@ async function handleSave() {
 .actions {
   display: flex;
   gap: 8px;
-}
-.test-result {
-  margin-top: 12px;
-  padding: 10px 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.test-result.success {
-  background: rgba(77, 196, 178, 0.1);
-  border: 1px solid rgba(77, 196, 178, 0.3);
-}
-.test-result.fail {
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid rgba(248, 113, 113, 0.3);
-}
-.test-result p {
-  margin: 0 0 6px;
-}
-.test-models {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
 }
 </style>

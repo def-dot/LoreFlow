@@ -1,3 +1,5 @@
+name: loreflow
+
 services:
   db:
     build:
@@ -5,7 +7,7 @@ services:
       dockerfile: postgres/Dockerfile.postgres
     restart: unless-stopped
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5434}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER?variable not set}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?variable not set}
@@ -23,7 +25,7 @@ services:
     command: redis-server --requirepass ${REDIS_PASSWORD:-}
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -34,14 +36,13 @@ services:
 
   tei-embed:
     image: ghcr.io/huggingface/text-embeddings-inference:86-1.6
-    container_name: bge-m3-embed
     command: >
       --model-id /data
       --max-client-batch-size ${TEI_BATCH_SIZE:-16}
     volumes:
       - ../hub/bge-m3:/data
     ports:
-      - "8081:80"
+      - "8085:80"
     environment:
       - HF_HUB_OFFLINE=1
     restart: unless-stopped
@@ -60,14 +61,13 @@ services:
 
   tei-rerank:
     image: ghcr.io/huggingface/text-embeddings-inference:86-1.6
-    container_name: bge-reranker
     command: >
       --model-id /data
       --max-client-batch-size ${TEI_BATCH_SIZE:-16}
     volumes:
       - ../hub/bge-reranker-v2-m3:/data
     ports:
-      - "8082:80"
+      - "8084:80"
     environment:
       - HF_HUB_OFFLINE=1
     restart: unless-stopped

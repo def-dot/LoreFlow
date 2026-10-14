@@ -44,23 +44,6 @@ export interface ModelSettings {
   default_rerank_model: string | null
 }
 
-export interface ProviderTestResult {
-  success: boolean
-  models: string[]
-  error: string
-}
-
-export interface AvailableModel {
-  name: string
-  model_type: 'chat' | 'embedding' | 'rerank'
-  imported: boolean
-}
-
-export interface ImportModel {
-  name: string
-  model_type: 'chat' | 'embedding' | 'rerank'
-}
-
 // ---------------------------------------------------------------------------
 // Provider CRUD
 // ---------------------------------------------------------------------------
@@ -77,14 +60,8 @@ export const updateProvider = (id: number, data: ProviderIn) =>
 
 export const deleteProvider = (id: number) => api.delete(`/providers/${id}`)
 
-export const testProvider = (id: number) =>
-  api.post<ProviderTestResult>(`/providers/${id}/test`)
-
-export const getAvailableModels = (providerId: number) =>
-  api.get<AvailableModel[]>(`/providers/${providerId}/available-models`)
-
-export const importModels = (providerId: number, data: ImportModel[]) =>
-  api.post<{ imported: number }>(`/providers/${providerId}/import-models`, data)
+export const syncModels = (providerId: number) =>
+  api.post<{ synced: boolean }>(`/providers/${providerId}/sync-models`)
 
 // ---------------------------------------------------------------------------
 // Model CRUD
@@ -98,6 +75,12 @@ export const createModel = (data: ModelIn) =>
 
 export const updateModel = (id: number, data: ModelIn) =>
   api.put<ModelItem>(`/models/${id}`, data)
+
+export const toggleModel = (id: number) =>
+  api.patch<ModelItem>(`/models/${id}/toggle`)
+
+export const updateModelType = (id: number, modelType: string) =>
+  api.patch<ModelItem>(`/models/${id}/type`, { model_type: modelType })
 
 export const deleteModel = (id: number) => api.delete(`/models/${id}`)
 

@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.compiler import compiles
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -20,6 +22,17 @@ import app.services.orchestrator as orchestrator
 from app.core.config import settings
 from app.main import app
 from app.registry.plugins import load_plugins
+
+
+# SQLite 无 PG 类型：建表编译降级（仅测试建表用，数据语义以 PG 为准）
+@compiles(ARRAY, "sqlite")
+def _compile_array_sqlite(type_, compiler, **kw) -> str:
+    return "JSON"
+
+
+@compiles(TSVECTOR, "sqlite")
+def _compile_tsvector_sqlite(type_, compiler, **kw) -> str:
+    return "TEXT"
 
 load_plugins()  # 模拟 lifespan 的插件加载（ASGITransport 不运行 lifespan）
 

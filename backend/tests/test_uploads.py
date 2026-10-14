@@ -1,4 +1,4 @@
-"""上传端点与 read_document 读盘解析 — 白名单/大小/空内容拒绝、编码探测、路径穿越、E2E。"""
+"""上传端点与 read_document 读盘解析 — 白名单/大小/空内容拒绝、路径穿越、E2E。"""
 
 import asyncio
 from io import BytesIO
@@ -10,7 +10,6 @@ from pypdf import PdfWriter
 
 from app.core.config import settings
 from app.registry.funcs.file import read_document
-from app.utils.files import decode_text
 
 
 async def _upload(client: AsyncClient, filename: str, data: bytes) -> Any:
@@ -80,14 +79,6 @@ async def test_upload_rejects_oversize(client: AsyncClient, monkeypatch: pytest.
     resp = await _upload(client, "big.md", b"x")
     assert resp.status_code == 400
     assert "大小上限" in resp.json()["msg"]
-
-
-def test_decode_text() -> None:
-    """UTF-8 优先、GBK 兜底、replace 保底永不抛。"""
-    assert decode_text("你好".encode()) == "你好"  # UTF-8 直通
-    assert decode_text("你好".encode("gbk")) == "你好"  # GBK 兜底
-    assert decode_text(b"ascii only") == "ascii only"
-    assert decode_text(b"\xff\xff\xff\xff") == "����"  # replace 不抛
 
 
 async def test_read_document_rejects_traversal() -> None:

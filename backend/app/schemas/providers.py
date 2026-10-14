@@ -71,22 +71,3 @@ class ModelSettings(BaseModel):
     default_rerank_model: str | None = None
 
 
-# ── 测试 / 同步 ───────────────────────────────────────────────────────────────
-
-class ProviderTestResult(BaseModel):
-    success: bool
-    models: list[str] = Field(default_factory=list)
-    error: str = ""
-
-
-class AvailableModel(BaseModel):
-    """provider /models 返回的模型，附带猜测类型。"""
-
-    name: str
-    model_type: str = "chat"  # chat / embedding / rerank
-    imported: bool = False
-
-
-class ImportModel(BaseModel):
-    name: str
-    model_type: str = "chat"
