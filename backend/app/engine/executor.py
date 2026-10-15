@@ -33,15 +33,6 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 
-def _filter_skipped(inputs: dict[str, Any], results: dict[str, NodeResult]) -> dict[str, Any]:
-    """移除值中引用了跳过上游节点的输入 key。"""
-    skipped = {name for name, r in results.items()
-               if r.status in (NodeStatus.SKIPPED, NodeStatus.UPSTREAM_SKIPPED)}
-    def _ref_to_skipped(v: Any) -> bool:
-        return isinstance(v, str) and v.startswith("$") and v[1:].split(".")[0] in skipped
-    return {k: v for k, v in inputs.items() if not _ref_to_skipped(v)}
-
-
 class PipeLineExecutor:
     """Executes a DAG concurrently, respecting node dependencies.
 
@@ -127,9 +118,10 @@ class PipeLineExecutor:
                 return
 
             # ---- 4. Execute with concurrency gate + retry ----
-            # 过滤掉引用了跳过上游节点的输入
-            filtered_inputs = _filter_skipped(node.inputs or {}, results)
-            resolved_inputs = {k: resolve_ref(self.ctx, v) for k, v in filtered_inputs.items()}
+            skipped = {n for n, r in results.items()
+                       if r.status in (NodeStatus.SKIPPED, NodeStatus.UPSTREAM_SKIPPED)} or None
+            resolved_inputs = {k: resolve_ref(self.ctx, v, skipped)
+                               for k, v in (node.inputs or {}).items()}
             if self.on_event is not None:
                 await self.on_event(NodeResult(node_name=node.name, status=NodeStatus.RUNNING, inputs=resolved_inputs))
 

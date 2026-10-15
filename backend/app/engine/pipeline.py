@@ -366,13 +366,13 @@ class Pipeline(BaseModel):
             return {"type": "array"}
         if not isinstance(value, str):
             return _INFER_SCHEMA.get(type(value).__name__, {"type": "string"})
-        from .types import _REF_RE
+        from .types import REF_RE
         # 纯引用：返回目标 schema（保持类型）
-        m = _REF_RE.fullmatch(value)
+        m = REF_RE.fullmatch(value)
         if m:
             return self._resolve_ref([m.group(1)], errors, upstream)
         # 内嵌引用或无引用：string
-        refs = _REF_RE.findall(value)
+        refs = REF_RE.findall(value)
         if refs and self._resolve_ref(refs, errors, upstream) is None:
             return None
         return {"type": "string"}

@@ -57,21 +57,29 @@ class SuspendExecution(BaseException):
 # ---------------------------------------------------------------------------
 
 
-_REF_RE = re.compile(r"\$([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)")
+REF_RE = re.compile(r"\$([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)")
 
 
-def resolve_ref(ctx: dict[str, Any], value: Any) -> Any:
+def resolve_ref(
+    ctx: dict[str, Any],
+    value: Any,
+    skipped: set[str] | None = None,
+) -> Any:
     """递归解析 value 中的 $ 引用。
 
     - 纯引用 ``$a.b.c`` → 返回原始值（保持类型）。
     - 内嵌引用 ``"前置 $a.b 后缀"`` → 字符串替换。
+    - 引用指向跳过节点 → 纯引用返回 ``None``，内嵌引用替换为空字符串。
     """
     if isinstance(value, dict):
-        return {k: resolve_ref(ctx, v) for k, v in value.items()}
+        return {k: resolve_ref(ctx, v, skipped) for k, v in value.items()}
     if isinstance(value, list):
-        return [resolve_ref(ctx, v) for v in value]
+        return [resolve_ref(ctx, v, skipped) for v in value]
     if not isinstance(value, str):
         return value
+
+    def _is_skipped(ref: str) -> bool:
+        return skipped is not None and ref.split(".")[0] in skipped
 
     def _deref(ref: str) -> Any:
         parts = ref.split(".")
@@ -83,8 +91,9 @@ def resolve_ref(ctx: dict[str, Any], value: Any) -> Any:
         return v
 
     # 纯引用：保持原始类型
-    m = _REF_RE.fullmatch(value)
+    m = REF_RE.fullmatch(value)
     if m:
-        return _deref(m.group(1))
+        return None if _is_skipped(m.group(1)) else _deref(m.group(1))
     # 内嵌引用：字符串替换
-    return _REF_RE.sub(lambda m: str(_deref(m.group(1))), value)
+    return REF_RE.sub(
+        lambda m: "" if _is_skipped(m.group(1)) else str(_deref(m.group(1))), value)
