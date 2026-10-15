@@ -1,11 +1,11 @@
 {
   "schema_name": "DoclingDocument",
   "version": "1.10.0",
-  "name": "1a63bcf5466042088690369cb6e4c437",
+  "name": "3e36d804e0204481a3880ac534430c7d",
   "origin": {
     "mimetype": "application/pdf",
     "binary_hash": 11144804177216724501,
-    "filename": "1a63bcf5466042088690369cb6e4c437.pdf"
+    "filename": "3e36d804e0204481a3880ac534430c7d.pdf"
   },
   "furniture": {
     "self_ref": "#/furniture",

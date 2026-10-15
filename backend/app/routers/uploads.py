@@ -1,4 +1,4 @@
-"""文件上传 — /api/v1/uploads（选文件即上传，返回 stored_name 相对路径供 run 参数引用）"""
+"""文件上传 — /api/v1/uploads（选文件即上传，返回 store_path 相对路径供 run 参数引用）"""
 
 from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/uploads", route_class=UnifiedResponseRoute, tags=["u
 
 
 class UploadResponse(BaseModel):
-    stored_name: str  # 相对路径，如 uploads/{uuid}.ext
+    store_path: str  # 相对路径，如 uploads/{uuid}.ext
     filename: str
     size: int
 
@@ -24,11 +24,11 @@ async def upload_file(
     filename = file.filename or ""
     data = await file.read()
     suffix = files.check_upload(filename, data)
-    stored_name = files.save_upload(data, suffix)  # uploads/{uuid}.ext
-    record = UploadRecord(stored_name=stored_name, filename=filename, size=len(data))
+    store_path = files.save_upload(data, suffix)  # uploads/{uuid}.ext
+    record = UploadRecord(store_path=store_path, filename=filename, size=len(data))
     await uploads_service.create(record)
     return UploadResponse(
-        stored_name=stored_name,
+        store_path=store_path,
         filename=filename,
         size=len(data),
     )

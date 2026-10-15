@@ -19,7 +19,7 @@ from sqlmodel import select
 from app.core import database
 from app.core.config import settings
 from app.models.knowledge import ChunkRecord, DocumentRecord, DocumentStatus, DocumentTagRecord, TagRecord
-from app.schemas.knowledge import DocumentListItem
+from app.schemas.knowledge import ChunkItem, DocumentListItem
 from app.services.knowledge_rag import (
     _insert_chunks,
     _update_document_status,
@@ -138,17 +138,6 @@ async def infer_tags_for_text(text_preview: str) -> list[str]:
 # ── 文档入库（异步） ───────────────────────────────────────────────
 
 
-async def get_existing_filenames(filenames: list[str]) -> set[str]:
-    """返回 filenames 中已存在于 documents 表的名字集合。"""
-    if not filenames:
-        return set()
-    async with database.AsyncSessionLocal() as session:
-        rows = (await session.exec(
-            select(DocumentRecord.filename).where(DocumentRecord.filename.in_(filenames))
-        )).all()
-    return set(rows)
-
-
 async def ingest_document(
     file_path: str, filename: str, *, tags: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -171,8 +160,10 @@ async def ingest_document(
 
         if tags:
             rows = (await session.exec(select(TagRecord).where(TagRecord.name.in_(tags)))).all()
-            for tag in rows:
-                session.add(DocumentTagRecord(document_id=doc_id, tag_id=tag.id))
+            by_name = {t.name: t.id for t in rows}
+            for name in tags:
+                if name in by_name:
+                    session.add(DocumentTagRecord(document_id=doc_id, tag_id=by_name[name]))
             await session.commit()
 
     from app.utils.arq import enqueue_parse
@@ -304,7 +295,7 @@ async def get_document(doc_id: int) -> dict[str, Any] | None:
             "file_path": doc.file_path,
             "file_size": doc.file_size, "file_ext": doc.file_ext,
             "status": doc.status, "chunk_count": doc.chunk_count,
-            "error": doc.error, "content_hash": doc.content_hash,
+            "error": doc.error,
             "parse_duration_ms": doc.parse_duration_ms,
             "created_at": doc.created_at.isoformat() if doc.created_at else None,
             "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
@@ -376,7 +367,7 @@ async def get_document_status_counts() -> dict[str, int]:
 
 async def list_chunks(
     document_id: int, page: int = 1, page_size: int = 30, q: str = "",
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[ChunkItem], int]:
     """列出文档的切片（分页 + 可选搜索）。"""
     async with database.AsyncSessionLocal() as session:
         filters = [ChunkRecord.document_id == document_id]
@@ -399,12 +390,12 @@ async def list_chunks(
         )).scalars().all()
 
     items = [
-        {
-            "id": c.id, "document_id": c.document_id, "file_name": c.file_name,
-            "page_numbers": c.page_numbers or [],
-            "heading_context": c.heading_context or "",
-            "raw_content": c.raw_content or "",
-        }
+        ChunkItem(
+            id=c.id, document_id=c.document_id, file_name=c.file_name,
+            page_numbers=c.page_numbers or [],
+            heading_context=c.heading_context or "",
+            raw_content=c.raw_content or "",
+        )
         for c in rows
     ]
     return items, total

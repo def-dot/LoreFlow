@@ -242,7 +242,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 
 interface PendingItem {
-  stored_name: string | null
+  store_path: string | null
   filename: string
   error: string | null
   tags: string[]
@@ -286,20 +286,20 @@ async function acceptFiles(files: File[]) {
     for (const f of ok) {
       try {
         const rec = await uploadFile(f)
-        items.push({ stored_name: rec.stored_name, filename: rec.filename, error: null, tags: [], tags_loading: true })
+        items.push({ store_path: rec.store_path, filename: rec.filename, error: null, tags: [], tags_loading: true })
       } catch {
-        items.push({ stored_name: null, filename: f.name, error: '上传失败', tags: [], tags_loading: false })
+        items.push({ store_path: null, filename: f.name, error: '上传失败', tags: [], tags_loading: false })
       }
     }
     pendingItems.value = items
 
     // 异步推断标签
-    const toInfer = items.filter(i => i.stored_name && !i.error)
+    const toInfer = items.filter(i => i.store_path && !i.error)
     if (toInfer.length && allTags.value.length) {
-      const names = toInfer.map(i => i.stored_name!)
+      const names = toInfer.map(i => i.store_path!)
       inferTags(names).then(({ items: results }) => {
         for (const r of results) {
-          const target = pendingItems.value.find(p => p.stored_name === r.stored_name)
+          const target = pendingItems.value.find(p => p.store_path === r.store_path)
           if (target) {
             target.tags = r.suggested_tags
             target.tags_loading = false
@@ -352,22 +352,22 @@ function removePendingItem(index: number) {
 }
 
 async function confirmUpload() {
-  const valid = pendingItems.value.filter(i => i.stored_name && !i.error)
+  const valid = pendingItems.value.filter(i => i.store_path && !i.error)
   if (!valid.length) return
   uploading.value = true
   try {
-    const { items } = await uploadDocuments(
-      valid.map(i => ({ stored_name: i.stored_name!, filename: i.filename, tags: i.tags })),
+    const items = await uploadDocuments(
+      valid.map(i => ({ store_path: i.store_path!, filename: i.filename, tags: i.tags })),
     )
 
-    // 同名冲突 → 标记冲突项，弹窗保留
-    const conflicts = items.filter(r => r.error_code === 'duplicate_name')
-    if (conflicts.length) {
-      for (const c of conflicts) {
-        const target = pendingItems.value.find(p => p.filename === c.filename)
-        if (target) target.error = c.error
+    // 有失败项 → 逐项标红，弹窗保留可重试
+    const failed = items.filter(r => r.error != null)
+    if (failed.length) {
+      for (const f of failed) {
+        const target = pendingItems.value.find(p => p.filename === f.filename)
+        if (target) target.error = f.error
       }
-      ElMessage.error(`同名已存在，未入库：${conflicts.map(r => r.filename).join('、')}`)
+      ElMessage.error(`未入库：${failed.map(r => r.filename).join('、')}`)
       return
     }
 
@@ -745,7 +745,7 @@ onUnmounted(() => {
 
         <!-- 预览结果：逐文件标签 -->
         <template v-else>
-          <div v-for="(item, idx) in pendingItems" :key="item.stored_name || item.filename" class="preview-file">
+          <div v-for="(item, idx) in pendingItems" :key="item.store_path || item.filename" class="preview-file">
             <div class="preview-file-head">
               <el-icon class="file-icon"><Document /></el-icon>
               <span class="file-name" :title="item.filename">{{ item.filename }}</span>

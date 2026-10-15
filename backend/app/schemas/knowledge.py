@@ -36,6 +36,13 @@ class ChunkListResponse(BaseModel):
     total: int
 
 
+class UploadResultItem(BaseModel):
+    filename: str
+    doc_id: int | None = None
+    status: str | None = None
+    error: str | None = None
+
+
 class StatusCounts(BaseModel):
     pending: int = 0
     processing: int = 0

@@ -39,7 +39,6 @@ class DocumentRecord(SQLModel, table=True):
     status: str = Field(default=DocumentStatus.PENDING, max_length=20)
     chunk_count: int = 0
     error: str | None = Field(default=None, sa_column=Column(Text))
-    content_hash: str | None = Field(default=None, max_length=64, index=True)
     parse_duration_ms: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None)

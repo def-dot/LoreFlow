@@ -30,15 +30,15 @@ async def _wait_terminal(client: AsyncClient, run_id: int, timeout: float = 15) 
 
 
 async def test_upload_stores_file(client: AsyncClient) -> None:
-    """上传 201：返回 {stored_name, filename, size} 引用，磁盘字节一致。"""
+    """上传 201：返回 {store_path, filename, size} 引用，磁盘字节一致。"""
     resp = await _upload(client, "北境要塞.md", "第一段设定。\n\n第二段设定。".encode())
     assert resp.status_code == 201
     doc = resp.json()["data"]
-    assert doc["stored_name"].endswith(".md")
+    assert doc["store_path"].endswith(".md")
     assert doc["filename"] == "北境要塞.md"
     assert doc["size"] == len("第一段设定。\n\n第二段设定。".encode())
-    # stored_name 是相对路径 uploads/{uuid}.ext，取文件名部分
-    stored = settings.UPLOADS_DIR / doc["stored_name"].split("/", 1)[1]
+    # store_path 是相对路径 uploads/{uuid}.ext，取文件名部分
+    stored = settings.UPLOADS_DIR / doc["store_path"].split("/", 1)[1]
     assert stored.is_file()
     assert stored.read_bytes() == "第一段设定。\n\n第二段设定。".encode()
 
@@ -51,7 +51,7 @@ async def test_upload_rejects_bad_extension(client: AsyncClient) -> None:
 
 
 async def test_upload_stores_pdf(client: AsyncClient) -> None:
-    """PDF 上传成功：返回 .pdf 后缀 stored_name，磁盘字节一致。"""
+    """PDF 上传成功：返回 .pdf 后缀 store_path，磁盘字节一致。"""
     writer = PdfWriter()
     writer.add_blank_page(width=72, height=72)
     buf = BytesIO()
@@ -61,11 +61,11 @@ async def test_upload_stores_pdf(client: AsyncClient) -> None:
     resp = await _upload(client, "设定集.pdf", pdf_bytes)
     assert resp.status_code == 201
     doc = resp.json()["data"]
-    assert doc["stored_name"].endswith(".pdf")
+    assert doc["store_path"].endswith(".pdf")
     assert doc["filename"] == "设定集.pdf"
     assert doc["size"] == len(pdf_bytes)
-    # stored_name 是相对路径 uploads/{uuid}.ext，取文件名部分
-    assert (settings.UPLOADS_DIR / doc["stored_name"].split("/", 1)[1]).read_bytes() == pdf_bytes
+    # store_path 是相对路径 uploads/{uuid}.ext，取文件名部分
+    assert (settings.UPLOADS_DIR / doc["store_path"].split("/", 1)[1]).read_bytes() == pdf_bytes
 
 
 async def test_upload_rejects_empty(client: AsyncClient) -> None:
@@ -94,7 +94,7 @@ async def test_upload_to_run_e2e_gbk(client: AsyncClient) -> None:
 
     resp = await client.post(
         "/api/v1/runs",
-        json={"config_file": "01_serial.yaml", "inputs": {"document": doc["stored_name"]}},
+        json={"config_file": "01_serial.yaml", "inputs": {"document": doc["store_path"]}},
     )
     assert resp.status_code == 201
     data = await _wait_terminal(client, resp.json()["data"]["run_id"])
@@ -109,12 +109,12 @@ async def test_upload_to_run_e2e_gbk(client: AsyncClient) -> None:
 async def test_run_fails_when_file_deleted(client: AsyncClient) -> None:
     """引用的文件被清理：节点失败并报中文错误。"""
     doc = (await _upload(client, "gone.md", "内容".encode())).json()["data"]
-    # stored_name 是相对路径 uploads/{uuid}.ext，取文件名部分
-    (settings.UPLOADS_DIR / doc["stored_name"].split("/", 1)[1]).unlink()
+    # store_path 是相对路径 uploads/{uuid}.ext，取文件名部分
+    (settings.UPLOADS_DIR / doc["store_path"].split("/", 1)[1]).unlink()
 
     resp = await client.post(
         "/api/v1/runs",
-        json={"config_file": "01_serial.yaml", "inputs": {"document": doc["stored_name"]}},
+        json={"config_file": "01_serial.yaml", "inputs": {"document": doc["store_path"]}},
     )
     assert resp.status_code == 201
     data = await _wait_terminal(client, resp.json()["data"]["run_id"])

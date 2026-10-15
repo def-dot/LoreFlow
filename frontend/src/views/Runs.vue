@@ -235,12 +235,12 @@ const formInputs = computed(() => {
     switch (type) {
       case 'file': {
         const ref = uploadRefs.value[spec.name]
-        value[spec.name] = ref?.stored_name ?? null
+        value[spec.name] = ref?.store_path ?? null
         break
       }
       case 'file_list': {
         const refs = multiUploadRefs.value[spec.name]
-        value[spec.name] = refs?.length ? refs.map((r) => r.stored_name) : null
+        value[spec.name] = refs?.length ? refs.map((r) => r.store_path) : null
         break
       }
       case 'number': {

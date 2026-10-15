@@ -29,6 +29,6 @@ def check_upload(filename: str, data: bytes) -> str:
 def save_upload(data: bytes, suffix: str) -> str:
     """惰性建目录并落盘，返回相对路径 ``uploads/{uuid_hex}{suffix}``。"""
     settings.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    stored_name = f"{uuid.uuid4().hex}{suffix}"
-    (settings.UPLOADS_DIR / stored_name).write_bytes(data)
-    return f"uploads/{stored_name}"
+    store_name = f"{uuid.uuid4().hex}{suffix}"
+    (settings.UPLOADS_DIR / store_name).write_bytes(data)
+    return f"uploads/{store_name}"

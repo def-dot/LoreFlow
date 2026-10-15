@@ -7,12 +7,14 @@ from pathlib import Path
 import pypdfium2 as pdfium
 from docling_core.types.doc import DoclingDocument  # type: ignore[attr-defined]
 from fastapi import APIRouter, HTTPException, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from sqlmodel import select
 
 from app.core import database
 from app.core.response import UnifiedResponseRoute
-from app.models.knowledge import DocumentRecord, DocumentTagRecord, TagRecord
-from app.schemas.knowledge import ChunkListResponse, DocumentListResponse, StatusCounts
+from app.models.knowledge import DocumentRecord
+from app.schemas.knowledge import ChunkListResponse, DocumentListResponse, StatusCounts, UploadResultItem
 from app.services import knowledge
 
 # ── 文档（扁平接口）──────────────────────────────────────────────────
@@ -21,26 +23,26 @@ router = APIRouter(route_class=UnifiedResponseRoute, tags=["knowledge"])
 
 
 class UploadItem(BaseModel):
-    stored_name: str
+    store_path: str
     filename: str
     tags: list[str] = []
 
 
 class UploadRequest(BaseModel):
-    items: list[UploadItem]
+    items: list[UploadItem] = Field(min_length=1)
 
 
 class InferTagsRequest(BaseModel):
-    stored_names: list[str]
+    store_paths: list[str]
 
 
 @router.post("/documents/infer-tags", status_code=200)
 async def infer_tags(body: InferTagsRequest) -> dict:
     """对已保存文件读文本预览并 LLM 推断标签，并行处理，逐文件返回推荐标签。"""
 
-    async def _read_preview(stored_name: str) -> tuple[str, str]:
-        """读取文件文本预览，返回 (stored_name, text_preview)。"""
-        file_path = Path(stored_name)
+    async def _read_preview(store_path: str) -> tuple[str, str]:
+        """读取文件文本预览，返回 (store_path, text_preview)。"""
+        file_path = Path(store_path)
         suffix = file_path.suffix.lower()
         text = ""
         if suffix in (".txt", ".md"):
@@ -53,46 +55,49 @@ async def infer_tags(body: InferTagsRequest) -> dict:
                 )[:2000]
             except Exception:
                 text = ""
-        return stored_name, text
+        return store_path, text
 
-    previews = await asyncio.gather(*(_read_preview(s) for s in body.stored_names))
+    previews = await asyncio.gather(*(_read_preview(s) for s in body.store_paths))
 
     # 并行 LLM 推断
-    async def _infer(stored_name: str, text: str) -> dict:
+    async def _infer(store_path: str, text: str) -> dict:
         if not text:
-            return {"stored_name": stored_name, "suggested_tags": []}
+            return {"store_path": store_path, "suggested_tags": []}
         suggested = await knowledge.infer_tags_for_text(text)
-        return {"stored_name": stored_name, "suggested_tags": suggested}
+        return {"store_path": store_path, "suggested_tags": suggested}
 
     results = await asyncio.gather(*(_infer(sn, txt) for sn, txt in previews))
     return {"items": list(results)}
 
 
 @router.post("/documents/upload", status_code=202)
-async def upload_documents(body: UploadRequest) -> dict:
+async def upload_documents(body: UploadRequest) -> list[UploadResultItem]:
     """批量入库（文件已在盘上）；同名冲突整批中止。"""
     # ── 预检查：同名冲突整批中止 ──
     filenames = [item.filename for item in body.items]
-    existing = await knowledge.get_existing_filenames(filenames)
+    async with database.AsyncSessionLocal() as session:
+        rows = (await session.exec(
+            select(DocumentRecord.filename).where(DocumentRecord.filename.in_(filenames))
+        )).all()
+        existing = set(rows)
     if existing:
-        return {
-            "items": [
-                {"filename": item.filename, "doc_id": None, "status": None,
-                 "error": f"同名文档「{item.filename}」已存在" if item.filename in existing else None,
-                 "error_code": "duplicate_name" if item.filename in existing else None}
-                for item in body.items
-            ]
-        }
+        return [
+            UploadResultItem(
+                filename=item.filename,
+                error=f"同名文档「{item.filename}」已存在" if item.filename in existing else None,
+            )
+            for item in body.items
+        ]
 
     # ── 正常入库 ──
-    items: list[dict] = []
+    items: list[UploadResultItem] = []
     for item in body.items:
         try:
-            result = await knowledge.ingest_document(item.stored_name, item.filename, tags=item.tags)
-            items.append({"filename": item.filename, "doc_id": result["doc_id"], "status": result["status"], "error": None, "error_code": None})
+            result = await knowledge.ingest_document(item.store_path, item.filename, tags=item.tags)
+            items.append(UploadResultItem(filename=item.filename, doc_id=result["doc_id"], status=result["status"]))
         except Exception as exc:
-            items.append({"filename": item.filename, "doc_id": None, "status": None, "error": str(exc), "error_code": None})
-    return {"items": items}
+            items.append(UploadResultItem(filename=item.filename, error=str(exc)))
+    return items
 
 
 @router.get("/documents")

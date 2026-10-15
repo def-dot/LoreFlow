@@ -3,7 +3,7 @@ import { api } from './request'
 export interface UploadRecord {
   id: number
   /** UUID 存储文件名（如 "a1b2c3d4.txt"）：run 时按它读盘 */
-  stored_name: string
+  store_path: string
   /** 原始文件名（展示 / doc_id / title 来源） */
   filename: string
   size: number

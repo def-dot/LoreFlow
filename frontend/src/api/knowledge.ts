@@ -77,21 +77,20 @@ export interface UploadResult {
   doc_id: number | null
   status: string | null
   error: string | null
-  error_code: 'duplicate_name' | null
 }
 
 // 推断标签
 export interface InferTagsItem {
-  stored_name: string
+  store_path: string
   suggested_tags: string[]
 }
 
-export const inferTags = (storedNames: string[]) =>
-  api.post<{ items: InferTagsItem[] }>('/documents/infer-tags', { stored_names: storedNames })
+export const inferTags = (storePaths: string[]) =>
+  api.post<{ items: InferTagsItem[] }>('/documents/infer-tags', { store_paths: storePaths })
 
-// 确认入库（文件已在盘上，传 stored_name + 标签名）
-export const uploadDocuments = (items: { stored_name: string; filename: string; tags: string[] }[]) =>
-  api.post<{ items: UploadResult[] }>('/documents/upload', { items })
+// 确认入库（文件已在盘上，传 store_path + 标签名）
+export const uploadDocuments = (items: { store_path: string; filename: string; tags: string[] }[]) =>
+  api.post<UploadResult[]>('/documents/upload', { items })
 
 // 标签 CRUD（以标签名为键）
 export const listTags = () =>

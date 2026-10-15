@@ -87,7 +87,7 @@ async def run_agent_chat(
                 from sqlmodel import select as sql_select
                 async with AsyncSessionLocal() as session:
                     upload = (await session.exec(
-                        sql_select(UploadRecord).where(UploadRecord.stored_name == fid)
+                        sql_select(UploadRecord).where(UploadRecord.store_path == fid)
                     )).first()
                     filename = upload.filename if upload else fid
 
