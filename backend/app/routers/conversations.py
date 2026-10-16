@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from app.core.database import AsyncSessionLocal
 from app.core.response import UnifiedResponseRoute
-from app.models.agent import AgentRecord, ConversationRecord, MessageRecord
+from app.models.agent import AgentRecord, ChatFileRecord, ConversationRecord, MessageRecord
 from app.schemas.agents import (
     ChatRequest,
     ConversationCreate,
@@ -81,6 +81,9 @@ async def delete_conversation(conv_id: int) -> dict[str, int]:
 
         await session.exec(
             delete(MessageRecord).where(MessageRecord.conversation_id == conv_id)
+        )
+        await session.exec(
+            delete(ChatFileRecord).where(ChatFileRecord.conversation_id == conv_id)
         )
         await session.delete(conv)
         await session.commit()
