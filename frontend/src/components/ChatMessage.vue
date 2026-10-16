@@ -76,7 +76,13 @@ function formatTotalDuration(ms?: number): string {
 
 /** markdown → HTML */
 function formatContent(text: string): string {
-  return marked.parse(text) as string
+  let html = marked.parse(text) as string
+  // uploads/ 路径转为可点击链接
+  html = html.replace(
+    /(?<!["'=])(uploads\/[\w./-]+\.\w+)/g,
+    '<a href="/$1" target="_blank">$1</a>',
+  )
+  return html
 }
 </script>
 
