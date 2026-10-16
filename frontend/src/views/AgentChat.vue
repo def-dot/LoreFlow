@@ -16,7 +16,7 @@ const agentId = computed(() => Number(route.params.id))
 const inputText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
-const pendingFiles = ref<{ id: string; name: string }[]>([])
+const pendingFiles = ref<{ store_path: string; filename: string }[]>([])
 const uploading = ref(false)
 const toolLabels = ref<Record<string, string>>({})
 
@@ -76,11 +76,11 @@ async function handleSend() {
     store.newConversation()
   }
 
-  const fileIds = pendingFiles.value.map((f) => f.id)
+  const files = pendingFiles.value.map((f) => ({ store_path: f.store_path, filename: f.filename }))
   const msg = text || '请查看附件'
   inputText.value = ''
   pendingFiles.value = []
-  await store.sendMessage(store.currentConversation?.id, msg, fileIds)
+  await store.sendMessage(store.currentConversation?.id, msg, files)
   scrollToBottom()
 }
 
@@ -94,7 +94,7 @@ async function handleFileSelect(e: Event) {
   try {
     for (const file of Array.from(files)) {
       const result = await uploadFile(file)
-      pendingFiles.value.push({ id: result.id, name: result.filename })
+      pendingFiles.value.push({ store_path: result.store_path, filename: result.filename })
     }
   } catch (err: any) {
     ElMessage.error(err.message || '文件上传失败')
@@ -194,7 +194,7 @@ function goBack() {
       <div class="chat-input-area">
         <div v-if="pendingFiles.length" class="pending-files">
           <div v-for="(f, i) in pendingFiles" :key="i" class="pending-file">
-            <span class="file-name">{{ f.name }}</span>
+            <span class="file-name">{{ f.filename }}</span>
             <button class="remove-file" @click="removePendingFile(i)" :disabled="store.streaming">×</button>
           </div>
         </div>

@@ -6,7 +6,6 @@ import ModelTreeSelect from '@/components/ModelTreeSelect.vue'
 import { listTools, listSkills, type ToolOut } from '@/api/registry'
 import { listPlugins, type PluginInfo } from '@/api/plugins'
 import { listMcpServers, reconnectMcpServer, type McpServer } from '@/api/mcp'
-import { listTags } from '@/api/knowledge'
 import { ElMessage } from 'element-plus'
 import type { AgentListItem } from '@/api/agents'
 
@@ -27,14 +26,12 @@ const form = ref({
   model: '',
   tools: [] as string[],
   skills: [] as string[],
-  tags: [] as string[],
 })
 
 const saving = ref(false)
 const models = ref<ModelItem[]>([])
 const allTools = ref<ToolOut[]>([])
 const allSkills = ref<{ name: string; description: string }[]>([])
-const allTags = ref<string[]>([])
 const plugins = ref<PluginInfo[]>([])
 const mcpServers = ref<McpServer[]>([])
 const mcpBusy = ref('')
@@ -319,7 +316,6 @@ watch(
         model: a.model,
         tools: [...a.tools],
         skills: [...a.skills],
-        tags: [...(a.tags || [])],
       }
     } else {
       form.value = {
@@ -329,7 +325,6 @@ watch(
         model: '',
         tools: [],
         skills: [],
-        tags: [],
       }
     }
   },
@@ -342,13 +337,12 @@ const isEdit = computed(() => !!props.agent?.id)
 
 async function loadOptions() {
   try {
-    const [m, toolsResp, skillsResp, pluginsResp, mcpResp, tagsResp, settings] = await Promise.all([
+    const [m, toolsResp, skillsResp, pluginsResp, mcpResp, settings] = await Promise.all([
       listModels(),
       listTools(),
       listSkills(),
       listPlugins(),
       listMcpServers(),
-      listTags(),
       getModelSettings().catch(() => null),
     ])
     models.value = m
@@ -357,7 +351,6 @@ async function loadOptions() {
       name: s.name,
       description: s.description || '',
     }))
-    allTags.value = tagsResp || []
     plugins.value = pluginsResp?.plugins || []
     mcpServers.value = mcpResp || []
     // MCP 默认折叠
@@ -484,24 +477,6 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
             <template v-if="form.skills.length">（{{ form.skills.includes('*') ? '全部' : form.skills.length }}）</template>
           </el-button>
         </div>
-      </el-form-item>
-
-      <!-- ===== 知识库标签 ===== -->
-      <el-form-item label="知识库范围">
-        <el-select
-          v-model="form.tags"
-          multiple
-          filterable
-          placeholder="选择标签以启用知识库检索"
-          style="width: 100%"
-        >
-          <el-option
-            v-for="t in allTags"
-            :key="t"
-            :label="t"
-            :value="t"
-          />
-        </el-select>
       </el-form-item>
 
       <el-form-item>

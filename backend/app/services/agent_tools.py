@@ -58,8 +58,8 @@ def build_skill_prompt(skill_names: list[str]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
-    """执行单个工具调用，返回结果。"""
+async def execute_tool_call(tc: dict[str, Any]) -> str:
+    """执行单个工具调用，返回输出文本。"""
     func_def = tc.get("function", {})
     name = func_def.get("name", "")
     try:
@@ -68,21 +68,12 @@ async def execute_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
         args = {}
 
     td = TOOL_REGISTRY.get(name)
-    status = "success"
-    if td is not None:
-        try:
-            output = await td.invoke(args)
-        except Exception as exc:
-            output = f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
-            status = "error"
-    else:
-        output = f"未知工具：{name}"
-        status = "error"
+    if td is None:
+        return f"未知工具：{name}"
 
-    return {
-        "tool_call_id": tc.get("id", ""),
-        "tool_name": name,
-        "arguments": args,
-        "output": json.dumps(output.model_dump(), ensure_ascii=False) if hasattr(output, 'model_dump') else str(output),
-        "status": status,
-    }
+    try:
+        result = await td.invoke(args)
+    except Exception as exc:
+        return f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+
+    return json.dumps(result.model_dump(), ensure_ascii=False) if hasattr(result, 'model_dump') else str(result)

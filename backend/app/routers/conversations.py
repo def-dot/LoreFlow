@@ -90,7 +90,7 @@ async def delete_conversation(conv_id: int) -> dict[str, int]:
 @router.post("/{conv_id}/chat")
 async def chat(conv_id: int, body: ChatRequest):
     """发送消息，返回 SSE 流式响应。"""
-    # 验证对话和 Agent 存在
+    # 验证对话存在
     async with AsyncSessionLocal() as session:
         conv = (await session.exec(
             select(ConversationRecord).where(ConversationRecord.id == conv_id)
@@ -98,14 +98,12 @@ async def chat(conv_id: int, body: ChatRequest):
         if conv is None:
             raise HTTPException(status_code=404, detail=f"对话 {conv_id!r} 不存在")
 
-        agent = (await session.exec(
-            select(AgentRecord).where(AgentRecord.id == conv.agent_id)
-        )).one_or_none()
-        if agent is None:
-            raise HTTPException(status_code=404, detail=f"Agent {conv.agent_id!r} 不存在")
-
     return StreamingResponse(
-        run_agent_chat(agent, conv_id, body.message, file_ids=body.file_ids),
+        run_agent_chat(
+            conv_id,
+            body.message,
+            files=body.files,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

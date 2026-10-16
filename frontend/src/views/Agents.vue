@@ -19,42 +19,44 @@ onMounted(async () => {
   allTools.value = await listTools()
 })
 
-/** 将工具名列表压缩为显示标签：
- *  全选的组 → 组名
- *  部分选 → 组名 (N)
- *  未分组 → label（显示名）
+/** 工具名列表 → 卡片显示标签：
+ *  MCP 工具折叠为服务器名（部分选中带计数），其余展开为 label。
+ *  不按「基础」这类域分组压缩——那是选择器里的组织概念，卡片上看不懂。
  */
-function compressTools(tools: string[]): string[] {
-  const set = new Set(tools)
-  const grouped = new Map<string, ToolOut[]>()
-  const labelMap = new Map<string, string>()
+function toolDisplay(tools: string[]) {
+  const labelOf = new Map<string, string>()
+  const mcpServer = new Map<string, string>()
+  const mcpTotal = new Map<string, number>()
   for (const t of allTools.value) {
-    const g = t.metadata?.group
-    if (g) {
-      const arr = grouped.get(g) || []
-      arr.push(t)
-      grouped.set(g, arr)
-    } else {
-      labelMap.set(t.name, t.label)
+    labelOf.set(t.name, t.label || t.name)
+    if (t.metadata?.source === 'mcp') {
+      const server = t.metadata?.source_name || t.name
+      mcpServer.set(t.name, server)
+      mcpTotal.set(server, (mcpTotal.get(server) || 0) + 1)
     }
   }
-  const labels: string[] = []
-  for (const [g, members] of [...grouped.entries()].sort()) {
-    const names = members.map((m) => m.name)
-    const selected = names.filter((n) => set.has(n))
-    if (!selected.length) continue
-    names.forEach((n) => set.delete(n))
-    labels.push(selected.length === names.length ? g : `${g} (${selected.length})`)
+  const mcpHit = new Map<string, number>()
+  for (const n of tools) {
+    const server = mcpServer.get(n)
+    if (server) mcpHit.set(server, (mcpHit.get(server) || 0) + 1)
   }
-  for (const name of set) {
-    labels.push(labelMap.get(name) || name)
-  }
-  return labels
-}
 
-function toolDisplay(tools: string[]) {
-  const compressed = compressTools(tools)
-  return { shown: compressed.slice(0, 5), more: compressed.length > 5 ? compressed.length - 5 : 0 }
+  const labels: string[] = []
+  const seen = new Set<string>()
+  for (const n of tools) {
+    const server = mcpServer.get(n)
+    let label: string
+    if (server) {
+      const hit = mcpHit.get(server)!
+      label = hit < (mcpTotal.get(server) || 0) ? `${server} (${hit})` : server
+    } else {
+      label = labelOf.get(n) || n
+    }
+    if (seen.has(label)) continue
+    seen.add(label)
+    labels.push(label)
+  }
+  return { shown: labels.slice(0, 5), more: labels.length > 5 ? labels.length - 5 : 0 }
 }
 
 function openCreate() {
@@ -275,6 +277,12 @@ function enterChat(agentId: number) {
   background: rgba(240, 194, 75, 0.08);
   color: var(--amber);
   border: 1px solid rgba(240, 194, 75, 0.2);
+}
+
+.kb-tag {
+  background: rgba(135, 144, 176, 0.1);
+  color: var(--slate);
+  border: 1px solid rgba(135, 144, 176, 0.25);
 }
 
 .card-actions {

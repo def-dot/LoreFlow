@@ -1,6 +1,6 @@
 """Database models."""
 
-from .agent import AgentRecord, ConversationRecord, MessageRecord
+from .agent import AgentRecord, ChatFileRecord, ConversationRecord, MessageRecord
 from .knowledge import ChunkRecord, DocumentRecord, DocumentStatus, DocumentTagRecord, TagRecord
 from .pipeline import PipelineRecord
 from .provider import ModelRecord, ProviderRecord, SettingRecord
@@ -9,6 +9,7 @@ from .upload import UploadRecord
 
 __all__ = [
     "AgentRecord",
+    "ChatFileRecord",
     "ChunkRecord",
     "ConversationRecord",
     "DocumentRecord",

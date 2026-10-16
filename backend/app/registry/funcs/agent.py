@@ -63,9 +63,9 @@ async def agent(params: AgentParams) -> AgentOutput:
 
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
         for tc in tool_calls:
-            tr = await execute_tool_call(tc)
-            logger.info("[agent] tool %s -> %s", tr["tool_name"], tr["status"])
-            messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "content": tr["output"]})
+            output = await execute_tool_call(tc)
+            logger.info("[agent] tool %s", tc.get("function", {}).get("name", ""))
+            messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": output})
     else:
         logger.warning("[agent] max iterations (%d) reached", params.max_iterations)
 

@@ -19,7 +19,6 @@ class AgentRecord(SQLModel, table=True):
     model: str = ""  # provider_name/model_name 格式，空则用全局默认
     tools: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     skills: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None, sa_column_kwargs={"onupdate": datetime.now})
 
@@ -30,10 +29,23 @@ class ConversationRecord(SQLModel, table=True):
     __tablename__ = "conversations"
 
     id: int | None = Field(default=None, primary_key=True)
-    agent_id: int = Field(index=True)
+    agent_id: int = Field(foreign_key="agents.id", index=True)
     title: str = ""
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None, sa_column_kwargs={"onupdate": datetime.now})
+
+
+class ChatFileRecord(SQLModel, table=True):
+    """会话中上传的附件。"""
+
+    __tablename__ = "chat_files"
+
+    id: int | None = Field(default=None, primary_key=True)
+    conversation_id: int = Field(foreign_key="conversations.id", index=True)
+    store_path: str          # UUID 存储路径，如 "uploads/a1b2c3d4.txt"
+    filename: str            # 原始文件名
+    size: int = 0
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 class MessageRecord(SQLModel, table=True):
@@ -42,7 +54,7 @@ class MessageRecord(SQLModel, table=True):
     __tablename__ = "messages"
 
     id: int | None = Field(default=None, primary_key=True)
-    conversation_id: int = Field(index=True)
+    conversation_id: int = Field(foreign_key="conversations.id", index=True)
     role: str = Field(max_length=20)  # user / assistant / tool
     content: str = Field(default="", sa_column=Column(Text))
     reasoning_content: str | None = Field(default=None, sa_column=Column(Text))

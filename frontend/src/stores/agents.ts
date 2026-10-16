@@ -208,7 +208,7 @@ export const useAgentsStore = defineStore('agents', {
 
     // ----- Chat -----
 
-    async sendMessage(conversationId: number | undefined, message: string, fileIds: string[] = []) {
+    async sendMessage(conversationId: number | undefined, message: string, files: { store_path: string; filename: string }[] = []) {
       // 若处于"新对话待提交"状态，先在后端真正创建对话
       if (this.pendingNewConversation && this.selectedAgent) {
         const title = message.length > 30 ? message.slice(0, 30) + '…' : message
@@ -219,8 +219,8 @@ export const useAgentsStore = defineStore('agents', {
       }
 
       // 添加用户消息（含文件标记）
-      const displayMsg = fileIds.length
-        ? `[📎 ${fileIds.length} 个附件]\n${message}`
+      const displayMsg = files.length
+        ? `[📎 ${files.length} 个附件]\n${message}`
         : message
       this.chatMessages.push({ role: 'user', content: displayMsg })
 
@@ -246,7 +246,7 @@ export const useAgentsStore = defineStore('agents', {
         }
         const currentRound = () => getActive().rounds![roundIdx]
 
-        for await (const evt of sendChatMessage(conversationId, message, fileIds)) {
+        for await (const evt of sendChatMessage(conversationId, message, files)) {
           switch (evt.event) {
             case 'thinking': {
               const msg = ensureRound()

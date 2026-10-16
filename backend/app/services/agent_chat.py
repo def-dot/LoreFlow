@@ -1,10 +1,6 @@
 """独立 Agent 对话服务 — 多轮流式对话核心逻辑。
 
-从 node_types/agent.py 的 agentic loop 提取并扩展，支持：
-- 从 messages 表加载历史上下文
-- SSE 流式输出（token 级）
-- 工具调用的完整生命周期事件
-- 消息持久化
+SSE 流式输出（token 级）、工具调用生命周期事件、消息持久化。
 """
 
 from __future__ import annotations
@@ -19,15 +15,19 @@ from sqlmodel import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.agent import AgentRecord, MessageRecord
-from app.services.agent_tools import execute_tool_call
-from app.services.agent_tools import build_tools, build_skill_prompt
+from app.models.agent import AgentRecord, ChatFileRecord, ConversationRecord, MessageRecord
+from app.schemas.agents import FileRef
+from app.services.agent_tools import build_skill_prompt, build_tools, execute_tool_call
 from app.services.llm import llm_chat_stream
 
 logger = logging.getLogger(__name__)
 
 
-async def _load_history(conversation_id: int) -> list[dict[str, str]]:
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def _load_history(conversation_id: int) -> list[dict[str, Any]]:
     """从 messages 表加载历史消息为 OpenAI messages 格式。"""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -56,129 +56,84 @@ async def _load_history(conversation_id: int) -> list[dict[str, str]]:
 
 
 async def run_agent_chat(
-    agent: AgentRecord,
     conversation_id: int,
     user_message: str,
-    file_ids: list[str] | None = None,
+    *,
+    files: list[FileRef] | None = None,
 ) -> AsyncGenerator[str, None]:
     """SSE 流式 agent 对话。yield SSE event 字符串。
 
     事件格式 (每行一个 SSE frame)：
     - ``event: token\\ndata: {"content": "..."}\\n\\n``
+    - ``event: thinking\\ndata: {"content": "..."}\\n\\n``
     - ``event: tool_start\\ndata: {"tool_name": "...", "arguments": "..."}\\n\\n``
     - ``event: tool_end\\ndata: {"tool_name": "...", "output": "..."}\\n\\n``
     - ``event: done\\ndata: {"content": "..."}\\n\\n``
     - ``event: error\\ndata: {"message": "..."}\\n\\n``
     """
-
-    # 1. 构建 user message 并持久化
-    doc_ids: list[int] = []
-    if file_ids:
-        # 同步入库：解析文件 → 写入切片 → 可检索
-        from app.services.knowledge import ingest_document_sync
-
-        file_list = "\n".join(f"- /uploads/{fid}" for fid in file_ids)
-        user_message = f"[附件]\n{file_list}\n\n{user_message}"
-
-        for fid in file_ids:
-            try:
-                # 从 upload 记录获取原始文件名
-                from app.models.upload import UploadRecord
-                from sqlmodel import select as sql_select
-                async with AsyncSessionLocal() as session:
-                    upload = (await session.exec(
-                        sql_select(UploadRecord).where(UploadRecord.store_path == fid)
-                    )).first()
-                    filename = upload.filename if upload else fid
-
-                did = await ingest_document_sync(fid, filename)
-                doc_ids.append(did)
-            except Exception as exc:
-                logger.warning("[agent_chat] 文件 %s 入库失败: %s", fid, exc)
-
-    async with AsyncSessionLocal() as session:
-        session.add(MessageRecord(conversation_id=conversation_id, role="user", content=user_message))
-        await session.commit()
-
-    # 2. 加载历史（含刚写入的 user message）
-    messages = await _load_history(conversation_id)
-
-    # 4. 构建工具列表（含内置工具 + Pipeline 工具）
-    tool_names: list[str] = list(agent.tools or [])
-    if agent.skills and "load_skill" not in tool_names:
-        tool_names.append("load_skill")
-    tools, pipeline_prompt = await build_tools(tool_names)
-
-    # 3. 插入 system prompt
-    if agent.system_prompt or agent.skills or pipeline_prompt or doc_ids or agent.tags:
-        skill_prompt = build_skill_prompt(agent.skills) or ""
-        parts = [agent.system_prompt or "", skill_prompt, pipeline_prompt or ""]
-        if agent.tags:
-            tag_str = "、".join(agent.tags)
-            parts.append(f"你的知识库范围：{tag_str}。检索时请传入 tags 参数限定范围。")
-        if doc_ids:
-            doc_id_str = ", ".join(str(d) for d in doc_ids)
-            parts.append(
-                f"用户上传了文件，文档 ID：[{doc_id_str}]。"
-                "如需检索文件内容，请使用 retrieve_knowledge 工具并传入 doc_ids 参数。"
-            )
-        system_prompt = "\n\n".join(p for p in parts if p).strip()
-        messages.insert(0, {"role": "system", "content": system_prompt})
-
-    # 5. Agentic loop
-    max_iter = settings.AGENT_MAX_ROUNDS
+    messages: list[dict[str, Any]] = []
     full_content = ""
     _chat_start = time.monotonic()
     try:
+        # 1. 加载 Agent 配置
+        async with AsyncSessionLocal() as session:
+            agent = (await session.exec(
+                select(AgentRecord)
+                .join(ConversationRecord, ConversationRecord.agent_id == AgentRecord.id)
+                .where(ConversationRecord.id == conversation_id)
+            )).one()
 
-        for iteration in range(1, max_iter + 1):
-            logger.info("[agent_chat] conv=%d iteration=%d/%d", conversation_id, iteration, max_iter)
+        # 2. 构建 system prompt
+        system_parts = [agent.system_prompt or "", build_skill_prompt(agent.skills) or ""]
+        system_content = "\n\n".join(p for p in system_parts if p)
+        if system_content:
+            messages.append({"role": "system", "content": system_content})
+
+        # 3. 加载历史
+        messages.extend(await _load_history(conversation_id))
+
+        # 4. 处理附件 + 持久化 user message
+        if files:
+            file_list = "\n".join(f"- {f.store_path}" for f in files)
+            user_message = f"[附件]\n{file_list}\n\n{user_message}"
+
+        async with AsyncSessionLocal() as session:
+            for f in files or []:
+                session.add(ChatFileRecord(
+                    conversation_id=conversation_id,
+                    store_path=f.store_path,
+                    filename=f.filename,
+                ))
+            session.add(MessageRecord(conversation_id=conversation_id, role="user", content=user_message))
+            await session.commit()
+
+        messages.append({"role": "user", "content": user_message})
+
+        # 5. 构建工具列表
+        tool_names: list[str] = list(agent.tools or [])
+        if agent.skills and "load_skill" not in tool_names:
+            tool_names.append("load_skill")
+        tool_defs = build_tools(tool_names)
+
+        # 6. Agentic loop
+        for iteration in range(1, settings.AGENT_MAX_ROUNDS + 1):
+            logger.info("[agent_chat] conv=%d iteration=%d/%d", conversation_id, iteration, settings.AGENT_MAX_ROUNDS)
             full_content = ""
             reasoning_content = ""
             current_tool_calls: list[dict[str, Any]] = []
 
-            async for chunk in llm_chat_stream(model_key=agent.model or None, messages=messages, tools=tools):
-                reasoning_delta = chunk.get("reasoning", "")
-                if reasoning_delta:
-                    reasoning_content += reasoning_delta
-                    yield f'event: thinking\ndata: {json.dumps({"content": reasoning_delta}, ensure_ascii=False)}\n\n'
+            async for chunk in llm_chat_stream(model_key=agent.model, messages=messages, tools=tool_defs):
+                if chunk.get("reasoning"):
+                    reasoning_content += chunk["reasoning"]
+                    yield _sse("thinking", {"content": chunk["reasoning"]})
 
-                content_delta = chunk.get("content", "")
-                if content_delta:
-                    full_content += content_delta
-                    yield f'event: token\ndata: {json.dumps({"content": content_delta}, ensure_ascii=False)}\n\n'
+                if chunk.get("content"):
+                    full_content += chunk["content"]
+                    yield _sse("token", {"content": chunk["content"]})
 
                 if chunk.get("tool_calls"):
                     current_tool_calls = chunk["tool_calls"]
 
-
-            if not current_tool_calls:
-                # 最终回复，入库
-                async with AsyncSessionLocal() as session:
-                    session.add(MessageRecord(
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content=full_content,
-                        reasoning_content=reasoning_content or None,
-                    ))
-                    await session.commit()
-                break
-
-            tool_results: list[dict[str, Any]] = []
-            for tc in current_tool_calls:
-                func = tc.get("function", {})
-                yield f'event: tool_start\ndata: {json.dumps({"tool_name": func.get("name", ""), "arguments": func.get("arguments", "")}, ensure_ascii=False)}\n\n'
-
-                _t0 = time.monotonic()
-                tr = await execute_tool_call(tc)
-                duration_ms = int((time.monotonic() - _t0) * 1000)
-                tr["arguments"] = func.get("arguments", "")
-                tr["duration_ms"] = duration_ms
-                tool_results.append(tr)
-
-                yield f'event: tool_end\ndata: {json.dumps({"tool_name": tr["tool_name"], "output": tr["output"], "duration_ms": duration_ms, "status": tr.get("status", "success")}, ensure_ascii=False)}\n\n'
-
-            # 本轮 assistant + tool 消息入库
             async with AsyncSessionLocal() as session:
                 session.add(MessageRecord(
                     conversation_id=conversation_id,
@@ -187,33 +142,45 @@ async def run_agent_chat(
                     reasoning_content=reasoning_content or None,
                     tool_calls=current_tool_calls,
                 ))
-                for tr in tool_results:
+                await session.commit()
+
+            if not current_tool_calls:
+                # 最终回复，入库
+                break
+
+            # 执行工具调用
+            tool_messages: list[dict[str, Any]] = []
+            for tc in current_tool_calls:
+                func = tc.get("function", {})
+                yield _sse("tool_start", {"tool_name": func.get("name", ""), "arguments": func.get("arguments", "")})
+
+                _t0 = time.monotonic()
+                output = await execute_tool_call(tc)
+                duration_ms = int((time.monotonic() - _t0) * 1000)
+
+                yield _sse("tool_end", {"tool_name": func.get("name", ""), "output": output, "duration_ms": duration_ms})
+
+                tool_messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": output})
+
+                async with AsyncSessionLocal() as session:
                     session.add(MessageRecord(
                         conversation_id=conversation_id,
                         role="tool",
-                        content=tr["output"],
-                        tool_call_id=tr["tool_call_id"],
-                        duration_ms=tr.get("duration_ms"),
+                        content=output,
+                        tool_call_id=tc.get("id", ""),
+                        duration_ms=duration_ms,
                     ))
-                await session.commit()
+                    await session.commit()
 
-            messages.append({
-                "role": "assistant",
-                "content": full_content,
-                "tool_calls": current_tool_calls,
-            })
-            for tr in tool_results:
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tr["tool_call_id"],
-                    "content": tr["output"],
-                })
+            # 追加到上下文供下轮使用
+            messages.append({"role": "assistant", "content": full_content, "tool_calls": current_tool_calls})
+            messages.extend(tool_messages)
+
         else:
-            logger.warning("[agent_chat] max iterations (%d) reached for conv=%d", max_iter, conversation_id)
+            logger.warning("[agent_chat] max iterations (%d) reached for conv=%d", settings.AGENT_MAX_ROUNDS, conversation_id)
 
-        total_ms = int((time.monotonic() - _chat_start) * 1000)
-        yield f'event: done\ndata: {json.dumps({"content": full_content, "total_duration_ms": total_ms}, ensure_ascii=False)}\n\n'
+        yield _sse("done", {"content": full_content, "total_duration_ms": int((time.monotonic() - _chat_start) * 1000)})
 
     except Exception as exc:
         logger.exception("[agent_chat] error in conv=%d", conversation_id)
-        yield f'event: error\ndata: {json.dumps({"message": str(exc)}, ensure_ascii=False)}\n\n'
+        yield _sse("error", {"message": str(exc)})

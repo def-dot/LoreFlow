@@ -66,6 +66,7 @@ async def llm_chat_call(
     if messages is None:
         raise ValueError("messages is required")
     base_url, api_key, model_name = await _resolve_chat_model(model_key)
+    logger.info("[llm] %s %s", base_url, model_name)
 
     payload: dict[str, Any] = {"model": model_name, "messages": messages, "stream": False}
     if tools is not None:

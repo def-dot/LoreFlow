@@ -119,13 +119,20 @@ function formatContent(text: string): string {
                   :class="`step-${step.status}`"
                 >
                   <div class="step-header">
-                    <span class="step-icon">{{ step.status === 'running' ? '⏳' : step.status === 'error' ? '❌' : '✅' }}</span>
+                    <span v-if="step.status === 'running'" class="step-spinner" />
+                    <span v-else class="step-icon">{{ step.status === 'error' ? '❌' : '✅' }}</span>
                     <span class="step-name">{{ toolLabels?.[step.tool_name] || step.tool_name }}</span>
                     <span class="step-duration" v-if="step.duration_ms != null">耗时：{{ formatDuration(step.duration_ms) }}</span>
                   </div>
                   <div v-if="step.arguments || step.output" class="step-detail">
-                    <pre v-if="step.arguments" class="detail-input">{{ formatArgs(step.arguments) }}</pre>
-                    <pre v-if="step.output" class="detail-output" :class="{ 'is-error': step.status === 'error' }">{{ step.output }}</pre>
+                    <template v-if="step.arguments">
+                      <div class="detail-label">输入</div>
+                      <pre class="detail-input">{{ formatArgs(step.arguments) }}</pre>
+                    </template>
+                    <template v-if="step.output">
+                      <div class="detail-label">输出</div>
+                      <pre class="detail-output" :class="{ 'is-error': step.status === 'error' }">{{ step.output }}</pre>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -412,6 +419,21 @@ function formatContent(text: string): string {
   flex-shrink: 0;
 }
 
+.step-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ink-3, #999);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .step-name {
   font-family: var(--font-mono);
   font-weight: 500;
@@ -450,6 +472,13 @@ function formatContent(text: string): string {
   white-space: pre-wrap;
   max-height: 200px;
   overflow-y: auto;
+}
+
+.detail-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-3, #999);
+  margin-bottom: -2px;
 }
 
 .detail-input {

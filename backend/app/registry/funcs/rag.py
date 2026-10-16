@@ -25,16 +25,15 @@ class SearchKnowledgeOutput(BaseModel):
 
 class SearchKnowledgeParams(BaseModel):
     queries: str | list[str] = Field(description="检索关键词，单个字符串或列表")
-    tags: list[str] = Field(default_factory=list, description="按标签名称筛选，为空则检索全部")
+    tags: list[str] | None = Field(default=None, description="按标签名称筛选，为空则检索全部")
     doc_ids: list[int] | None = Field(default=None, description="按文档 ID 筛选，用于检索特定上传文件")
 
 
 @node(
     label="检索知识库",
     description=(
-        "从知识库中检索与问题最相关的文档片段。"
-        "支持多查询并发检索并自动去重。"
-        "可通过 doc_ids 参数限定检索特定文档。"
+        "混合检索知识库：向量 + BM25 双路召回，RRF 融合去重，Reranker 精排后返回 Top-K。"
+        "支持多查询并发检索，按标签/文档 ID 过滤。"
     ),
     metadata={"group": "基础", "order": 30},
 )
