@@ -6,7 +6,7 @@ from app.core.response import UnifiedResponseRoute
 from app.models.upload import UploadRecord
 from app.schemas.agents import FileRef
 from app.services import uploads as uploads_service
-from app.utils import files
+from app.utils.files import check_upload, save_upload
 
 router = APIRouter(prefix="/uploads", route_class=UnifiedResponseRoute, tags=["uploads"])
 
@@ -17,8 +17,8 @@ async def upload_file(
 ) -> UploadRecord:
     filename = file.filename or ""
     data = await file.read()
-    suffix = files.check_upload(filename, data)
-    store_path = files.save_upload(data, suffix)  # uploads/{uuid}.ext
+    suffix = check_upload(filename, data)
+    store_path = save_upload(data, suffix)  # uploads/{uuid}.ext
     record = UploadRecord(store_path=store_path, filename=filename, size=len(data))
     await uploads_service.create(record)
     return FileRef(

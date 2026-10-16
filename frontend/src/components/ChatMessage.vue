@@ -83,6 +83,11 @@ function formatContent(text: string): string {
     /(?<!["'=])(uploads\/[\w./-]+\.\w+)/g,
     '<a href="/$1" target="_blank">$1</a>',
   )
+  // sandbox:xxx 转为代理下载链接
+  html = html.replace(
+    /\[([^\]]+)\]\(sandbox:([^)]+)\)/g,
+    '<a href="/api/v1/uploads/sandbox/$2" target="_blank">$1</a>',
+  )
   return html
 }
 
