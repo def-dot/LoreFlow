@@ -12,6 +12,7 @@ from app.schemas.agents import (
     ChatRequest,
     ConversationCreate,
     ConversationDetail,
+    FileRef,
 )
 from app.services.agent_chat import run_agent_chat
 
@@ -64,9 +65,16 @@ async def get_conversation(conv_id: int) -> ConversationDetail:
             .order_by(MessageRecord.id)
         )).all()
 
+        files = (await session.exec(
+            select(ChatFileRecord)
+            .where(ChatFileRecord.conversation_id == conv_id)
+            .order_by(ChatFileRecord.id)
+        )).all()
+
     return ConversationDetail(
         **conv.model_dump(),
         messages=messages,
+        files=[FileRef(store_path=f.store_path, filename=f.filename) for f in files],
     )
 
 

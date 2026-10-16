@@ -40,6 +40,8 @@ export interface RoundData {
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  /** 附件列表 */
+  files?: { store_path: string; filename: string }[]
   /** 按轮分组的过程数据（思考 + 工具调用） */
   rounds?: RoundData[]
   /** 执行摘要（done 事件携带） */
@@ -147,7 +149,14 @@ export const useAgentsStore = defineStore('agents', {
         const assistantMsgs = turn.filter(m => m.role === 'assistant')
         const toolMsgs = turn.filter(m => m.role === 'tool')
 
-        if (userMsg) result.push({ role: 'user', content: userMsg.content })
+        if (userMsg) {
+          const chatMsg: ChatMessage = { role: 'user', content: userMsg.content }
+          // 第一条用户消息关联附件
+          if (result.length === 0 && this.currentConversation?.files?.length) {
+            chatMsg.files = this.currentConversation.files
+          }
+          result.push(chatMsg)
+        }
 
         // 把每个 assistant 消息和它对应的 tool 消息配对为 rounds
         const rounds: RoundData[] = []
@@ -222,7 +231,11 @@ export const useAgentsStore = defineStore('agents', {
       const displayMsg = files.length
         ? `[📎 ${files.length} 个附件]\n${message}`
         : message
-      this.chatMessages.push({ role: 'user', content: displayMsg })
+      this.chatMessages.push({
+        role: 'user',
+        content: displayMsg,
+        files: files.length ? files : undefined,
+      })
 
       // 当前活跃的 assistant 消息在数组中的索引
       // 必须通过 this.chatMessages[idx] 访问（reactive Proxy），

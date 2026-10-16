@@ -92,8 +92,21 @@ function formatContent(text: string): string {
     <!-- 用户消息 -->
     <template v-if="message.role === 'user'">
       <div class="msg-avatar user-avatar"><UserFilled /></div>
-      <div class="bubble user-bubble">
-        <pre class="msg-text">{{ message.content }}</pre>
+      <div class="msg-body">
+        <div v-if="message.files?.length" class="msg-files">
+          <a
+            v-for="f in message.files"
+            :key="f.store_path"
+            :href="'/' + f.store_path"
+            target="_blank"
+            class="file-chip"
+          >
+            📄 {{ f.filename }}
+          </a>
+        </div>
+        <div class="bubble user-bubble">
+          <pre class="msg-text">{{ message.content }}</pre>
+        </div>
       </div>
     </template>
 
@@ -210,7 +223,6 @@ function formatContent(text: string): string {
 }
 
 .bubble {
-  max-width: 80%;
   padding: 12px 16px;
   border-radius: 12px;
   font-size: 13.5px;
@@ -228,6 +240,38 @@ function formatContent(text: string): string {
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--ink-2);
+  max-width: 80%;
+}
+
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 80%;
+}
+
+.msg-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: rgba(77, 196, 178, 0.1);
+  border: 1px solid rgba(77, 196, 178, 0.2);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.file-chip:hover {
+  background: rgba(77, 196, 178, 0.2);
 }
 
 /* ---- 流式指示 ---- */
