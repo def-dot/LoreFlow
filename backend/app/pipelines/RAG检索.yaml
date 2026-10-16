@@ -1,0 +1,44 @@
+name: RAG检索
+description: 纯检索工作流：查询改写 → 知识库检索。返回检索结果，不生成回答。
+params:
+  query:
+    type: string
+    title: 用户问题
+    description: 输入要检索的问题
+  tags:
+    type: array
+    title: 标签筛选
+    description: 按标签过滤知识库，不选则检索全部
+    items:
+      type: string
+      enum: [财务, 人事, 客服, 技术]
+    ui: select
+required:
+- query
+
+nodes:
+- name: rewrite
+  type: llm_rewrite_query
+  label: 查询改写
+  inputs:
+    query: $params.query
+
+- name: retrieve
+  type: retrieve_knowledge
+  label: 知识库检索
+  depends_on:
+  - rewrite
+  inputs:
+    queries: $rewrite.sub_queries
+    tags: $params.tags
+
+- name: __end__
+  label: 输出
+  depends_on:
+  - retrieve
+  type: end
+  inputs:
+    context: $retrieve.context
+    sources: $retrieve.sources
+    search_query: $rewrite.search_query
+    sub_queries: $rewrite.sub_queries
