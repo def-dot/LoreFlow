@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { marked } from 'marked'
+import { UserFilled, Cpu } from '@element-plus/icons-vue'
 import type { ChatMessage } from '@/stores/agents'
 
 // 流式场景下同步解析，避免闪烁
@@ -89,12 +90,17 @@ function formatContent(text: string): string {
 <template>
   <div class="chat-msg" :class="[`role-${message.role}`, { streaming: message.streaming }]">
     <!-- 用户消息 -->
-    <div v-if="message.role === 'user'" class="bubble user-bubble">
-      <pre class="msg-text">{{ message.content }}</pre>
-    </div>
+    <template v-if="message.role === 'user'">
+      <div class="msg-avatar user-avatar"><UserFilled /></div>
+      <div class="bubble user-bubble">
+        <pre class="msg-text">{{ message.content }}</pre>
+      </div>
+    </template>
 
     <!-- Assistant 消息（含完整执行过程） -->
-    <div v-else-if="message.role === 'assistant'" class="bubble assistant-bubble">
+    <template v-else-if="message.role === 'assistant'">
+      <div class="msg-avatar ai-avatar"><Cpu /></div>
+      <div class="bubble assistant-bubble">
       <!-- 推理过程（思考 + 工具步骤，统一折叠） -->
       <div v-if="hasProcess || (message.streaming && message.phase === 'thinking')" class="process-section">
         <button class="toggle-btn" @click="toggleProcess">
@@ -158,20 +164,49 @@ function formatContent(text: string): string {
         {{ formatTotalDuration(message.summary.total_duration_ms) }}
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .chat-msg {
   display: flex;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
 .role-user {
-  justify-content: flex-end;
+  flex-direction: row-reverse;
 }
 .role-assistant {
-  justify-content: flex-start;
+  flex-direction: row;
+}
+
+.msg-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.msg-avatar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.user-avatar {
+  background: rgba(77, 196, 178, 0.18);
+  border: 1px solid rgba(77, 196, 178, 0.3);
+  color: #3ba89a;
+}
+
+.ai-avatar {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: #5558e6;
 }
 
 .bubble {
