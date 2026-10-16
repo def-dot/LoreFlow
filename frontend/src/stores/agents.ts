@@ -44,10 +44,6 @@ export interface ChatMessage {
   files?: { store_path: string; filename: string }[]
   /** 按轮分组的过程数据（思考 + 工具调用） */
   rounds?: RoundData[]
-  /** 执行摘要（done 事件携带） */
-  summary?: {
-    total_duration_ms: number
-  }
   /** 当前流式阶段 */
   phase?: 'thinking' | 'tool' | 'token'
   /** 正在流式接收中 */
@@ -312,9 +308,6 @@ export const useAgentsStore = defineStore('agents', {
                 lastRound.content = evt.data.content || roundContentBuf || undefined
               }
               msg.content = evt.data.content || msg.content
-              msg.summary = {
-                total_duration_ms: evt.data.total_duration_ms,
-              }
               msg.streaming = false
               break
             }

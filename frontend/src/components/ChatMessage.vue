@@ -66,27 +66,16 @@ function formatDuration(ms?: number): string {
 }
 
 /** 格式化总耗时 */
-function formatTotalDuration(ms?: number): string {
-  if (ms == null) return ''
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  const m = Math.floor(ms / 60000)
-  const s = Math.round((ms % 60000) / 1000)
-  return `${m}m${s}s`
-}
-
 /** markdown → HTML */
 function formatContent(text: string): string {
   let html = marked.parse(text) as string
-  // uploads/ 路径转为可点击链接
+  // uploads/ 路径转为可点击链接（支持 /uploads/ 和 uploads/）
   html = html.replace(
-    /(?<!["'=])(uploads\/[\w./-]+\.\w+)/g,
-    '<a href="/$1" target="_blank">$1</a>',
-  )
-  // sandbox:xxx 转为代理下载链接
-  html = html.replace(
-    /\[([^\]]+)\]\(sandbox:([^)]+)\)/g,
-    '<a href="/api/v1/uploads/sandbox/$2" target="_blank">$1</a>',
+    /(?<!["'=/])(\/?uploads\/[\w./-]+\.\w+)/g,
+    (m) => {
+      const path = m.startsWith('/') ? m : '/' + m
+      return `<a href="${path}" target="_blank">${m}</a>`
+    },
   )
   return html
 }
@@ -182,10 +171,6 @@ function stripFilePrefix(text: string): string {
       <!-- 流式光标 -->
       <span v-if="message.streaming && message.phase === 'token'" class="cursor">▊</span>
 
-      <!-- 执行摘要 -->
-      <div v-if="message.summary" class="execution-summary">
-        {{ formatTotalDuration(message.summary.total_duration_ms) }}
-      </div>
     </div>
     </template>
   </div>
@@ -613,14 +598,6 @@ function stripFilePrefix(text: string): string {
 }
 
 /* ---- 执行摘要 ---- */
-.execution-summary {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--ink-3);
-}
-
 /* ---- 流式光标 ---- */
 .cursor {
   display: inline-block;
