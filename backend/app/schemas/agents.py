@@ -58,4 +58,4 @@ class ConversationDetail(BaseModel):
     created_at: datetime
     updated_at: datetime | None = None
     messages: list[MessageRecord] = Field(default_factory=list)
-    files: list[FileRef] = Field(default_factory=list)
+    files_by_message: dict[int, list[FileRef]] = Field(default_factory=dict)

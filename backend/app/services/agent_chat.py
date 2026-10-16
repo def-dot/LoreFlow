@@ -98,13 +98,16 @@ async def run_agent_chat(
             user_message = f"[附件]\n{file_list}\n\n{user_message}"
 
         async with AsyncSessionLocal() as session:
+            user_msg = MessageRecord(conversation_id=conversation_id, role="user", content=user_message)
+            session.add(user_msg)
+            await session.flush()  # 获取 message id
             for f in files or []:
                 session.add(ChatFileRecord(
                     conversation_id=conversation_id,
+                    message_id=user_msg.id,
                     store_path=f.store_path,
                     filename=f.filename,
                 ))
-            session.add(MessageRecord(conversation_id=conversation_id, role="user", content=user_message))
             await session.commit()
 
         messages.append({"role": "user", "content": user_message})

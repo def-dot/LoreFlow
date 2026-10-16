@@ -41,7 +41,7 @@ export interface MessageItem {
 
 export interface ConversationDetail extends ConversationListItem {
   messages: MessageItem[]
-  files: { store_path: string; filename: string }[]
+  files_by_message: Record<number, { store_path: string; filename: string }[]>
 }
 
 export interface ChatRequest {

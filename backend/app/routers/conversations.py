@@ -1,5 +1,7 @@
 """对话 API — 挂载在 /api/v1 下的 /conversations 路由组"""
 
+from collections import defaultdict
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete
@@ -71,10 +73,15 @@ async def get_conversation(conv_id: int) -> ConversationDetail:
             .order_by(ChatFileRecord.id)
         )).all()
 
+    # 按 message_id 分组文件
+    files_by_msg: dict[int, list[FileRef]] = defaultdict(list)
+    for f in files:
+        files_by_msg[f.message_id].append(FileRef(store_path=f.store_path, filename=f.filename))
+
     return ConversationDetail(
         **conv.model_dump(),
         messages=messages,
-        files=[FileRef(store_path=f.store_path, filename=f.filename) for f in files],
+        files_by_message=files_by_msg,
     )
 
 

@@ -151,9 +151,10 @@ export const useAgentsStore = defineStore('agents', {
 
         if (userMsg) {
           const chatMsg: ChatMessage = { role: 'user', content: userMsg.content }
-          // 第一条用户消息关联附件
-          if (result.length === 0 && this.currentConversation?.files?.length) {
-            chatMsg.files = this.currentConversation.files
+          // 关联附件
+          const msgFiles = this.currentConversation?.files_by_message?.[userMsg.id]
+          if (msgFiles?.length) {
+            chatMsg.files = msgFiles
           }
           result.push(chatMsg)
         }

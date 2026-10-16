@@ -42,6 +42,7 @@ class ChatFileRecord(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     conversation_id: int = Field(foreign_key="conversations.id", index=True)
+    message_id: int | None = Field(default=None, foreign_key="messages.id", index=True)
     store_path: str          # UUID 存储路径，如 "uploads/a1b2c3d4.txt"
     filename: str            # 原始文件名
     size: int = 0

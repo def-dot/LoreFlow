@@ -85,6 +85,11 @@ function formatContent(text: string): string {
   )
   return html
 }
+
+/** 去掉 [附件] 前缀 */
+function stripFilePrefix(text: string): string {
+  return text.replace(/^\[附件\]\n(?:- .+\n)*\n?/, '')
+}
 </script>
 
 <template>
@@ -105,7 +110,7 @@ function formatContent(text: string): string {
           </a>
         </div>
         <div class="bubble user-bubble">
-          <pre class="msg-text">{{ message.content }}</pre>
+          <pre class="msg-text">{{ stripFilePrefix(message.content) }}</pre>
         </div>
       </div>
     </template>
