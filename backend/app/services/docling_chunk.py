@@ -38,7 +38,6 @@ def document_chunk(file_path: str, doc_id: int, *, doc: DoclingDocument = None) 
 
     doc_chunks = list(_get_chunker().chunk(doc))
 
-    source_file = os.path.basename(file_path)
     formatted: list[dict[str, Any]] = []
     for i, chunk in enumerate(doc_chunks):
         text = chunk.text.replace("\x00 ", "-")
@@ -56,7 +55,7 @@ def document_chunk(file_path: str, doc_id: int, *, doc: DoclingDocument = None) 
                 "enriched_text": f"[章节上下文: {heading_ctx}]\n{text}",
                 "raw_text": text,
                 "metadata": {
-                    "source_file": source_file,
+                    "source_file": file_path,
                     "chunk_id": i,
                     "heading_context": heading_ctx,
                     "page_numbers": pages,
