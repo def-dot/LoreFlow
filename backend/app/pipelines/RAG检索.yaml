@@ -38,7 +38,6 @@ nodes:
   - retrieve
   type: end
   inputs:
-    context: $retrieve.context
     sources: $retrieve.sources
     search_query: $rewrite.search_query
     sub_queries: $rewrite.sub_queries

@@ -14,7 +14,7 @@ nodes:
   - search
   inputs:
     prompt: |
-      参考资料：$search.context
+      参考资料：$search.sources
 
       问题：$params.question
     system: |
@@ -27,7 +27,7 @@ nodes:
   type: end
   inputs:
     answer: $answer.content
-    sources: $search.context
+    sources: $search.sources
 params:
   question:
     type: string

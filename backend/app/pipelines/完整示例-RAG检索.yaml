@@ -63,7 +63,7 @@ nodes:
   - retrieve
   inputs:
     prompt: |
-      参考资料：$retrieve.context
+      参考资料：$retrieve.sources
 
       问题：$params.query
     system: |
