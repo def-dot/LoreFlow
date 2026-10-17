@@ -796,8 +796,6 @@ function stripFilePrefix(text: string): string {
   color: var(--ink-3);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 64px;
-  overflow: hidden;
 }
 
 </style>
