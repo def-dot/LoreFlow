@@ -177,7 +177,6 @@ async def search_chunks(
     top_k: int = 5,
     *,
     tags: list[str] | None = None,
-    doc_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """混合检索：BM25 + 向量 + RRF 融合 + Reranker 精排。"""
     t0 = time.perf_counter()
@@ -191,7 +190,6 @@ async def search_chunks(
         limit=settings.RECALL_COUNT,
         rrf_k=settings.RRF_K,
         tags=tags,
-        doc_ids=doc_ids,
     )
     logger.info("[perf] hybrid_rrf: %.2fs (%d results)", time.perf_counter() - t0, len(recalls))
 
@@ -220,27 +218,25 @@ async def search_multi(
     queries: list[str],
     tags: list[str] | None = None,
     top_k: int = 5,
-    doc_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """并发检索多个 query，多 query 时自动去重，返回结构化结果列表。"""
 
     async def _retrieve_one(q: str):
-        return await search_chunks(q, top_k=top_k, tags=tags, doc_ids=doc_ids)
+        return await search_chunks(q, top_k=top_k, tags=tags)
 
     all_results = await asyncio.gather(*[_retrieve_one(q) for q in queries])
 
-    if len(queries) > 1:
-        seen: dict[int, dict] = {}
-        for results in all_results:
-            for r in results:
-                cid = r.get("chunk_id")
-                if cid is None:
-                    cid = hash(r["content"][:100])
-                if cid not in seen or r["similarity"] > seen[cid]["similarity"]:
-                    seen[cid] = r
-        return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)[:top_k]
+    if not all_results:
+        return []
 
-    return all_results[0][:top_k] if all_results else []
+    seen: dict[int, dict] = {}
+    for results in all_results:
+        for r in results:
+            cid = r["chunk_id"]
+            if cid not in seen or r["similarity"] > seen[cid]["similarity"]:
+                seen[cid] = r
+
+    return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)[:top_k]
 
 
 def format_sources(sources: list[dict[str, Any]]) -> str:
@@ -258,24 +254,12 @@ async def _get_chunks_hybrid_rrf(
     limit: int = 100,
     rrf_k: int = 60,
     tags: list[str] | None = None,
-    doc_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """单 SQL 完成稠密向量 + tsvector BM25 双路召回 + RRF 融合。"""
     query_vec_str = _vector_to_str(query_vec)
 
     scope_filter = ""
-    if tags and doc_ids:
-        scope_filter = (
-            "AND ("
-            "  c.document_id IN ("
-            "    SELECT dt.document_id FROM document_tags dt"
-            "    JOIN tags t ON t.id = dt.tag_id"
-            "    WHERE t.name = ANY(:tags)"
-            "  )"
-            "  OR c.document_id = ANY(:doc_ids)"
-            ")"
-        )
-    elif tags:
+    if tags:
         scope_filter = (
             "AND c.document_id IN ("
             "  SELECT dt.document_id FROM document_tags dt"
@@ -283,8 +267,6 @@ async def _get_chunks_hybrid_rrf(
             "  WHERE t.name = ANY(:tags)"
             ")"
         )
-    elif doc_ids:
-        scope_filter = "AND c.document_id = ANY(:doc_ids)"
 
     hybrid_sql = text(f"""
         WITH qv AS (
@@ -335,8 +317,6 @@ async def _get_chunks_hybrid_rrf(
     }
     if tags:
         params["tags"] = tags
-    if doc_ids:
-        params["doc_ids"] = doc_ids
 
     async with database.AsyncSessionLocal() as session:
         rows = (await session.execute(hybrid_sql, params)).fetchall()
