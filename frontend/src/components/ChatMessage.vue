@@ -178,11 +178,11 @@ function formatContent(text: string, withChunkRef = false): string {
       return `<a href="${path}" target="_blank">${m}</a>`
     },
   )
-  // [来源#123] → 可点击 chunk 引用（仅最终回复）
+  // [#123] → 可点击 chunk 引用（仅最终回复）
   if (withChunkRef && chunkSources.value.length) {
     html = html.replace(
-      /\[来源#(\d+)\]/g,
-      '<a class="chunk-ref" data-cid="$1" href="javascript:void(0)">[来源#$1]</a>',
+      /\[#(\d+)\]/g,
+      '<a class="chunk-ref" data-cid="$1" href="javascript:void(0)">[#$1]</a>',
     )
   }
   return html
@@ -292,7 +292,7 @@ function stripFilePrefix(text: string): string {
           :class="{ active: activeChunk?.chunk_id === src.chunk_id }"
           @click="toggleSource(src, $event)"
         >
-          <span class="source-num">[来源#{{ src.chunk_id }}]</span>
+          <span class="source-num">[#{{ src.chunk_id }}]</span>
           <span class="source-file">{{ src.file_path }}</span>
           <span class="source-score">{{ (src.similarity * 100).toFixed(1) }}%</span>
           <div class="source-preview">{{ src.content }}</div>
