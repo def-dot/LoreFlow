@@ -72,17 +72,17 @@ async def _insert_chunks(chunks: list[dict[str, Any]], document_id: int) -> int:
                         text(
                             """
                             INSERT INTO chunks
-                                (document_id, file_name, page_numbers, heading_context,
+                                (document_id, file_path, page_numbers, heading_context,
                                  raw_content, enriched_content, embedding)
                             VALUES
-                                (:document_id, :file_name, CAST(:page_numbers AS INTEGER[]),
+                                (:document_id, :file_path, CAST(:page_numbers AS INTEGER[]),
                                  :heading_context, :raw_content, :enriched_content,
                                  CAST(:embedding AS vector))
                             """
                         ),
                         {
                             "document_id": document_id,
-                            "file_name": meta["source_file"],
+                            "file_path": meta["source_file"],
                             "page_numbers": meta["page_numbers"],
                             "heading_context": meta["heading_context"],
                             "raw_content": chunk_data["raw_text"],
@@ -209,7 +209,7 @@ async def search_chunks(
     ranked.sort(key=lambda x: x["similarity"], reverse=True)
 
     return [
-        {"chunk_id": r["id"], "content": r["content"], "filename": r["filename"], "similarity": r["similarity"]}
+        {"chunk_id": r["id"], "content": r["content"], "file_path": r["file_path"], "similarity": r["similarity"]}
         for r in ranked[:top_k]
     ]
 
@@ -243,7 +243,7 @@ def format_sources(sources: list[dict[str, Any]]) -> str:
     """将检索结果列表格式化为可读文本。"""
     if not sources:
         return "（未检索到相关内容）"
-    parts = [f"[{i}] 来源：{r['filename']}\n{r['content']}" for i, r in enumerate(sources, 1)]
+    parts = [f"[{i}] 来源：{r['file_path']}\n{r['content']}" for i, r in enumerate(sources, 1)]
     return "\n\n".join(parts)
 
 
@@ -278,7 +278,7 @@ async def _get_chunks_hybrid_rrf(
             )) AS q
         ),
         dense_search AS (
-            SELECT c.id, c.document_id, c.file_name, c.raw_content, c.enriched_content,
+            SELECT c.id, c.document_id, c.file_path, c.raw_content, c.enriched_content,
                    ROW_NUMBER() OVER (ORDER BY c.embedding <=> qv.v) AS rank
             FROM chunks c, qv
             WHERE c.embedding IS NOT NULL
@@ -288,7 +288,7 @@ async def _get_chunks_hybrid_rrf(
             LIMIT :limit
         ),
         sparse_search AS (
-            SELECT c.id, c.document_id, c.file_name, c.raw_content, c.enriched_content,
+            SELECT c.id, c.document_id, c.file_path, c.raw_content, c.enriched_content,
                    ROW_NUMBER() OVER (ORDER BY ts_rank(c.tsv_content, qt.q) DESC) AS rank
             FROM chunks c, qt
             WHERE c.tsv_content @@ qt.q
@@ -299,7 +299,7 @@ async def _get_chunks_hybrid_rrf(
         SELECT
             COALESCE(d.id, s.id)                        AS id,
             COALESCE(d.document_id, s.document_id)      AS document_id,
-            COALESCE(d.file_name, s.file_name)          AS file_name,
+            COALESCE(d.file_path, s.file_path)          AS filename,
             COALESCE(d.enriched_content, s.enriched_content)      AS content,
             COALESCE(1.0 / (:rrf_k + d.rank), 0.0)
                 + COALESCE(1.0 / (:rrf_k + s.rank), 0.0) AS score
@@ -322,6 +322,6 @@ async def _get_chunks_hybrid_rrf(
         rows = (await session.execute(hybrid_sql, params)).fetchall()
 
     return [
-        {"id": r[0], "document_id": r[1], "filename": r[2], "content": r[3], "similarity": float(r[4])}
+        {"id": r[0], "document_id": r[1], "file_path": r[2], "content": r[3], "similarity": float(r[4])}
         for r in rows
     ]

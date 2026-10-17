@@ -12,6 +12,7 @@ import {
   uploadDocuments,
   cancelDocument,
   retryDocument,
+  reparseDocument,
   updateDocumentTags,
   getDocumentStatusCounts,
   listTags,
@@ -418,6 +419,17 @@ async function handleRetry(row: DocumentItem) {
   } catch { /* interceptor handles */ }
 }
 
+async function handleReparse(row: DocumentItem) {
+  try {
+    await ElMessageBox.confirm(`重新解析「${row.filename}」？旧切片将被清除。`, '重新解析', {
+      type: 'warning',
+    })
+    await reparseDocument(row.id)
+    ElMessage.success('已重新入队')
+    await refreshAll()
+  } catch { /* 用户取消 */ }
+}
+
 async function handleDelete(row: DocumentItem) {
   try {
     await ElMessageBox.confirm(`删除文档「${row.filename}」及其全部切片，不可恢复。`, '删除文档', {
@@ -692,6 +704,9 @@ onUnmounted(() => {
                   </button>
                   <button type="button" class="act" title="查看切片" @click="openChunks(row)">
                     <el-icon><View /></el-icon>
+                  </button>
+                  <button type="button" class="act warn" title="重新解析" @click="handleReparse(row)">
+                    <el-icon><RefreshRight /></el-icon>
                   </button>
                 </template>
                 <button type="button" class="act danger" title="删除文档" @click="handleDelete(row)">

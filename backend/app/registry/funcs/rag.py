@@ -14,7 +14,7 @@ from app.services import knowledge
 class ChunkResult(BaseModel):
     chunk_id: int = Field(description="切片 ID")
     content: str = Field(description="切片内容")
-    filename: str = Field(description="来源文件名")
+    file_path: str = Field(description="来源文件路径")
     similarity: float = Field(description="相似度分数")
 
 

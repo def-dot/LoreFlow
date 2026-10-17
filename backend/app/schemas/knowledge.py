@@ -25,7 +25,7 @@ class DocumentListResponse(BaseModel):
 class ChunkItem(BaseModel):
     id: int
     document_id: int
-    file_name: str | None = None
+    file_path: str | None = None
     page_numbers: list[int] = []
     heading_context: str = ""
     raw_content: str = ""

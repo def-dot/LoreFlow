@@ -326,7 +326,7 @@ async def list_chunks(
 
     items = [
         ChunkItem(
-            id=c.id, document_id=c.document_id, file_name=c.file_name,
+            id=c.id, document_id=c.document_id, file_path=c.file_path,
             page_numbers=c.page_numbers or [],
             heading_context=c.heading_context or "",
             raw_content=c.raw_content or "",
@@ -359,6 +359,27 @@ async def retry_document(doc_id: int) -> bool:
 
     from app.utils.arq import delete_job, enqueue_parse, doc_job_id
     await delete_job(doc_job_id(doc_id))
+    await enqueue_parse(doc_id)
+    return True
+
+
+async def reparse_document(doc_id: int) -> bool:
+    """重新解析已完成的文档：清除旧切片，重新入队解析。"""
+    async with database.AsyncSessionLocal() as session:
+        doc = await session.get(DocumentRecord, doc_id)
+        if doc is None or doc.status != DocumentStatus.COMPLETED:
+            return False
+        # 清除旧切片
+        await session.execute(delete(ChunkRecord).where(ChunkRecord.document_id == doc_id))
+        doc.status = DocumentStatus.PENDING
+        doc.chunk_count = 0
+        doc.error = None
+        doc.parse_duration_ms = None
+        doc.updated_at = datetime.now()
+        session.add(doc)
+        await session.commit()
+
+    from app.utils.arq import enqueue_parse
     await enqueue_parse(doc_id)
     return True
 

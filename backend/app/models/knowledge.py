@@ -61,7 +61,7 @@ class ChunkRecord(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     document_id: int = Field(index=True, foreign_key="documents.id")
-    file_name: str | None = Field(default=None, max_length=255)
+    file_path: str | None = Field(default=None, max_length=255)
     embedding: list[float] | None = Field(
         default=None,
         sa_column=Column(Vector(settings.EMBEDDING_DIMENSION)),

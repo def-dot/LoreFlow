@@ -174,6 +174,14 @@ async def retry_document(doc_id: int) -> dict:
     return {"document_id": doc_id, "retried": True}
 
 
+@router.post("/documents/{doc_id}/reparse")
+async def reparse_document(doc_id: int) -> dict:
+    ok = await knowledge.reparse_document(doc_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="该文档当前无法重新解析（仅支持已完成的文档）")
+    return {"document_id": doc_id, "reparsed": True}
+
+
 @router.get("/documents/{doc_id}/pages/{page_no}")
 async def get_document_page(doc_id: int, page_no: int) -> dict:
     """获取文档单页的解析结果（Markdown + 元数据）"""

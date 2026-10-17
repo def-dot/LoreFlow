@@ -20,7 +20,7 @@ export interface DocumentListResponse {
 export interface ChunkItem {
   id: number
   document_id: number
-  file_name: string | null
+  file_path: string | null
   page_numbers: number[]
   heading_context: string
   raw_content: string
@@ -67,6 +67,9 @@ export const cancelDocument = (docId: number) =>
 
 export const retryDocument = (docId: number) =>
   api.post(`/documents/${docId}/retry`)
+
+export const reparseDocument = (docId: number) =>
+  api.post(`/documents/${docId}/reparse`)
 
 export const updateDocumentTags = (docId: number, tags: string[]) =>
   api.put(`/documents/${docId}/tags`, { tags })
