@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import { UserFilled, Cpu } from '@element-plus/icons-vue'
 import type { ChatMessage } from '@/stores/agents'
+
+interface ChunkSource {
+  chunk_id: number
+  content: string
+  file_path: string
+  similarity: number
+}
 
 // 流式场景下同步解析，避免闪烁
 marked.use({ async: false })
@@ -44,6 +51,100 @@ function toggleProcess() {
   showProcess.value = !showProcess.value
 }
 
+// ── Chunk 引用 ─────────────────────────────────────────────────
+
+const msgTextRef = ref<HTMLElement | null>(null)
+const activeChunk = ref<ChunkSource | null>(null)
+const popoverPos = ref<Record<string, string>>({})
+let popoverAnchor: HTMLElement | null = null
+
+/** 从工具输出中解析检索结果 sources（多次调用合并去重） */
+const chunkSources = computed<ChunkSource[]>(() => {
+  const rounds = props.message.rounds
+  if (!rounds) return []
+  const merged: ChunkSource[] = []
+  const seen = new Set<number>()
+  for (const round of rounds) {
+    if (!round.steps) continue
+    for (const step of round.steps) {
+      if (step.tool_name !== 'retrieve_knowledge' || !step.output) continue
+      try {
+        const data = JSON.parse(step.output)
+        if (Array.isArray(data.sources)) {
+          for (const s of data.sources) {
+            if (!seen.has(s.chunk_id)) {
+              seen.add(s.chunk_id)
+              merged.push(s)
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  return merged
+})
+
+/** 点击 [来源#id] 引用 → 弹出/关闭 popover */
+function onChunkRefClick(e: MouseEvent) {
+  const el = e.target as HTMLElement
+  if (!el.classList.contains('chunk-ref')) return
+  e.preventDefault()
+  const cid = Number(el.dataset.cid)
+  const src = chunkSources.value.find(s => s.chunk_id === cid)
+  if (!src) return
+
+  // 再次点击同一引用 → 关闭
+  if (popoverAnchor === el && activeChunk.value) {
+    activeChunk.value = null
+    popoverAnchor = null
+    return
+  }
+
+  activeChunk.value = src
+  popoverAnchor = el
+
+  // 定位 popover（Teleport 到 body，用视口坐标）
+  const cr = el.getBoundingClientRect()
+  popoverPos.value = {
+    position: 'fixed',
+    left: `${cr.left + cr.width / 2}px`,
+    top: `${cr.bottom + 4}px`,
+    transform: 'translateX(-50%)',
+    zIndex: '9999',
+  }
+}
+
+/** 点击外部关闭 popover */
+function onDocClick(e: MouseEvent) {
+  const t = e.target as HTMLElement
+  if (t.closest('.chunk-popover') || t.classList.contains('chunk-ref')) return
+  activeChunk.value = null
+  popoverAnchor = null
+}
+
+onMounted(() => document.addEventListener('click', onDocClick, true))
+onUnmounted(() => document.removeEventListener('click', onDocClick, true))
+
+/** 点击末尾来源项 → 切换弹窗 */
+function toggleSource(src: ChunkSource, e: MouseEvent) {
+  if (activeChunk.value?.chunk_id === src.chunk_id) {
+    activeChunk.value = null
+    popoverAnchor = null
+    return
+  }
+  activeChunk.value = src
+  const el = e.currentTarget as HTMLElement
+  popoverAnchor = el
+  const cr = el.getBoundingClientRect()
+  popoverPos.value = {
+    position: 'fixed',
+    left: `${cr.left + cr.width / 2}px`,
+    top: `${cr.top - 4}px`,
+    transform: 'translate(-50%, -100%)',
+    zIndex: '9999',
+  }
+}
+
 /** 格式化工具参数为可读文本 */
 function formatArgs(args: string): string {
   try {
@@ -67,7 +168,7 @@ function formatDuration(ms?: number): string {
 
 /** 格式化总耗时 */
 /** markdown → HTML */
-function formatContent(text: string): string {
+function formatContent(text: string, withChunkRef = false): string {
   let html = marked.parse(text) as string
   // uploads/ 路径转为可点击链接（支持 /uploads/ 和 uploads/）
   html = html.replace(
@@ -77,6 +178,13 @@ function formatContent(text: string): string {
       return `<a href="${path}" target="_blank">${m}</a>`
     },
   )
+  // [来源#123] → 可点击 chunk 引用（仅最终回复）
+  if (withChunkRef && chunkSources.value.length) {
+    html = html.replace(
+      /\[来源#(\d+)\]/g,
+      '<a class="chunk-ref" data-cid="$1" href="javascript:void(0)">[来源#$1]</a>',
+    )
+  }
   return html
 }
 
@@ -166,7 +274,48 @@ function stripFilePrefix(text: string): string {
       </div>
 
       <!-- 最终回复文本（始终可见） -->
-      <div v-if="message.content" class="msg-text" v-html="formatContent(message.content)" />
+      <div
+        v-if="message.content"
+        ref="msgTextRef"
+        class="msg-text"
+        v-html="formatContent(message.content, true)"
+        @click="onChunkRefClick"
+      />
+
+      <!-- 来源列表（末尾附带） -->
+      <div v-if="chunkSources.length && !message.streaming" class="sources-section">
+        <div class="sources-title">📎 参考来源</div>
+        <div
+          v-for="src in chunkSources"
+          :key="src.chunk_id"
+          class="source-item"
+          :class="{ active: activeChunk?.chunk_id === src.chunk_id }"
+          @click="toggleSource(src, $event)"
+        >
+          <span class="source-num">[来源#{{ src.chunk_id }}]</span>
+          <span class="source-file">{{ src.file_path }}</span>
+          <span class="source-score">{{ (src.similarity * 100).toFixed(1) }}%</span>
+          <div class="source-preview">{{ src.content }}</div>
+        </div>
+      </div>
+
+      <!-- chunk 引用弹窗（正文内 [n] 点击用） -->
+      <Teleport to="body">
+        <Transition name="chunk-pop">
+          <div
+            v-if="activeChunk && chunkSources.length"
+            class="chunk-popover"
+            :style="popoverPos"
+          >
+            <div class="chunk-pop-header">
+              <span class="chunk-pop-num">#{{ activeChunk.chunk_id }}</span>
+              <span class="chunk-pop-file">{{ activeChunk.file_path }}</span>
+              <span class="chunk-pop-score">{{ (activeChunk.similarity * 100).toFixed(1) }}%</span>
+            </div>
+            <div class="chunk-pop-content">{{ activeChunk.content }}</div>
+          </div>
+        </Transition>
+      </Teleport>
 
       <!-- 流式光标 -->
       <span v-if="message.streaming && message.phase === 'token'" class="cursor">▊</span>
@@ -385,6 +534,25 @@ function stripFilePrefix(text: string): string {
 }
 .msg-text :deep(a:hover) {
   opacity: 0.85;
+}
+
+/* ---- chunk 引用标签 ---- */
+.msg-text :deep(.chunk-ref) {
+  display: inline;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.8em;
+  vertical-align: super;
+  background: rgba(77, 196, 178, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-decoration: none;
+  font-weight: 600;
+  transition: background 0.15s;
+  line-height: 1;
+}
+.msg-text :deep(.chunk-ref:hover) {
+  background: rgba(77, 196, 178, 0.25);
 }
 
 .msg-text :deep(img) {
@@ -609,5 +777,163 @@ function stripFilePrefix(text: string): string {
 
 @keyframes blink {
   50% { opacity: 0; }
+}
+
+/* ---- 末尾来源列表 ---- */
+.sources-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sources-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+
+.source-item {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.source-item:hover {
+  border-color: rgba(77, 196, 178, 0.4);
+  background: rgba(77, 196, 178, 0.03);
+}
+
+.source-item.active {
+  border-color: var(--accent);
+  background: rgba(77, 196, 178, 0.06);
+}
+
+.source-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: 6px;
+}
+
+.source-file {
+  font-size: 12px;
+  color: var(--ink-3);
+  word-break: break-all;
+}
+
+.source-score {
+  float: right;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(77, 196, 178, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.source-preview {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 72px;
+  overflow: hidden;
+  position: relative;
+}
+
+.source-preview::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background: linear-gradient(transparent, var(--panel));
+  pointer-events: none;
+}
+
+/* ---- chunk 引用弹窗 ---- */
+.chunk-popover {
+  max-width: min(420px, 90vw);
+  min-width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  padding: 14px 16px;
+  pointer-events: auto;
+}
+
+.chunk-pop-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.chunk-pop-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(77, 196, 178, 0.1);
+}
+
+.chunk-pop-file {
+  flex: 1;
+  font-size: 12px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.chunk-pop-score {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(77, 196, 178, 0.08);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.chunk-pop-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+/* 弹窗进出动画 */
+.chunk-pop-enter-active,
+.chunk-pop-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.chunk-pop-enter-from,
+.chunk-pop-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px);
 }
 </style>

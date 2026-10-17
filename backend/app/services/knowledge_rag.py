@@ -240,10 +240,10 @@ async def search_multi(
 
 
 def format_sources(sources: list[dict[str, Any]]) -> str:
-    """将检索结果列表格式化为可读文本。"""
+    """将检索结果列表格式化为可读文本（使用 chunk_id 作为唯一标识）。"""
     if not sources:
         return "（未检索到相关内容）"
-    parts = [f"[{i}] 来源：{r['file_path']}\n{r['content']}" for i, r in enumerate(sources, 1)]
+    parts = [f"[来源#{r['chunk_id']}] 来源：{r['file_path']}\n{r['content']}" for r in sources]
     return "\n\n".join(parts)
 
 

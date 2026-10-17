@@ -23,7 +23,6 @@ from app.schemas.knowledge import ChunkItem, DocumentListItem
 from app.services.knowledge_rag import (
     _insert_chunks,
     _update_document_status,
-    format_sources,
     parse_document,
     search_chunks,
     search_multi,

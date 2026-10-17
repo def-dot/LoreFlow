@@ -19,8 +19,7 @@ class ChunkResult(BaseModel):
 
 
 class SearchKnowledgeOutput(BaseModel):
-    sources: list[ChunkResult] = Field(description="检索结果列表（结构化）")
-    context: str = Field(description="检索结果（格式化文本，用于 LLM 上下文）")
+    sources: list[ChunkResult] = Field(description="检索结果列表（结构化，含 chunk_id / 内容 / 来源 / 相似度）")
 
 
 class SearchKnowledgeParams(BaseModel):
@@ -41,7 +40,4 @@ async def retrieve_knowledge(params: SearchKnowledgeParams) -> SearchKnowledgeOu
     results = await knowledge.search_multi(
         queries, tags=params.tags or None, top_k=5,
     )
-    return SearchKnowledgeOutput(
-        sources=results,
-        context=knowledge.format_sources(results),
-    )
+    return SearchKnowledgeOutput(sources=results)
