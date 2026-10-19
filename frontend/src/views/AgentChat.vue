@@ -29,7 +29,7 @@ async function loadAgent(id: number) {
 onMounted(async () => {
   await loadAgent(agentId.value)
   const tools = await listTools()
-  toolLabels.value = Object.fromEntries(tools.map((t) => [t.name, t.label]))
+  toolLabels.value = Object.fromEntries(tools.map((t) => [t.name, t.name]))
 })
 
 // 切换 Agent 时重新加载
