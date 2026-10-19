@@ -52,7 +52,7 @@ def _make_pipeline_runner(pipeline: Pipeline):
 def register_pipeline(pipeline: Pipeline) -> None:
     """注册 Pipeline：始终注册到 REGISTRY（节点），agent_tool=True 时同时注册到 TOOL_REGISTRY（工具）。"""
     try:
-        input_props = {k: v.model_dump() for k, v in pipeline.params.items()} if pipeline.params else {}
+        input_props = {k: v.to_json_schema() for k, v in pipeline.params.items()} if pipeline.params else {}
         input_schema: dict[str, Any] = {"type": "object", "properties": input_props}
         if pipeline.required:
             input_schema["required"] = pipeline.required

@@ -28,7 +28,7 @@ function toolDisplay(tools: string[]) {
   const mcpServer = new Map<string, string>()
   const mcpTotal = new Map<string, number>()
   for (const t of allTools.value) {
-    labelOf.set(t.name, t.label || t.name)
+    labelOf.set(t.name, t.name)
     if (t.metadata?.source === 'mcp') {
       const server = t.metadata?.source_name || t.name
       mcpServer.set(t.name, server)

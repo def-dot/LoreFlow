@@ -41,10 +41,10 @@ const toolDialogVisible = ref(false)
 const skillDialogVisible = ref(false)
 const skillSearchQuery = ref('')
 
-/** name → label 映射，用于 tag 显示 */
+/** name → 显示名映射，用于 tag 显示 */
 const toolNameMap = computed(() => {
   const m = new Map<string, string>()
-  for (const t of allTools.value) m.set(t.name, t.label || t.name)
+  for (const t of allTools.value) m.set(t.name, t.name)
   return m
 })
 
@@ -100,7 +100,7 @@ const toolTabs = computed<ToolTab[]>(() => {
     .filter((t) => !srcMap.has(t.name) && t.name !== 'load_skill' && matchTool(t))
     .map((t) => ({
       name: t.name,
-      label: t.label || t.name,
+      label: t.name,
       description: t.description || '',
       source: { kind: 'builtin' as const, name: 'builtin' },
     }))
@@ -119,7 +119,7 @@ const toolTabs = computed<ToolTab[]>(() => {
     .filter((t) => srcMap.get(t.name)?.kind === 'pipeline' && matchTool(t))
     .map((t) => ({
       name: t.name,
-      label: t.label || t.name,
+      label: t.name,
       description: t.description || '',
       source: { kind: 'pipeline' as const, name: t.name },
     }))
@@ -139,7 +139,7 @@ const toolTabs = computed<ToolTab[]>(() => {
       .filter((t) => srcMap.get(t.name)?.kind === 'plugin' && srcMap.get(t.name)?.name === p.filename && matchTool(t))
       .map((t) => ({
         name: t.name,
-        label: t.label || t.name,
+        label: t.name,
         description: t.description || '',
         source: { kind: 'plugin' as const, name: p.filename },
       }))
@@ -157,7 +157,7 @@ const toolTabs = computed<ToolTab[]>(() => {
       .filter((t) => srcMap.get(t.name)?.kind === 'mcp' && srcMap.get(t.name)?.name === s.name && matchTool(t))
       .map((t) => ({
         name: t.name,
-        label: t.label || t.name,
+        label: t.name,
         description: t.description || '',
         source: { kind: 'mcp' as const, name: s.name },
       }))
@@ -594,7 +594,7 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'danger' | '
                         @change="toggleTool(t.name)"
                       />
                       <span class="tool-name">
-                        {{ t.label }}
+                        {{ t.name }}
                       </span>
                       <span v-if="t.description" class="tool-desc">{{ t.description }}</span>
                     </label>

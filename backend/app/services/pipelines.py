@@ -88,8 +88,6 @@ async def register_pipelines_from_db() -> None:
             records = (await session.exec(select(PipelineRecord))).all()
 
         for rec in records:
-            if rec.name in TOOL_REGISTRY:
-                continue
             try:
                 cfg = Pipeline.model_validate(yaml.safe_load(rec.definition))
                 register_pipeline(cfg)

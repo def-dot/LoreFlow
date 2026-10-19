@@ -2,7 +2,7 @@ name: 基础示例-加一计算器
 metadata:
   agent_tool: true
   tool_name: add_one_calculator
-description: 加一计算器：输入一个数字 → 加一计算 → 输出结果。
+description: 加一计算器：输入一个数字，加一计算，输出结果。
 nodes:
 - name: task_a
   type: code
@@ -21,5 +21,6 @@ params:
   x:
     type: number
     title: x
+    description: 输入一个数字，计算加一。
 required:
 - x

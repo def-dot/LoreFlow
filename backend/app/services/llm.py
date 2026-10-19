@@ -114,7 +114,10 @@ async def llm_chat_stream(
     async with client.stream(
         "POST", f"{base_url}/chat/completions", json=payload, headers=headers
     ) as resp:
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            body = await resp.aread()
+            logger.error("[llm:stream] %d — body: %s", resp.status_code, body.decode(errors="replace"))
+            resp.raise_for_status()
         async for line in resp.aiter_lines():
             if not line or not line.startswith("data: "):
                 continue

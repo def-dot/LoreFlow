@@ -90,6 +90,10 @@ class ParamSchema(BaseModel):
             raise ValueError(f"type={t!r} 不支持 ui={self.ui!r}，可选: {sorted(allowed - {None}) or '不写 ui'}")
         return self
 
+    def to_json_schema(self) -> dict[str, Any]:
+        """输出合法的 JSON Schema property 片段（排除 ui 等非标准字段）。"""
+        return self.model_dump(exclude={"ui"}, exclude_none=True)
+
 
 class RetryPolicy(BaseModel):
     """可配置的重试策略（指数退避 + 抖动）。"""
