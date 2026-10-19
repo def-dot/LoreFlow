@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
-    """构建 OpenAI 格式工具列表。
+    """构建 OpenAI 格式工具列表。TOOL_REGISTRY 的 key 即 LLM function name（ASCII）。
     """
     result: list[dict[str, Any]] = []
     for name in tools_input:
@@ -26,7 +26,7 @@ def build_tools(tools_input: list[str]) -> list[dict[str, Any]] | None:
         schema = td.input_schema or {"type": "object", "properties": {}}
         result.append({
             "type": "function",
-            "function": {"name": td.name, "description": td.description, "parameters": schema},
+            "function": {"name": name, "description": td.description, "parameters": schema},
         })
     return result or None
 

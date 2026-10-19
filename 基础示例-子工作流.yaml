@@ -1,0 +1,40 @@
+name: 基础示例-子工作流
+description: 输入 a、b，分别调用加一子工作流，再求和。
+nodes:
+- name: a_plus_1
+  type: 基础示例-加一计算器
+  label: a 加一
+  inputs:
+    x: $params.a
+- name: b_plus_1
+  type: 基础示例-加一计算器
+  label: b 加一
+  inputs:
+    x: $params.b
+- name: sum
+  type: code
+  label: 求和
+  depends_on:
+  - a_plus_1
+  - b_plus_1
+  inputs:
+    code: "def main(a: float, b: float):\n    return a + b\n"
+    a: $a_plus_1.output.result
+    b: $b_plus_1.output.result
+- name: __end__
+  label: 输出
+  depends_on:
+  - sum
+  type: end
+  inputs:
+    result: $sum.result
+params:
+  a:
+    type: number
+    title: 数值 a
+  b:
+    type: number
+    title: 数值 b
+required:
+- a
+- b

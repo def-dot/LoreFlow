@@ -1,0 +1,46 @@
+name: 完整实例-智能客服-Agent
+description: |
+  智能客服 Agent —— 结合知识库检索与网络搜索，自主回答用户问题。
+  Agent 会先从知识库中检索相关信息（通过 RAG检索 工作流），
+  若知识库无结果则转为网络搜索，最后综合信息给出回答。
+  演示了 Agent 如何将其他工作流作为工具调用。
+params:
+  prompt:
+    type: string
+    title: 用户问题
+    description: 输入客户咨询的问题
+    ui: textarea
+required:
+  - prompt
+
+nodes:
+  - name: agent
+    type: agent
+    label: 智能客服
+    description: 自主决定调用知识库检索或网络搜索，综合信息后回答
+    inputs:
+      system: |
+        你是一名专业的客服助手。请遵循以下流程：
+        1. 优先使用「RAG检索」工作流从知识库中查找答案
+        2. 若知识库无相关信息或结果不够充分，再使用 web_search 进行网络搜索
+        3. 综合所有信息，用简洁专业的语言回答用户
+        4. 如果问题超出服务范围，礼貌地告知用户并建议转人工
+
+        回答要求：
+        - 引用信息来源时标注出处
+        - 不确定的内容明确告知用户
+        - 保持友好专业的语气
+      prompt: $params.prompt
+      tools:
+        - RAG检索
+        - web_search
+      max_iterations: 5
+    timeout: 120
+
+  - name: __end__
+    type: end
+    label: 输出
+    depends_on:
+      - agent
+    inputs:
+      answer: $agent.content

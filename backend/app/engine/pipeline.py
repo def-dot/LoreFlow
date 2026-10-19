@@ -229,6 +229,16 @@ class Node(BaseModel):
 class PipelineMetadata(BaseModel):
     """Pipeline 级元数据（YAML metadata 段）。"""
     agent_tool: bool = True  # false 时不注册为 Agent 工具
+    tool_name: str | None = None  # LLM 工具名（须 ASCII），agent_tool=True 时必填
+
+    @model_validator(mode="after")
+    def _check_tool_name(self) -> "PipelineMetadata":
+        if self.agent_tool:
+            if not self.tool_name:
+                raise ValueError("工作流允许注册为 Agent 工具（metadata.agent_tool=True）时，metadata.tool_name 必填（a-zA-Z0-9_-）")
+            if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.tool_name):
+                raise ValueError(f"metadata.tool_name {self.tool_name!r} 含非法字符，须为 a-zA-Z0-9_-")
+        return self
 
 
 class Pipeline(BaseModel):

@@ -78,13 +78,15 @@ def register_pipeline(pipeline: Pipeline) -> None:
         logger.debug("[pipeline] 注册节点: %s", pipeline.name)
 
         if pipeline.metadata.agent_tool:
-            TOOL_REGISTRY[pipeline.name] = fd
-            logger.debug("[pipeline] 注册工具: %s", pipeline.name)
+            TOOL_REGISTRY[pipeline.metadata.tool_name] = fd
+            logger.debug("[pipeline] 注册工具: %s → %s", pipeline.name, pipeline.metadata.tool_name)
     except Exception:
         logger.warning("[pipeline] 注册失败: %s", pipeline.name, exc_info=True)
 
 
 def unregister_pipeline(name: str) -> None:
-    """从两张注册表移除指定 Pipeline。"""
+    """从两张注册表移除指定 Pipeline。TOOL_REGISTRY 的 key 是 tool_name，需按 FuncDef.name 反查。"""
     REGISTRY.pop(name, None)
-    TOOL_REGISTRY.pop(name, None)
+    stale = [k for k, v in TOOL_REGISTRY.items() if v.name == name]
+    for k in stale:
+        TOOL_REGISTRY.pop(k, None)
