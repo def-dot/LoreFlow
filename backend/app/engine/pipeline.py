@@ -228,7 +228,7 @@ class Node(BaseModel):
 
 class PipelineMetadata(BaseModel):
     """Pipeline 级元数据（YAML metadata 段）。"""
-    agent_tool: bool = True  # false 时不注册为 Agent 工具
+    agent_tool: bool = False  # true 时注册为 Agent 工具
     tool_name: str | None = None  # LLM 工具名（须 ASCII），agent_tool=True 时必填
 
     @model_validator(mode="after")

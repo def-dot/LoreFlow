@@ -1,4 +1,7 @@
 name: 基础示例-加一计算器
+metadata:
+  agent_tool: true
+  tool_name: add_one_calculator
 description: 加一计算器：输入一个数字 → 加一计算 → 输出结果。
 nodes:
 - name: task_a
@@ -6,7 +9,7 @@ nodes:
   label: 加一计算器
   inputs:
     code: "def main(a:int):\n    return a+1\n"
-    a: $params.a
+    a: $params.x
 - name: __end__
   label: 输出
   depends_on:
@@ -15,8 +18,8 @@ nodes:
   inputs:
     result: $task_a.result
 params:
-  a:
+  x:
     type: number
-    title: a
+    title: x
 required:
-- a
+- x
