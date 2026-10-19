@@ -1,0 +1,66 @@
+name: 汇率计算器
+description: 汇率计算器：输入金额和币种，计算目标币种的等值金额。
+metadata:
+  agent_tool: true
+  tool_name: currency_converter
+nodes:
+- name: convert
+  type: code
+  label: 汇率转换
+  inputs:
+    code: |
+      def main(amount: float, from_currency: str, to_currency: str):
+          rates = {
+              "USD": 1.0,
+              "CNY": 7.24,
+              "EUR": 0.92,
+              "JPY": 149.5,
+              "GBP": 0.79,
+              "HKD": 7.81,
+              "KRW": 1325.0,
+              "SGD": 1.34,
+          }
+          from_currency = from_currency.upper()
+          to_currency = to_currency.upper()
+          if from_currency not in rates:
+              return {"error": f"不支持的币种: {from_currency}"}
+          if to_currency not in rates:
+              return {"error": f"不支持的币种: {to_currency}"}
+          usd = amount / rates[from_currency]
+          result = usd * rates[to_currency]
+          return {
+              "amount": amount,
+              "from": from_currency,
+              "to": to_currency,
+              "rate": round(rates[to_currency] / rates[from_currency], 4),
+              "result": round(result, 2),
+          }
+    amount: $params.amount
+    from_currency: $params.from_currency
+    to_currency: $params.to_currency
+- name: __end__
+  label: 输出
+  depends_on:
+  - convert
+  type: end
+  inputs:
+    result: $convert.result
+params:
+  amount:
+    type: number
+    title: 金额
+    description: 要转换的金额
+  from_currency:
+    type: string
+    title: 源币种
+    description: 例如 USD、CNY、EUR、JPY
+    default: USD
+  to_currency:
+    type: string
+    title: 目标币种
+    description: 例如 USD、CNY、EUR、JPY
+    default: CNY
+required:
+- amount
+- from_currency
+- to_currency
