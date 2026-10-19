@@ -397,35 +397,43 @@ class Pipeline(BaseModel):
 
     # ---- Mermaid 可视化 ----
 
-    # Mermaid 保留字，用作节点 ID 时加 _ 前缀避免解析错误
-    _MERMAID_RESERVED = frozenset({
-        "end", "subgraph", "graph", "flowchart", "class", "click", "link",
-        "style", "default", "direction", "interpolate", "fill", "stroke",
-    })
-
     def to_mermaid(self) -> str:
-        lines = ["graph TD"]
-        for node in self.nodes:
-            nid = re.sub(r"[ \-]", "_", node.name)
-            if nid in self._MERMAID_RESERVED:
-                nid = f"_{nid}"
-            func_def = REGISTRY.get(node.type)
-            main_text = node.label or node.name
-            small: list[str] = []
-            if func_def and func_def.label:
-                small.append(func_def.label)
-            if node.condition:
-                small.append("[?]")
-            rp = node.retry
-            if isinstance(rp, int):
-                small.append(f"[R{rp}]")
-            elif isinstance(rp, RetryPolicy) and rp.max_retries:
-                small.append(f"[R{rp.max_retries}]")
-            text = main_text + (f"<br/><i>{' '.join(small)}</i>" if small else "")
-            lines.append(f'    {nid}["{text}"]')
-            for dep in node.depends_on:
-                did = re.sub(r"[ \-]", "_", dep)
-                if did in self._MERMAID_RESERVED:
-                    did = f"_{did}"
-                lines.append(f"    {did} --> {nid}")
-        return "\n".join(lines)
+        """生成 Mermaid 流程图。"""
+        return mermaid_from_nodes([n.model_dump() for n in self.nodes])
+
+
+# Mermaid 保留字，用作节点 ID 时加 _ 前缀避免解析错误
+_MERMAID_RESERVED = frozenset({
+    "end", "subgraph", "graph", "flowchart", "class", "click", "link",
+    "style", "default", "direction", "interpolate", "fill", "stroke",
+})
+
+
+def mermaid_from_nodes(nodes: list[dict]) -> str:
+    """从节点 dict 列表生成 Mermaid 流程图。"""
+    lines = ["graph TD"]
+    for node in nodes:
+        name = node.get("name", "")
+        nid = re.sub(r"[ \-]", "_", name)
+        if nid in _MERMAID_RESERVED:
+            nid = f"_{nid}"
+        func_def = REGISTRY.get(node.get("type", ""))
+        main_text = node.get("label") or name
+        small: list[str] = []
+        if func_def and func_def.label:
+            small.append(func_def.label)
+        if node.get("condition"):
+            small.append("[?]")
+        rp = node.get("retry")
+        if isinstance(rp, int):
+            small.append(f"[R{rp}]")
+        elif isinstance(rp, dict) and rp.get("max_retries"):
+            small.append(f"[R{rp['max_retries']}]")
+        text = main_text + (f"<br/><i>{' '.join(small)}</i>" if small else "")
+        lines.append(f'    {nid}["{text}"]')
+        for dep in (node.get("depends_on") or []):
+            did = re.sub(r"[ \-]", "_", dep)
+            if did in _MERMAID_RESERVED:
+                did = f"_{did}"
+            lines.append(f"    {did} --> {nid}")
+    return "\n".join(lines)

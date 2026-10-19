@@ -1,6 +1,6 @@
 """Engine 包 — Pipeline 构造期校验和运行时执行。"""
 
-from .pipeline import Node, Pipeline, RetryPolicy
+from .pipeline import Node, Pipeline, RetryPolicy, mermaid_from_nodes
 from .types import NodeResult, NodeSchema, NodeStatus
 from .validator import PipelineValidator
 

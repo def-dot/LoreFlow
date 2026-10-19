@@ -8,10 +8,10 @@ from sqlalchemy import update as sa_update
 
 from app.core import database
 from app.core.response import UnifiedResponseRoute
-from app.engine import Pipeline, NodeStatus
+from app.engine import NodeStatus, mermaid_from_nodes
 from app.registry import REGISTRY
 from app.models.run import RunRecord, RunStatus
-from app.schemas.pipelines import PipelineDetail
+from app.schemas.pipelines import NodeDetail, PipelineDetail
 from app.schemas.runs import (
     ApproveRequest,
     ApproveResponse,
@@ -22,7 +22,6 @@ from app.schemas.runs import (
     RunListSummary,
 )
 from app.services import orchestrator
-from app.services import pipelines as pipeline_service
 from app.services import runs as run_service
 
 router = APIRouter(prefix="/runs", route_class=UnifiedResponseRoute, tags=["runs"])
@@ -66,20 +65,22 @@ async def get_run(run_id: int) -> RunDetail:
 
     data = record.model_dump()
 
-    # 解析 definition（只解析一次）
-    cfg = yaml.safe_load(record.definition)
-    pipeline = Pipeline.model_validate(cfg)
-    data["mermaid"] = pipeline.to_mermaid()
+    # 从快照 YAML 直接取结构数据，不做 Pipeline 校验（历史快照可能与当前节点 schema 不兼容）
+    cfg = yaml.safe_load(record.definition) or {}
+    nodes_cfg = {n["name"]: n for n in (cfg.get("nodes") or []) if isinstance(n, dict)}
+
+    # mermaid
+    data["mermaid"] = mermaid_from_nodes(list(nodes_cfg.values()))
 
     # 节点 label/description/type/type_label 补全（inputs 已由 NodeResult.model_dump 写入 run 记录）
-    nodes_dict = {n.name: n for n in pipeline.nodes}
     for name, node in data.get("nodes", {}).items():
-        spec = nodes_dict.get(name)
-        node["label"] = spec.label
-        node["description"] = spec.description
-        node["type"] = spec.type
-        func_def = REGISTRY.get(spec.type)
-        node["type_label"] = func_def.label if func_def else spec.type
+        spec = nodes_cfg.get(name)
+        if spec:
+            node["label"] = spec.get("label", "")
+            node["description"] = spec.get("description")
+            node["type"] = spec.get("type")
+            func_def = REGISTRY.get(spec.get("type"))
+            node["type_label"] = func_def.label if func_def else spec.get("type")
 
     return RunDetail(**data)
 
@@ -90,7 +91,32 @@ async def get_run_config(run_id: int) -> PipelineDetail:
     record = await run_service.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"运行 {run_id!r} 不存在")
-    return PipelineDetail(**pipeline_service.detail_from_config(record.definition))
+    cfg = yaml.safe_load(record.definition) or {}
+    nodes_cfg = cfg.get("nodes") or []
+    nodes: list[dict[str, Any]] = []
+    for n in nodes_cfg:
+        ntype = n.get("type")
+        func_def = REGISTRY.get(ntype)
+        nodes.append(NodeDetail(
+            name=n.get("name", ""),
+            label=n.get("label"),
+            type=ntype,
+            type_label=func_def.label if func_def else None,
+            type_description=func_def.description if func_def else None,
+            depends_on=n.get("depends_on") or [],
+            inputs=n.get("inputs"),
+            retry=n.get("retry"),
+            condition=n.get("condition"),
+        ))
+    return PipelineDetail(
+        name=cfg.get("name", ""),
+        description=cfg.get("description") or "",
+        params=cfg.get("params"),
+        node_count=len(nodes_cfg),
+        mermaid=mermaid_from_nodes(nodes_cfg),
+        source=record.definition,
+        nodes=nodes,
+    )
 
 
 @router.delete("/{run_id}")
