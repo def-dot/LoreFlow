@@ -1,0 +1,22 @@
+name: 加一计算器
+description: 输入数字 → 加一 → 输出结果。
+nodes:
+- name: task_a
+  type: code
+  label: 加法计算器
+  inputs:
+    code: "def main(a:int):\n    return a+2\n"
+    a: $params.x
+- name: __end__
+  label: 输出
+  depends_on:
+  - task_a
+  type: end
+  inputs:
+    result: $task_a.result
+params:
+  x:
+    type: number
+    title: x
+required:
+- x

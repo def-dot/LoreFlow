@@ -1,13 +1,13 @@
-name: 基础示例-子工作流
+name: 子工作流
 description: 输入 a、b，分别调用加一子工作流，再求和。
 nodes:
 - name: a_plus_1
-  type: 基础示例-加一计算器
+  type: 加一计算器
   label: a 加一
   inputs:
     x: $params.a
 - name: b_plus_1
-  type: 基础示例-加一计算器
+  type: 加一计算器
   label: b 加一
   inputs:
     x: $params.b
