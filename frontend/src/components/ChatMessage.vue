@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import { UserFilled, Cpu } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import type { ChatMessage } from '@/stores/agents'
 
 interface ChunkSource {
@@ -17,7 +18,23 @@ marked.use({ async: false })
 const props = defineProps<{
   message: ChatMessage
   toolLabels?: Record<string, string>
+  /** 是否为最后一条消息（控制重新生成按钮显示） */
+  isLast?: boolean
 }>()
+
+const emit = defineEmits<{
+  regenerate: []
+}>()
+
+/** 复制消息内容 */
+async function copyContent() {
+  try {
+    await navigator.clipboard.writeText(props.message.content)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
 
 const showProcess = ref(false)
 /** 用户是否手动切换过（阻止自动展开覆盖） */
@@ -178,12 +195,16 @@ function stripFilePrefix(text: string): string {
         <div class="bubble user-bubble">
           <pre class="msg-text">{{ stripFilePrefix(message.content) }}</pre>
         </div>
+        <div class="msg-actions">
+          <button class="action-btn" @click="copyContent" title="复制">📋 复制</button>
+        </div>
       </div>
     </template>
 
     <!-- Assistant 消息（含完整执行过程） -->
     <template v-else-if="message.role === 'assistant'">
       <div class="msg-avatar ai-avatar"><Cpu /></div>
+      <div class="msg-body">
       <div class="bubble assistant-bubble">
       <!-- 推理过程（思考 + 工具步骤，统一折叠） -->
       <div v-if="hasProcess || (message.streaming && message.phase === 'thinking')" class="process-section">
@@ -272,6 +293,13 @@ function stripFilePrefix(text: string): string {
       <span v-if="message.streaming && message.phase === 'token'" class="cursor">▊</span>
 
     </div>
+
+    <!-- 操作按钮（hover 显示） -->
+    <div v-if="!message.streaming" class="msg-actions">
+      <button class="action-btn" @click="copyContent" title="复制">📋 复制</button>
+      <button v-if="isLast" class="action-btn" @click="emit('regenerate')" title="重新生成">🔄 重新生成</button>
+    </div>
+      </div>
     </template>
   </div>
 </template>
@@ -342,6 +370,8 @@ function stripFilePrefix(text: string): string {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.role-user .msg-body {
   max-width: 80%;
 }
 
@@ -796,6 +826,35 @@ function stripFilePrefix(text: string): string {
   color: var(--ink-3);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ---- 操作按钮 ---- */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.chat-msg:hover .msg-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.action-btn:hover {
+  background: rgba(77, 196, 178, 0.08);
+  border-color: rgba(77, 196, 178, 0.3);
+  color: var(--ink-2);
 }
 
 </style>

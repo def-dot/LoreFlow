@@ -116,6 +116,13 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+// 重新生成最后一条 assistant 回复
+async function handleRegenerate() {
+  if (store.streaming || !store.currentConversation) return
+  await store.regenerateMessage(store.currentConversation.id)
+  scrollToBottom()
+}
+
 // 删除对话
 async function handleDeleteConv(conv: ConversationListItem) {
   try {
@@ -182,6 +189,8 @@ function goBack() {
           :key="i"
           :message="msg"
           :tool-labels="toolLabels"
+          :is-last="msg.role === 'assistant' && !store.chatMessages.slice(i + 1).some(m => m.role === 'assistant')"
+          @regenerate="handleRegenerate"
         />
       </div>
 

@@ -11,6 +11,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from sqlalchemy import delete
 from sqlmodel import select
 
 from app.core.config import settings
@@ -60,6 +61,7 @@ async def run_agent_chat(
     user_message: str,
     *,
     files: list[FileRef] | None = None,
+    regenerate: bool = False,
 ) -> AsyncGenerator[str, None]:
     """SSE 流式 agent 对话。yield SSE event 字符串。
 
@@ -70,6 +72,8 @@ async def run_agent_chat(
     - ``event: tool_end\\ndata: {"tool_name": "...", "output": "..."}\\n\\n``
     - ``event: done\\ndata: {"content": "..."}\\n\\n``
     - ``event: error\\ndata: {"message": "..."}\\n\\n``
+
+    ``regenerate=True`` 时删除最后一条 assistant 回复后重新生成，不新增 user 消息。
     """
     messages: list[dict[str, Any]] = []
     full_content = ""
@@ -89,28 +93,51 @@ async def run_agent_chat(
         if system_content:
             messages.append({"role": "system", "content": system_content})
 
-        # 3. 加载历史
+        # 3. 重新生成：删除最后一条 assistant + 尾部 tool 消息
+        if regenerate:
+            async with AsyncSessionLocal() as session:
+                all_msgs = (await session.exec(
+                    select(MessageRecord)
+                    .where(MessageRecord.conversation_id == conversation_id)
+                    .order_by(MessageRecord.id.desc())
+                )).all()
+
+                to_delete: list[int] = []
+                for msg in all_msgs:
+                    if msg.role in ("assistant", "tool"):
+                        to_delete.append(msg.id)
+                    else:
+                        break
+
+                if to_delete:
+                    await session.exec(
+                        delete(MessageRecord).where(MessageRecord.id.in_(to_delete))
+                    )
+                    await session.commit()
+
+        # 4. 加载历史
         messages.extend(await _load_history(conversation_id))
 
-        # 4. 处理附件 + 持久化 user message
-        if files:
-            file_list = "\n".join(f"- {f.store_path}" for f in files)
-            user_message = f"[附件]\n{file_list}\n\n{user_message}"
+        # 5. 处理附件 + 持久化 user message（重新生成时跳过）
+        if not regenerate:
+            if files:
+                file_list = "\n".join(f"- {f.store_path}" for f in files)
+                user_message = f"[附件]\n{file_list}\n\n{user_message}"
 
-        async with AsyncSessionLocal() as session:
-            user_msg = MessageRecord(conversation_id=conversation_id, role="user", content=user_message)
-            session.add(user_msg)
-            await session.flush()  # 获取 message id
-            for f in files or []:
-                session.add(ChatFileRecord(
-                    conversation_id=conversation_id,
-                    message_id=user_msg.id,
-                    store_path=f.store_path,
-                    filename=f.filename,
-                ))
-            await session.commit()
+            async with AsyncSessionLocal() as session:
+                user_msg = MessageRecord(conversation_id=conversation_id, role="user", content=user_message)
+                session.add(user_msg)
+                await session.flush()  # 获取 message id
+                for f in files or []:
+                    session.add(ChatFileRecord(
+                        conversation_id=conversation_id,
+                        message_id=user_msg.id,
+                        store_path=f.store_path,
+                        filename=f.filename,
+                    ))
+                await session.commit()
 
-        messages.append({"role": "user", "content": user_message})
+            messages.append({"role": "user", "content": user_message})
 
         # 5. 构建工具列表
         tool_names: list[str] = list(agent.tools or [])
@@ -187,3 +214,4 @@ async def run_agent_chat(
     except Exception as exc:
         logger.exception("[agent_chat] error in conv=%d", conversation_id)
         yield _sse("error", {"message": str(exc)})
+

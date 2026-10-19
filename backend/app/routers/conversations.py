@@ -121,6 +121,7 @@ async def chat(conv_id: int, body: ChatRequest):
             conv_id,
             body.message,
             files=body.files,
+            regenerate=body.regenerate,
         ),
         media_type="text/event-stream",
         headers={

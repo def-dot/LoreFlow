@@ -99,13 +99,14 @@ export async function* sendChatMessage(
   conversationId: number,
   message: string,
   files: { store_path: string; filename: string }[] = [],
+  regenerate = false,
 ): AsyncGenerator<ChatEvent> {
   // 绕过 Vite proxy 直连后端，避免 http-proxy 缓冲 SSE
   const API_BASE = import.meta.env.DEV ? 'http://localhost:8001' : ''
   const resp = await fetch(`${API_BASE}/api/v1/conversations/${conversationId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, files }),
+    body: JSON.stringify({ message, files, regenerate }),
   })
 
   if (!resp.ok) {
@@ -159,3 +160,4 @@ export async function* sendChatMessage(
     }
   }
 }
+

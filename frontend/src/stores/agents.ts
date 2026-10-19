@@ -334,5 +334,105 @@ export const useAgentsStore = defineStore('agents', {
         await this.fetchConversations(conv.agent_id)
       }
     },
+
+    /** 重新生成最后一条 assistant 回复（不新增 user 消息） */
+    async regenerateMessage(conversationId: number) {
+      // 移除最后一条 assistant 消息
+      const messages = this.chatMessages
+      while (messages.length && messages[messages.length - 1].role === 'assistant') {
+        messages.pop()
+      }
+
+      // 添加新的 assistant 占位
+      messages.push({ role: 'assistant', content: '', streaming: true })
+      const activeIdx = messages.length - 1
+      this.streaming = true
+
+      const getActive = (): ChatMessage => messages[activeIdx]
+
+      try {
+        let roundIdx = 0
+        let roundContentBuf = ''
+        const ensureRound = () => {
+          const msg = getActive()
+          msg.rounds = msg.rounds || [{ thinking: '' }]
+          return msg
+        }
+        const currentRound = () => getActive().rounds![roundIdx]
+
+        for await (const evt of sendChatMessage(conversationId, '', [], true)) {
+          switch (evt.event) {
+            case 'thinking': {
+              const msg = ensureRound()
+              if (msg.rounds![roundIdx].steps?.length) {
+                msg.rounds![roundIdx].content = roundContentBuf || undefined
+                roundContentBuf = ''
+                roundIdx++
+                msg.rounds!.push({ thinking: '' })
+              }
+              const round = msg.rounds![roundIdx]
+              round.thinking = (round.thinking || '') + evt.data.content
+              msg.phase = 'thinking'
+              break
+            }
+            case 'token':
+              ensureRound()
+              getActive().content += evt.data.content
+              roundContentBuf += evt.data.content
+              getActive().phase = 'token'
+              break
+            case 'tool_start': {
+              const round = currentRound()
+              round.steps = round.steps || []
+              round.steps.push({
+                tool_name: evt.data.tool_name,
+                arguments: evt.data.arguments,
+                status: 'running',
+              })
+              getActive().phase = 'tool'
+              break
+            }
+            case 'tool_end': {
+              const round = currentRound()
+              const steps = round.steps || []
+              const step = [...steps].reverse().find((s) => s.status === 'running')
+              if (step) {
+                step.output = evt.data.output
+                step.duration_ms = evt.data.duration_ms
+                step.status = evt.data.status || 'success'
+              }
+              break
+            }
+            case 'done': {
+              const msg = getActive()
+              const lastRound = msg.rounds?.[msg.rounds.length - 1]
+              if (lastRound && !lastRound.content) {
+                lastRound.content = evt.data.content || roundContentBuf || undefined
+              }
+              msg.content = evt.data.content || msg.content
+              msg.streaming = false
+              break
+            }
+            case 'error':
+              getActive().content = `⚠️ ${evt.data.message}`
+              getActive().streaming = false
+              break
+          }
+        }
+      } catch (err: any) {
+        getActive().content = `⚠️ ${err.message || '请求失败'}`
+        getActive().streaming = false
+      } finally {
+        for (const msg of this.chatMessages) {
+          if (msg.streaming) msg.streaming = false
+        }
+        this.streaming = false
+      }
+
+      const conv = this.currentConversation
+      if (conv) {
+        await this.fetchConversations(conv.agent_id)
+      }
+    },
   },
 })

@@ -38,8 +38,9 @@ class FileRef(BaseModel):
 class ChatRequest(BaseModel):
     """发送聊天消息请求体。"""
 
-    message: str
+    message: str = ""
     files: list[FileRef] = Field(default_factory=list)
+    regenerate: bool = False
 
 
 class ConversationCreate(BaseModel):
