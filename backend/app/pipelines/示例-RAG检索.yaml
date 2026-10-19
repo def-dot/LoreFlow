@@ -1,8 +1,5 @@
-name: 基础示例-RAG检索
+name: 示例-RAG检索
 description: 知识库检索 + LLM 问答。先从知识库召回相关片段，再拼接上下文让 LLM 回答。
-metadata:
-  agent_tool: true
-  tool_name: rag_retrieve
 nodes:
 - name: search
   type: retrieve_knowledge

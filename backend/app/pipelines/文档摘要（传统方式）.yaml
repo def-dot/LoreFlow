@@ -1,4 +1,4 @@
-name: 完整实例-文档摘要（传统方式）
+name: 文档摘要（传统方式）
 description: 上传文档，LLM 生成摘要
 params:
   document:

@@ -1,4 +1,4 @@
-name: 基础示例-输入参数
+name: 示例-输入参数
 description: 输入参数全类型示例：text / textarea / number / select / multiselect / checkbox / file（object） / file_list（array）。
 nodes:
 - name: summary

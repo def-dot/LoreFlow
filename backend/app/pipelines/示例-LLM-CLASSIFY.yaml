@@ -1,4 +1,4 @@
-name: 基础示例-LLM-CLASSIFY
+name: 示例-LLM-CLASSIFY
 description: 根据用户输入识别心情：开心 / 难过 / 生气 / 平静。
 nodes:
 - name: classify

@@ -1,4 +1,4 @@
-name: 完整实例-智能客服（Agent）
+name: 智能客服（Agent）
 description: |
   智能客服 Agent —— 结合知识库检索与网络搜索，自主回答用户问题。
   Agent 会先从知识库中检索相关信息（通过 RAG检索 工作流），
