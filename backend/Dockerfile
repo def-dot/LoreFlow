@@ -6,7 +6,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
 ENV UV_LINK_MODE=copy \
     PYTHONDONTWRITEBYTECODE=1
 
-WORKDIR /code
+WORKDIR /backend
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
@@ -18,15 +18,18 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/code/.venv/bin:$PATH"
+    PATH="/backend/.venv/bin:$PATH"
 
-WORKDIR /code
+WORKDIR /backend
 
-COPY --from=builder /code/.venv .venv
+COPY --from=builder /backend/.venv .venv
 COPY ./app ./app
 COPY alembic.ini .
 COPY alembic ./alembic
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "fastapi run --workers ${WORKERS:-1} app/main.py"]
+ENTRYPOINT ["./entrypoint.sh"]
+CMD ["sh", "-c", "fastapi run --workers ${WORKERS:-4} app/main.py"]

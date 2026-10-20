@@ -63,12 +63,3 @@ services:
       backend:
         condition: service_healthy
 
-  db_migrate:
-    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
-    env_file: .env
-    depends_on:
-      db:
-        condition: service_healthy
-    command: alembic upgrade head
-    profiles:
-      - migrate
