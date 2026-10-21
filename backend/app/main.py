@@ -95,6 +95,7 @@ app.include_router(providers.router, prefix=API_V1)
 app.include_router(health.router, prefix=API_V1)
 
 # 静态文件：/uploads/*
+settings.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.UPLOADS_DIR), name="uploads")
 
 
