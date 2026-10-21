@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: postgres/Dockerfile.postgres
+    image: loreflow-db:latest
     restart: unless-stopped
     ports:
       - "${POSTGRES_PORT:-5434}:5432"

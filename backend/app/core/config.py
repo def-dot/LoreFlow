@@ -76,12 +76,6 @@ class Settings(BaseSettings):
             path=self.POSTGRES_DB,
         )
 
-    # Docker 镜像坐标（compose.prod.yml 使用）
-    DOCKER_BACKEND_REPOSITORY: str = ""
-    DOCKER_BACKEND_TAG: str = ""
-    DOCKER_FRONTEND_REPOSITORY: str = ""
-    DOCKER_FRONTEND_TAG: str = ""
-
     # Sandbox
     SANDBOX_URL: str = "http://localhost:8194"
 

@@ -6,7 +6,7 @@ services:
     ports: !override []
 
   arq-parse:
-    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
+    image: loreflow-backend:latest
     command: arq app.arq_worker.ParseWorkerSettings
     env_file: .env
     restart: unless-stopped
@@ -22,7 +22,7 @@ services:
       - ./backend/parsed:/app/parsed
 
   arq-default:
-    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
+    image: loreflow-backend:latest
     command: arq app.arq_worker.DefaultWorkerSettings
     env_file: .env
     restart: unless-stopped
@@ -35,7 +35,10 @@ services:
         restart: true
 
   backend:
-    image: ${DOCKER_BACKEND_REPOSITORY}:${DOCKER_BACKEND_TAG}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: loreflow-backend:latest
     env_file: .env
     restart: unless-stopped
     depends_on:
@@ -55,7 +58,10 @@ services:
       retries: 5
 
   frontend:
-    image: ${DOCKER_FRONTEND_REPOSITORY}:${DOCKER_FRONTEND_TAG}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: loreflow-frontend:latest
     restart: unless-stopped
     ports:
       - "80:80"
