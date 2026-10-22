@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     SANDBOX_URL: str = "http://localhost:8194"
 
     TAVILY_API_KEY: str = ""
+    MIMO_API_KEY: str = ""
 
     # 邮箱服务器
     SMTP_HOST: str = ""

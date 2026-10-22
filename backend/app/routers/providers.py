@@ -4,7 +4,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from sqlmodel import delete, select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.core.response import UnifiedResponseRoute
@@ -16,7 +15,7 @@ from app.schemas.providers import (
     ProviderBody,
     ProviderOut,
 )
-from app.utils.http import http_client
+from app.services.providers import _auto_import_models
 
 router = APIRouter(route_class=UnifiedResponseRoute, tags=["providers"])
 
@@ -41,31 +40,6 @@ async def create_provider(body: ProviderBody) -> ProviderOut:
         pass  # 导入失败不阻塞创建
 
     return provider
-
-
-async def _auto_import_models(provider: ProviderRecord) -> int:
-    """自动导入 provider 的所有可用模型，返回新增数量。"""
-    headers: dict[str, str] = {}
-    if provider.api_key:
-        headers["Authorization"] = f"Bearer {provider.api_key}"
-    resp = await http_client().get(f"{provider.base_url}/models", headers=headers)
-    resp.raise_for_status()
-    model_ids = [m["id"] for m in resp.json().get("data", [])]
-    if not model_ids:
-        return 0
-
-    async with AsyncSessionLocal() as session:
-        existing = (await session.exec(
-            select(ModelRecord.name).where(ModelRecord.provider_id == provider.id)
-        )).all()
-        new_models = [
-            ModelRecord(provider_id=provider.id, name=name, model_type=_guess_model_type(name))
-            for name in model_ids
-            if name not in existing
-        ]
-        session.add_all(new_models)
-        await session.commit()
-    return len(new_models)
 
 
 @router.get("/providers", response_model=list[ProviderOut])
@@ -153,14 +127,6 @@ async def sync_models(provider_id: int) -> dict[str, int]:
 
 
 # ── Model CRUD ────────────────────────────────────────────────────────────────
-
-def _guess_model_type(name: str) -> str:
-    n = name.lower()
-    if any(k in n for k in ("embed", "bge", "e5", "gte", "text2vec", "m3e", "contriever")):
-        return "embedding"
-    if "rerank" in n or "rank" in n:
-        return "rerank"
-    return "chat"
 
 @router.get("/models", response_model=list[ModelOut])
 async def list_models(provider_id: int | None = None, model_type: str | None = None) -> list[ModelOut]:

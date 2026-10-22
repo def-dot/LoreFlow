@@ -20,16 +20,23 @@ _PROMPT = """\
 async def ensure_project_assistant() -> None:
     """启动时自动创建「系统小助手」Agent，已存在则跳过。异常兜底，不阻塞启动。"""
     try:
+        from sqlalchemy import text
         from sqlmodel import select
 
         from app.registry.types import TOOL_REGISTRY
 
         async with AsyncSessionLocal() as session:
+            # 多 worker 下每个进程都跑 lifespan，advisory lock 保证只有一个进程执行插入
+            got = (await session.execute(
+                text("SELECT pg_try_advisory_xact_lock(hashtext('project_assistant_init'))")
+            )).scalar()
+            if not got:
+                return
             existing = (
                 await session.exec(
                     select(AgentRecord).where(AgentRecord.name == "系统小助手")
                 )
-            ).one_or_none()
+            ).first()
             if existing:
                 return
             tools = [

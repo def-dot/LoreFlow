@@ -1,7 +1,7 @@
 """系统监控 MCP 服务器 — 提供系统状态查询能力。
 
-启动方式（stdio）：
-    uv run python backend/mcp_servers/system_monitor.py
+启动方式（stdio，在 backend 目录下）：
+    python -m app.mcps.system_monitor
 """
 
 from __future__ import annotations

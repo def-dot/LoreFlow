@@ -24,6 +24,8 @@ const loading = ref(false)
 // ---- Provider drawer ----
 const providerFormOpen = ref(false)
 const editingProvider = ref<ProviderItem | null>(null)
+// 每次打开弹窗递增 key，强制重建表单，清除上次输入
+const providerFormKey = ref(0)
 
 // ---- Model drawer ----
 const modelFormOpen = ref(false)
@@ -52,11 +54,13 @@ async function fetchAll() {
 // ---- Provider 操作 ----
 function openProviderCreate() {
   editingProvider.value = null
+  providerFormKey.value++
   providerFormOpen.value = true
 }
 
 function openProviderEdit(p: ProviderItem) {
   editingProvider.value = { ...p }
+  providerFormKey.value++
   providerFormOpen.value = true
 }
 
@@ -250,7 +254,7 @@ onMounted(fetchAll)
       size="480px"
       :destroy-on-close="true"
     >
-      <ProviderForm :provider="editingProvider" @saved="onProviderSaved" />
+      <ProviderForm :key="providerFormKey" :provider="editingProvider" @saved="onProviderSaved" />
     </el-drawer>
 
     <!-- Model 表单 drawer -->

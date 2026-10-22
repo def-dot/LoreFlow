@@ -1,11 +1,10 @@
 {
   "mcpServers": {
     "系统监控": {
-      "command": "uv",
+      "command": "python",
       "args": [
-        "run",
-        "python",
-        "app/mcps/system_monitor.py"
+        "-m",
+        "app.mcps.system_monitor"
       ],
       "env": {}
     },

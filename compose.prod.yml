@@ -1,8 +1,18 @@
+# 部署：docker compose -f compose.yml -f compose.prod.yml up -d
 services:
   db:
     ports: !override []
 
   redis:
+    ports: !override []
+
+  tei-embed:
+    ports: !override []
+
+  tei-rerank:
+    ports: !override []
+
+  sandbox:
     ports: !override []
 
   arq-parse:
@@ -51,6 +61,7 @@ services:
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/parsed:/app/parsed
+      - ./backend/mcp.json:/backend/mcp.json
     healthcheck:
       test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
       interval: 10s
