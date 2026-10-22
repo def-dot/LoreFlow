@@ -26,7 +26,7 @@ services:
     command: redis-server --requirepass ${REDIS_PASSWORD:-}
     restart: unless-stopped
     ports:
-      - "6380:6379"
+      - "6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -43,7 +43,7 @@ services:
     volumes:
       - ../hub/bge-m3:/data
     ports:
-      - "8085:80"
+      - "8081:80"
     environment:
       - HF_HUB_OFFLINE=1
     restart: unless-stopped
@@ -68,7 +68,7 @@ services:
     volumes:
       - ../hub/bge-reranker-v2-m3:/data
     ports:
-      - "8084:80"
+      - "8082:80"
     environment:
       - HF_HUB_OFFLINE=1
     restart: unless-stopped
