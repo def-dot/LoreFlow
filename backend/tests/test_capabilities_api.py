@@ -60,32 +60,44 @@ async def test_skills_list_and_rescan(client: AsyncClient, monkeypatch, tmp_path
     assert "正文内容" in skills[0]["body"]
 
 
-async def test_mcp_servers_endpoints(client: AsyncClient, monkeypatch, tmp_path) -> None:
-    from app.core.config import settings
-    from app.services import mcp_client
+async def test_mcp_servers_endpoints(client: AsyncClient, monkeypatch) -> None:
+    from app.routers import mcp as mcp_router
 
-    # 启停会写回 mcp.json，隔离到临时文件，别污染 backend/mcp.json
-    monkeypatch.setattr(settings, "MCP_CONFIG", tmp_path / "mcp.json")
+    class _FakeResp:
+        def __init__(self, data):
+            self._data = data
+            self.status_code = 200
+            self.text = ""
 
-    mcp_client._servers.clear()
-    mcp_client._servers["demo-server"] = mcp_client.McpServerState(
-        name="demo-server",
-        transport="stdio",
-        config={"name": "demo-server", "transport": "stdio", "command": "echo"},
-        status=mcp_client.STATUS_FAILED,
-        error="connection refused",
-        tool_names=["do_thing"],
-    )
+        def json(self):
+            return self._data
+
+        def raise_for_status(self):
+            pass
+
+    class _FakeClient:
+        async def get(self, url, **_):
+            return _FakeResp([
+                {
+                    "name": "demo-server",
+                    "transport": "stdio",
+                    "status": "failed",
+                    "error": "connection refused",
+                    "tools": [{"name": "do_thing", "description": ""}],
+                }
+            ])
+
+        async def post(self, url, **_):
+            return _FakeResp({"name": "no-such", "transport": "stdio", "status": "connected", "tools": []})
+
+    monkeypatch.setattr(mcp_router, "http_client", lambda: _FakeClient())
 
     resp = await client.get("/api/v1/mcp/servers")
-    servers = resp.json()["data"]["servers"]
+    servers = resp.json()["data"]
     demo = next(s for s in servers if s["name"] == "demo-server")
     assert demo["status"] == "failed"
     assert demo["error"] == "connection refused"
-    assert demo["tool_names"] == ["do_thing"]
-    assert demo["endpoint"] == "echo"
-    # env 里的密钥不外泄
-    assert "env" not in demo
+    assert demo["tools"][0]["name"] == "do_thing"
 
     resp = await client.post("/api/v1/mcp/servers/no-such/reconnect")
-    assert resp.status_code == 404
+    assert resp.status_code == 200

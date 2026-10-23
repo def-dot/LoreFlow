@@ -12,6 +12,9 @@ services:
   tei-rerank:
     ports: !override []
 
+  mcp-service:
+    ports: !override []
+
   sandbox:
     ports: !override []
 
@@ -58,10 +61,12 @@ services:
       redis:
         condition: service_healthy
         restart: true
+      mcp-service:
+        condition: service_healthy
+        restart: true
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/parsed:/app/parsed
-      - ./backend/mcp.json:/backend/mcp.json
     healthcheck:
       test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
       interval: 10s

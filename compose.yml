@@ -85,6 +85,24 @@ services:
               count: 1
               capabilities: [gpu]
 
+  # mcp-service — MCP 配置 + 连接 + 工具（单进程），复用 backend 镜像
+  mcp-service:
+    image: loreflow-backend:latest
+    restart: unless-stopped
+    init: true
+    entrypoint: ["python", "-m", "app.mcp_service"]
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./backend/mcp.json:/backend/mcp.json
+    environment:
+      NOTION_TOKEN: ${NOTION_TOKEN:-}
+    healthcheck:
+      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8090/servers')"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   sandbox:
     image: python:3.12-slim
     restart: unless-stopped

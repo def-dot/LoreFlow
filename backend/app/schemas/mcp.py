@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -34,12 +36,18 @@ class McpServerConfigIn(BaseModel):
     mcpServers: dict[str, McpStdioConfig | McpHttpConfig] = Field(min_length=1)
 
 
-class McpTestResultOut(BaseModel):
-    ok: bool
-    status: str
-    tool_names: list[str] = Field(default_factory=list)
+class McpToolInfo(BaseModel):
+    name: str
+    description: str = ""
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+
+
+class McpServerState(BaseModel):
+    """MCP 服务器运行状态。"""
+
+    name: str
+    transport: str = "http"
+    status: str = "connecting"
     error: str | None = None
-
-
-class DeleteResult(BaseModel):
-    deleted: bool = True
+    tools: list[McpToolInfo] = Field(default_factory=list)

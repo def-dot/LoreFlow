@@ -2,10 +2,7 @@
   "mcpServers": {
     "系统监控": {
       "command": "python",
-      "args": [
-        "-m",
-        "app.mcps.system_monitor"
-      ],
+      "args": ["-m", "app.mcps.system_monitor"],
       "env": {}
     },
     "数据库": {
@@ -22,13 +19,8 @@
     },
     "Notion": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@notionhq/notion-mcp-server"
-      ],
-      "env": {
-        "NOTION_TOKEN": "${NOTION_TOKEN}"
-      }
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": {}
     },
     "文件系统": {
       "command": "npx",

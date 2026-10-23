@@ -1,53 +1,49 @@
-"""MCP 工具注册 — 将 MCP 服务器的工具注册/移除出 TOOL_REGISTRY。"""
+"""MCP 工具注册 — 从 mcp-service 拉列表，注册为 HTTP 代理 FuncDef。"""
 
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import Any
 
-from mcp import ClientSession
-
+from app.core.config import settings
 from app.registry.types import TOOL_REGISTRY, FuncDef
+from app.schemas.mcp import McpServerState
+from app.utils.http import http_client
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 60
 
-
-def _make_call(sess: ClientSession, tool_name: str, timeout: float | None = None):
-    """把 MCP 工具包成 FuncDef 可调用的异步函数。"""
-    read_timeout = timedelta(seconds=timeout) if timeout else None
-
+def _make_mcp_call(tool_name: str):
+    """构造代理函数：调用 mcp-service 的 /tools/{name}/call。"""
     async def _call(**kwargs: Any) -> str:
-        result = await sess.call_tool(tool_name, kwargs, read_timeout_seconds=read_timeout)
-        texts = [item.text for item in result.content if getattr(item, "type", None) == "text"]
-        if result.isError:
-            raise RuntimeError("\n".join(texts) or "MCP 工具返回错误（无错误详情）")
-        return "\n".join(texts)
+        resp = await http_client().post(
+            f"{settings.MCP_SERVICE_URL}/tools/{tool_name}/call",
+            json={"args": kwargs},
+        )
+        resp.raise_for_status()
+        return resp.json()["result"]
     return _call
 
 
-async def register_mcp_tools(server_name: str, session: ClientSession, timeout: float = DEFAULT_TIMEOUT) -> list[str]:
-    """从 MCP 会话获取工具列表并注册到 TOOL_REGISTRY，返回工具名列表。"""
-    tools_result = await session.list_tools()
-    for t in tools_result.tools:
-        if t.name in TOOL_REGISTRY:
-            logger.warning("[mcp] 工具名 %s 与已有工具冲突，服务器 %s 将覆盖它", t.name, server_name)
-        td = FuncDef(
-            name=t.name,
-            func=_make_call(session, t.name, timeout=timeout),
-            description=t.description or "",
-            label=t.name,
-            metadata={"group": server_name, "source": "mcp", "source_name": server_name},
-            input_schema=t.inputSchema,
-            output_schema=t.outputSchema,
-        )
-        TOOL_REGISTRY[t.name] = td
-    return [t.name for t in tools_result.tools]
+def register_mcp_tools(servers: list[McpServerState]) -> None:
+    """注册 mcp-service 工具到 TOOL_REGISTRY（先清旧的 MCP 条目）。"""
+    stale = [k for k, v in TOOL_REGISTRY.items() if v.metadata.get("source") == "mcp"]
+    for k in stale:
+        TOOL_REGISTRY.pop(k, None)
 
-
-def unregister_mcp_tools(tool_names: list[str]) -> None:
-    """从 TOOL_REGISTRY 移除指定工具。"""
-    for name in tool_names:
-        TOOL_REGISTRY.pop(name, None)
+    count = 0
+    for s in servers:
+        for t in s.tools:
+            if t.name in TOOL_REGISTRY:
+                logger.warning("[mcp] 工具名 %s 与已有工具冲突，mcp-service 将覆盖它", t.name)
+            TOOL_REGISTRY[t.name] = FuncDef(
+                name=t.name,
+                func=_make_mcp_call(t.name),
+                description=t.description,
+                label=t.name,
+                metadata={"group": s.name, "source": "mcp", "source_name": s.name},
+                input_schema=t.input_schema,
+                output_schema=t.output_schema,
+            )
+            count += 1
+    logger.info("[mcp] 已注册 %d 个 mcp-service 工具", count)

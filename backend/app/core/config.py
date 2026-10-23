@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # MCP — Model Context Protocol 服务器配置
     MCP_CONFIG: Path = Path(__file__).resolve().parent.parent.parent / "mcp.json"
+    MCP_SERVICE_URL: str = "http://localhost:8090"
 
     # Agent 工具调用最大轮次
     AGENT_MAX_ROUNDS: int = 10

@@ -21,6 +21,11 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/backend/.venv/bin:$PATH"
 
+# Node
+COPY --from=node:24-slim /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/
+COPY --from=node:24-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN printf 'registry=https://registry.npmmirror.com\n' > /root/.npmrc
+
 WORKDIR /backend
 
 COPY --from=builder /backend/.venv .venv
