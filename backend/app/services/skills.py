@@ -1,20 +1,16 @@
 """
-技能注册表 — 符合 Agent Skills 规范 (https://agentskills.io)。
+技能 — 符合 Agent Skills 规范 (https://agentskills.io)。
 
 规范核心：
 - 技能 = 包含 SKILL.md 的目录（frontmatter + markdown 指令体）
 - 目录结构：SKILL.md + scripts/ + references/ + assets/
 - agent 通过 load_skill 工具按需加载完整指令
 
-本模块提供：
-- ``SKILL_REGISTRY`` 全局注册表（name → SkillDef）
-- ``discover_skills()`` 扫描目录发现技能
-- ``load_skill()`` 工具函数，供 agent 按需加载技能指令
+磁盘是唯一 source of truth，读写直接操作 SKILLS_DIR。
 """
 
 from __future__ import annotations
 
-import logging
 import re
 import shutil
 from pathlib import Path
@@ -23,8 +19,6 @@ import yaml
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SkillDef — 技能定义
@@ -40,7 +34,32 @@ class SkillDef(BaseModel):
     files: list[str] = Field(default_factory=list)  # 目录内所有文件（相对路径）
 
 
-SKILL_REGISTRY: dict[str, SkillDef] = {}
+def find_skill(name: str) -> SkillDef | None:
+    """按名称从磁盘读取技能，不存在或格式错误返回 None。"""
+    skill_dir = settings.SKILLS_DIR / name
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        return None
+    try:
+        text = skill_md.read_text(encoding="utf-8")
+        _, desc = parse_skill_content(text)
+    except (ValueError, OSError):
+        return None
+    sd = SkillDef(name=name, description=desc, content=text)
+    sd.files = _collect_files(skill_dir)
+    return sd
+
+
+def list_all_skills() -> list[SkillDef]:
+    """扫描技能目录，返回所有合法技能。"""
+    result = []
+    if settings.SKILLS_DIR.is_dir():
+        for entry in sorted(settings.SKILLS_DIR.iterdir()):
+            if entry.is_dir():
+                sd = find_skill(entry.name)
+                if sd:
+                    result.append(sd)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -86,40 +105,17 @@ def _collect_files(skill_dir: Path) -> list[str]:
 
 
 def save_skill(sd: SkillDef) -> SkillDef:
-    """写入 SKILL.md、收集文件列表、注册到注册表。"""
+    """写入 SKILL.md、收集文件列表。"""
     skill_dir = settings.SKILLS_DIR / sd.name
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(sd.content, encoding="utf-8")
     sd.files = _collect_files(skill_dir)
-    SKILL_REGISTRY[sd.name] = sd
     return sd
 
 
 def delete_skill(name: str) -> None:
-    """删除技能目录并从注册表移除。"""
-    if name not in SKILL_REGISTRY:
+    """删除技能目录。"""
+    skill_dir = settings.SKILLS_DIR / name
+    if not skill_dir.is_dir():
         raise ValueError(f"技能 {name!r} 不存在")
-    del SKILL_REGISTRY[name]
-    shutil.rmtree(settings.SKILLS_DIR / name, ignore_errors=True)
-
-
-def discover_skills(*dirs: Path) -> None:
-    """扫描目录树，发现所有包含 SKILL.md 的子目录并注册到 SKILL_REGISTRY。"""
-    count = 0
-    for root_path in dirs:
-        if not root_path.is_dir():
-            continue
-        for entry in sorted(root_path.iterdir()):
-            if not entry.is_dir():
-                continue
-            skill_md = entry / "SKILL.md"
-            if not skill_md.is_file():
-                continue
-            try:
-                text = skill_md.read_text(encoding="utf-8")
-                name, desc = parse_skill_content(text)
-                save_skill(SkillDef(name=name, description=desc, content=text))
-                count += 1
-            except Exception:
-                continue
-    logger.info("发现 %d 个技能", count)
+    shutil.rmtree(skill_dir)

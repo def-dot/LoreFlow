@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import settings
 from app.core.response import UnifiedResponseRoute
-from app.registry.skills import SKILL_REGISTRY, SkillDef, delete_skill, parse_skill_content, save_skill
+from app.services.skills import SkillDef, delete_skill, find_skill, list_all_skills, parse_skill_content, save_skill
 from app.schemas.registry import SkillCreateIn
 
 router = APIRouter(prefix="/skills", route_class=UnifiedResponseRoute, tags=["skills"])
@@ -16,13 +16,13 @@ router = APIRouter(prefix="/skills", route_class=UnifiedResponseRoute, tags=["sk
 
 @router.get("", response_model=list[SkillDef])
 async def list_skills() -> list[SkillDef]:
-    return sorted(SKILL_REGISTRY.values(), key=lambda s: s.name)
+    return list_all_skills()
 
 
 @router.post("", response_model=SkillDef, status_code=201)
 async def create_skill(body: SkillCreateIn) -> SkillDef:
     name, desc = parse_skill_content(body.content)
-    if name in SKILL_REGISTRY:
+    if (settings.SKILLS_DIR / name).is_dir():
         raise ValueError(f"技能 {name!r} 已存在")
     sd = SkillDef(name=name, description=desc, content=body.content)
     return save_skill(sd)
@@ -30,14 +30,13 @@ async def create_skill(body: SkillCreateIn) -> SkillDef:
 
 @router.put("/{name}", response_model=SkillDef)
 async def update_skill(name: str, body: SkillCreateIn) -> SkillDef:
-    sd = SKILL_REGISTRY.get(name)
+    sd = find_skill(name)
     if not sd:
         raise ValueError(f"技能 {name!r} 不存在")
     new_name, description = parse_skill_content(body.content)
     if new_name != name:
-        if new_name in SKILL_REGISTRY:
+        if (settings.SKILLS_DIR / new_name).is_dir():
             raise ValueError(f"技能 {new_name!r} 已存在")
-        SKILL_REGISTRY.pop(name)
         (settings.SKILLS_DIR / name).rename(settings.SKILLS_DIR / new_name)
     sd.name = new_name
     sd.description = description
@@ -54,7 +53,7 @@ async def remove_skill(name: str) -> dict:
 @router.get("/{name}/file")
 async def read_skill_file(name: str, path: str) -> str:
     """读取技能目录内的文件内容。"""
-    if name not in SKILL_REGISTRY:
+    if not (settings.SKILLS_DIR / name).is_dir():
         raise ValueError(f"技能 {name!r} 不存在")
     base = (settings.SKILLS_DIR / name).resolve()
     target = (base / path).resolve()
@@ -70,7 +69,7 @@ async def read_skill_file(name: str, path: str) -> str:
 @router.get("/{name}/download")
 async def download_skill(name: str):
     """下载技能为 zip 包。"""
-    if name not in SKILL_REGISTRY:
+    if not (settings.SKILLS_DIR / name).is_dir():
         raise ValueError(f"技能 {name!r} 不存在")
     skill_dir = settings.SKILLS_DIR / name
     buf = BytesIO()
@@ -114,7 +113,7 @@ async def _parse_skill_zip(file: UploadFile) -> tuple[zipfile.ZipFile, SkillDef]
 async def upload_skill_zip(file: UploadFile = File(..., description="技能包 zip 文件")) -> SkillDef:
     zf, sd = await _parse_skill_zip(file)
     with zf:
-        if sd.name in SKILL_REGISTRY:
+        if (settings.SKILLS_DIR / sd.name).is_dir():
             raise ValueError(f"技能 {sd.name!r} 已存在")
         zf.extractall(settings.SKILLS_DIR / sd.name)
     return save_skill(sd)
@@ -122,12 +121,12 @@ async def upload_skill_zip(file: UploadFile = File(..., description="技能包 z
 
 @router.put("/{name}/upload", response_model=SkillDef)
 async def update_skill_zip(name: str, file: UploadFile = File(..., description="技能包 zip 文件")) -> SkillDef:
-    if name not in SKILL_REGISTRY:
+    if not (settings.SKILLS_DIR / name).is_dir():
         raise ValueError(f"技能 {name!r} 不存在")
     zf, sd = await _parse_skill_zip(file)
     with zf:
         if sd.name != name:
-            if sd.name in SKILL_REGISTRY:
+            if (settings.SKILLS_DIR / sd.name).is_dir():
                 raise ValueError(f"技能 {sd.name!r} 已存在")
         delete_skill(name)
         zf.extractall(settings.SKILLS_DIR / sd.name)

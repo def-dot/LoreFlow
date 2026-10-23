@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import settings
+from app.core.events import on_reload
 from app.core.logging import get_logger
 from app.registry import REGISTRY, TOOL_REGISTRY
 
@@ -37,6 +38,7 @@ class PluginInfo:
 _LOADED: dict[str, PluginInfo] = {}
 
 
+@on_reload("plugins")
 def load_plugins() -> None:
     """整体重建：撤销全部插件注册后全量重扫。
     """

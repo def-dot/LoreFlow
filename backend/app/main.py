@@ -22,11 +22,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
+from app.core.events import start_listener, stop_listener
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
 
 from app.registry.plugins import load_plugins
-from app.registry.skills import discover_skills
 from app.routers import (
     agents,
     conversations,
@@ -43,7 +43,7 @@ from app.routers import (
 )
 from app.services import orchestrator
 from app.services.agents import ensure_project_assistant
-from app.services.mcp_client import init_mcp, shutdown_mcp
+from app.services.mcp import init_mcp
 from app.services.pipelines import register_pipelines_from_db, sync_pipelines_from_yaml
 from app.services.providers import ensure_default_providers
 
@@ -55,8 +55,8 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
-    discover_skills(settings.SKILLS_DIR)
-    await init_mcp(settings.MCP_CONFIG)
+    await init_mcp()
+    await start_listener()
     await ensure_project_assistant()
     await ensure_default_providers()
     await sync_pipelines_from_yaml()
@@ -65,7 +65,7 @@ async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, None]:
         await orchestrator.resume_stuck_runs()
         yield
     finally:
-        await shutdown_mcp()
+        await stop_listener()
 
 
 app = FastAPI(

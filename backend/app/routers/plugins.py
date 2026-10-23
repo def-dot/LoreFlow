@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.core.config import settings
+from app.core.events import publish_reload
 from app.core.response import UnifiedResponseRoute
 from app.registry import plugins as plugin_loader
 from app.schemas.plugins import PluginListResponse, PluginOut
@@ -22,10 +23,10 @@ async def list_plugins() -> PluginListResponse:
     )
 
 
-@router.post("", response_model=PluginOut, status_code=201)
+@router.post("", status_code=201)
 async def upload_plugin(
     file: UploadFile = File(..., description="插件文件（.py）"),
-) -> PluginOut:
+) -> dict[str, str]:
     filename = file.filename or ""
     if Path(filename).suffix.lower() != ".py":
         raise ValueError("仅支持 .py 插件文件")
@@ -49,17 +50,8 @@ async def upload_plugin(
 
     target = PLUGINS_DIR / filename
     target.write_bytes(data)
-
-    # 立即重载插件
-    plugin_loader.load_plugins()
-
-    # 返回加载结果
-    for p in plugin_loader.list_plugins():
-        if p.filename == filename:
-            return PluginOut(**asdict(p))
-
-    # 不应走到这里，但兜底
-    raise RuntimeError(f"插件 {filename} 上传成功但未被加载")
+    await publish_reload("plugins")
+    return {"detail": f"插件 {filename} 已上传"}
 
 
 @router.delete("/{filename}")
@@ -68,5 +60,5 @@ async def delete_plugin(filename: str) -> dict:
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"插件文件 {filename} 不存在")
     target.unlink()
-    plugin_loader.load_plugins()
+    await publish_reload("plugins")
     return {"detail": f"插件 {filename} 已删除"}

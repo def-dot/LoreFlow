@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from app.registry.types import TOOL_REGISTRY, FuncDef
-from app.registry.skills import SKILL_REGISTRY
+from app.services.skills import find_skill
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def build_skill_prompt(skill_names: list[str]) -> str | None:
     """构建技能目录 prompt，无技能返回 None。"""
     skills = []
     for n in skill_names:
-        td = SKILL_REGISTRY.get(n)
+        td = find_skill(n)
         if td is None:
             logger.warning("未知技能：%s", n)
         else:
